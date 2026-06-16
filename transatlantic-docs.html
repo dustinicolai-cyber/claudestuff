@@ -18,12 +18,11 @@
   --bg:#eef1f3; --panel:#fff;
   --shadow:0 1px 3px rgba(20,40,50,.08),0 10px 30px rgba(20,40,50,.07);
   --ui:"DaxPro","Segoe UI",Helvetica,Arial,sans-serif;
-  /* --- Druckvorstufe (an einer Stelle justierbar) --- */
-  --bleed:3mm;     /* Anschnitt allseitig */
-  --slug:6mm;      /* weisser Rand fuer Schnittmarken */
-  --markw:.25mm;   /* Strichstaerke der Marken */
-  --markcol:#111;  /* Markenfarbe (Registrierschwarz) */
+  /* --- Druckvorstufe --- */
+  --bleed:0mm;     /* Beschnittzugabe allseitig: 0 / 1 / 3 mm, per JS umgeschaltet */
 }
+body.bleed1{--bleed:1mm}
+body.bleed3{--bleed:3mm}
 *{box-sizing:border-box;margin:0;padding:0}
 html,body{height:100%}
 body{font-family:var(--ui);background:var(--bg);color:var(--ink);-webkit-font-smoothing:antialiased}
@@ -76,7 +75,16 @@ select{-webkit-appearance:none;-moz-appearance:none;appearance:none;border:1px s
 
 /* ---------- A4 page ---------- */
 .page{width:210mm;min-height:297mm;background:#fff;position:relative;box-shadow:var(--shadow);overflow:hidden;color:var(--ink)}
-.page .bg{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;z-index:0;pointer-events:none;-webkit-user-select:none;user-select:none}
+/* Deckblatt-Hintergrund: vektorbasiert (Verlauf + SVG-Welle) statt Raster-JPEG.
+   Aufloesungsunabhaengig -> in jeder Druckgroesse gestochen scharf; Farben als
+   CSS-Variablen, in der CMYK-Pipeline 1:1 durch cmyk()-Werte ersetzbar. */
+.page .bg{position:absolute;inset:0;width:100%;height:100%;z-index:0;pointer-events:none;
+  overflow:hidden;-webkit-user-select:none;user-select:none;
+  background:linear-gradient(155deg,var(--bg-top) 0%,var(--bg-mid) 52%,var(--bg-deep) 100%);
+  background-size:cover;background-position:center}
+.page .bg .wave{position:absolute;inset:0;width:100%;height:100%;display:block}
+.page .bg.raster{background-image:var(--bg-raster);background-size:cover;background-position:center}
+.page .bg.raster .wave{display:none}
 .page .content{position:relative;z-index:3;padding:18mm 14mm 26mm}
 .chrome{position:relative;z-index:4}
 .chrome.locked{pointer-events:none;-webkit-user-select:none;user-select:none}
@@ -157,62 +165,47 @@ body:not(.editmode) .tbtns{display:none}
 body.editmode .stepimg .repl{display:flex}
 .step .stxt{font-size:10.5px;line-height:1.4;min-width:0;overflow-wrap:break-word;word-break:break-word;flex:1 1 auto}
 
-/* ---------- Crop marks (Schnittmarken) ---------- */
-.cmarks{display:none;position:absolute;inset:0;pointer-events:none;z-index:9}
-.cmarks i{position:absolute;background:var(--markcol)}
-.cmarks .tl-v,.cmarks .tr-v{top:calc(-1*(var(--bleed) + var(--slug)));height:var(--slug);width:var(--markw)}
-.cmarks .bl-v,.cmarks .br-v{bottom:calc(-1*(var(--bleed) + var(--slug)));height:var(--slug);width:var(--markw)}
-.cmarks .tl-v,.cmarks .bl-v{left:0}
-.cmarks .tr-v,.cmarks .br-v{right:0}
-.cmarks .tl-h,.cmarks .bl-h{left:calc(-1*(var(--bleed) + var(--slug)));width:var(--slug);height:var(--markw)}
-.cmarks .tr-h,.cmarks .br-h{right:calc(-1*(var(--bleed) + var(--slug)));width:var(--slug);height:var(--markw)}
-.cmarks .tl-h,.cmarks .tr-h{top:0}
-.cmarks .bl-h,.cmarks .br-h{bottom:0}
-
 /* ---------- Save/Load toast ---------- */
 #flashNote{position:fixed;left:50%;bottom:26px;transform:translateX(-50%) translateY(10px);
   background:var(--atlantic);color:#fff;padding:9px 16px;border-radius:10px;font-size:13px;font-family:var(--ui);
   box-shadow:0 6px 20px rgba(0,40,80,.25);opacity:0;pointer-events:none;transition:.2s;z-index:200}
 #flashNote.show{opacity:1;transform:translateX(-50%) translateY(0)}
 
-/* ---------- Print ---------- */
-@page{size:210mm 297mm;margin:0}                 /* Standard: ohne Anschnitt */
-@page bleedpage{size:216mm 303mm;margin:0}       /* 210x297 + 3mm Anschnitt allseitig */
-@page markspage{size:228mm 315mm;margin:0}       /* zusaetzlich 6mm Rand fuer Schnittmarken */
+/* ---------- Print ----------
+   Produktiv-PDF (CMYK / PDF-X-3 / FOGRA39) wird mit PDFreactor bzw. Antenna House
+   erzeugt. Diese Engines setzen den Beschnitt nativ ueber das CSS-Paged-Media-
+   Property 'bleed' und schreiben dabei korrekte BleedBox/TrimBox. Der Browser-
+   Druck (window.print) erzeugt nur einen RGB-Korrekturabzug auf Trim-Format. */
+@page      {size:210mm 297mm;margin:0}
+@page p1mm {size:210mm 297mm;margin:0;bleed:1mm}   /* 1 mm Beschnittzugabe */
+@page p3mm {size:210mm 297mm;margin:0;bleed:3mm}   /* 3 mm Beschnittzugabe */
 @media print{
   html,body{margin:0!important;padding:0!important}
   .topbar,.sidebar,.pagelabel,.zoom,.tbtns,.repl,.menubtn,.overlay,#flashNote{display:none!important}
   body{background:#fff}.shell{padding-top:0}
   .canvas{padding:0;gap:0;display:block;overflow:visible;height:auto}
-  /* die Seite wird ueber .pagewrap umgebrochen -> Anschnittflaeche kann darum liegen */
   .pagewrap{transform:none!important;margin:0!important;position:relative;background:#fff;
+    width:210mm;height:297mm;overflow:visible;
     page-break-after:always;break-after:page}
   .pagewrap:last-child{page-break-after:auto;break-after:auto}
-  .page{box-shadow:none;margin:0;width:210mm;height:297mm;overflow:hidden;
+  .page{box-shadow:none;margin:0;width:210mm;height:297mm;overflow:visible;position:relative;
     page-break-after:auto;break-after:auto}
   .editable:hover,.editable:focus{background:none!important;box-shadow:none!important}
   *{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}
 
-  /* Standard (ohne Anschnitt): Hintergruende 1mm ueberfuellen -> keine Blitzer am Rand */
-  body:not(.bleed) .page .bg,
-  body:not(.bleed) .cbg{top:-1mm!important;left:-1mm!important;
-    width:calc(100% + 2mm)!important;height:calc(100% + 2mm)!important}
+  /* Beschnitt-Format der Engine zuweisen (Browser ignoriert 'bleed' -> Trim-Abzug) */
+  body.bleed1 .pagewrap{page:p1mm}
+  body.bleed3 .pagewrap{page:p3mm}
 
-  /* ---- 3 mm Anschnitt ---- */
-  body.bleed .pagewrap{page:bleedpage;width:216mm;height:303mm;overflow:hidden}
-  body.bleed .page{position:absolute;top:var(--bleed);left:var(--bleed);overflow:visible}
-  /* Nur echte rechteckige Vollflaechen ueber den Beschnitt ziehen.
-     Die Deckblatt-Form (.tp-form) NICHT anfassen: sie ist eine SVG mit
-     preserveAspectRatio="none" und wird von resizeBlob() bereits mit 8mm
-     Ueberstand nach oben/links dimensioniert -> erledigt ihren Anschnitt selbst. */
-  body.bleed .page .bg,
-  body.bleed .cbg{top:calc(-1*var(--bleed))!important;left:calc(-1*var(--bleed))!important;
-    width:calc(100% + 2*var(--bleed))!important;height:calc(100% + 2*var(--bleed))!important}
-
-  /* ---- Schnittmarken (nur zusammen mit Anschnitt) ---- */
-  body.bleed.marks .pagewrap{page:markspage;width:228mm;height:315mm;overflow:visible}
-  body.bleed.marks .page{top:calc(var(--bleed) + var(--slug));left:calc(var(--bleed) + var(--slug))}
-  body.bleed.marks .cmarks{display:block}
+  /* Randlose Vollflaechen ueber den Beschnitt ziehen: Beschnittmass + 1 mm Reserve.
+     Bei 0 mm sorgt das 1-mm-Ueberfuellen fuer saubere Kanten ohne Blitzer.
+     Die Deckblatt-Form (.tp-form) wird von resizeBlob() bereits mit Ueberstand
+     dimensioniert und bleibt unangetastet. */
+  .page .bg,.cbg{
+    top:calc(-1*var(--bleed) - 1mm)!important;
+    left:calc(-1*var(--bleed) - 1mm)!important;
+    width:calc(100% + 2*(var(--bleed) + 1mm))!important;
+    height:calc(100% + 2*(var(--bleed) + 1mm))!important}
 }
 
 /* ---------- Responsive shell + crossbrowser ---------- */
@@ -278,8 +271,8 @@ body.editmode .stepimg .repl{display:flex}
 
 <div class="pf-back" id="pfBack">
   <div class="pf-card" role="dialog" aria-modal="true" aria-labelledby="pfTitle">
-    <h3 id="pfTitle">Druck-PDF erzeugen</h3>
-    <p class="lead">Damit das PDF <b>ohne weißen Rand</b> und in voller Qualität an die Druckerei geht, im folgenden Druckdialog bitte exakt diese Einstellungen wählen:</p>
+    <h3 id="pfTitle">RGB-Korrekturabzug erzeugen</h3>
+    <p class="lead">Für die <b>Layout-/Inhaltskontrolle</b>. Damit kein weißer Rand entsteht, im folgenden Druckdialog bitte exakt diese Einstellungen wählen (das produktive CMYK/PDF-X kommt aus der Engine):</p>
     <ul class="pf-list">
       <li><span class="k">🖨️</span><span>Ziel: <b>Als PDF speichern</b></span></li>
       <li><span class="k">📏</span><span>Ränder / Margins: <b>Keine</b> (None)</span></li>
@@ -310,10 +303,11 @@ body.editmode .stepimg .repl{display:flex}
     <div class="hint">Wird mit <b>12 mm</b> Abstand links/rechts auf das Deckblatt gesetzt.</div>
 
     <div class="side-title">Deckblatt-Hintergrund</div>
-    <label class="uploadbtn" for="bgUpload">⬆︎ Hintergrund austauschen</label>
+    <div class="hint">Standard ist ein <b>vektorbasierter Verlauf + Welle</b> – auflösungsunabhängig und damit in jeder Druckgröße gestochen scharf (kein DPI-Problem mehr). Farben kommen aus der Bereichs-Palette.</div>
+    <label class="uploadbtn" for="bgUpload" style="margin-top:8px">⬆︎ Sondermotiv (Raster) laden</label>
     <input id="bgUpload" type="file" accept="image/*" style="display:none">
-    <button class="btn btn-ghost" id="bgReset" style="width:100%;margin-top:6px;display:none" onclick="resetBg()">↺ Standard-Hintergrund</button>
-    <div class="hint">Für <b>Druckqualität (300&nbsp;DPI)</b> ein Bild mit mind. <b>2551&nbsp;×&nbsp;3579&nbsp;px</b> (mit 3&nbsp;mm Anschnitt) bzw. <b>2480&nbsp;×&nbsp;3508&nbsp;px</b> (A4 ohne Anschnitt) hochladen. Die mitgelieferten Standard-Hintergründe sind nur 1600&nbsp;×&nbsp;2262&nbsp;px (~193&nbsp;DPI) und werden im Druck sichtbar unscharf. Gilt pro Bereich.</div>
+    <button class="btn btn-ghost" id="bgReset" style="width:100%;margin-top:6px;display:none" onclick="resetBg()">↺ Zurück zum Vektor-Verlauf</button>
+    <div class="hint">Optional: nur für ein abweichendes Foto-/Rastermotiv. Dann mind. <b>2551&nbsp;×&nbsp;3579&nbsp;px</b> (300&nbsp;DPI inkl. 3&nbsp;mm Beschnitt) verwenden.</div>
 
     <div class="side-title">Technische Daten</div>
     <div class="field"><label>Gewicht</label><input data-bind="gewicht" value="1,8 kg"></div>
@@ -325,14 +319,24 @@ body.editmode .stepimg .repl{display:flex}
     <div class="lockrow"><input type="checkbox" id="folgeBg" checked onchange="toggleFolge()"><span>Hintergrund der Folgeseiten anzeigen</span></div>
 
     <div class="side-title">Druckvorstufe</div>
-    <div class="lockrow"><input type="checkbox" id="bleedChk" onchange="toggleBleed()"><span>3&nbsp;mm Anschnitt (Druck-PDF)</span></div>
-    <div class="lockrow"><input type="checkbox" id="marksChk" disabled onchange="toggleMarks()"><span>Schnittmarken anzeigen</span></div>
-    <div class="hint">Für die Druckerei: <b>Anschnitt</b> vergrößert das PDF auf 216&nbsp;×&nbsp;303&nbsp;mm und zieht randlose Flächen 3&nbsp;mm über den Beschnitt. Im Druckdialog <b>Ränder: Keine</b> wählen und <b>Hintergrundgrafiken</b> aktivieren. Für Office-Druck einfach beide aus lassen.</div>
+    <div class="field"><label>Beschnittzugabe</label>
+      <select id="bleedSel" onchange="setBleed(this.value)">
+        <option value="0">Keine (Office / Trim 210 × 297 mm)</option>
+        <option value="1">1 mm Beschnittzugabe</option>
+        <option value="3" selected>3 mm Beschnittzugabe (Standard Druckerei)</option>
+      </select>
+    </div>
+    <div class="hint">Die <b>Beschnittzugabe</b> wird beim CMYK/PDF-X-Export von der Engine (PDFreactor/Antenna House) als BleedBox geschrieben; randlose Flächen ziehen automatisch über den Beschnitt. Der Browser-Button erzeugt nur einen <b>RGB-Korrekturabzug</b> auf Trim-Format.</div>
     <div class="hint"><b>Bereich</b> oben wechselt Hintergrund + Logo. <b>Schritt-Bilder</b> in den 2-spaltigen Bereichen per Klick austauschen. <b>Tabellen</b> sind editierbar (Zeilen über die Buttons).</div>
   </aside>
 
   <main class="canvas" id="canvas"><div class="pagelabel">Seite 1</div><div class="pagewrap"><div class="page">
-  <img class="bg chrome locked" data-bg>
+  <div class="bg chrome locked" data-bg>
+    <svg class="wave" viewBox="0 0 210 297" preserveAspectRatio="none" aria-hidden="true">
+      <path data-wave d="M210,118 C170,150 168,196 150,232 C136,262 150,297 178,297 L210,297 Z" fill="var(--bg-wave)" opacity="0.55"/>
+      <path data-wave d="M210,150 C182,176 184,214 165,248 C150,276 168,297 196,297 L210,297 Z" fill="var(--bg-wave)" opacity="0.45"/>
+    </svg>
+  </div>
   <div class="tp-form chrome locked" data-form></div>
   <div class="tp-head chrome locked">
     <span class="tp-logo" data-logo></span>
@@ -414,15 +418,33 @@ const BRANDS={
   transaplus:{accent:"#8f87af"},
 };
 
-const customBg={};   // pro Bereich hochgeladener, hochaufloesender Deckblatt-Hintergrund
+const customBg={};   // pro Bereich optional hochgeladener Raster-Hintergrund (Override)
+
+/* Deckblatt-Verlaufspaletten pro Bereich (vektorbasiert, aufloesungsunabhaengig).
+   Werte aktuell aus den Original-JPEGs gesampelt = originalgetreuer Platzhalter.
+   --> Sobald die finalen CD-Farben vorliegen, hier die CMYK-Werte eintragen
+       (PDFreactor/Antenna House akzeptieren z.B. cmyk(0.42 0 0.10 0.06)). */
+const PALETTE={
+  transaroll:{top:'#8fccd4',mid:'#5fbecb',deep:'#2ba6bf',wave:'#bfe4e9'},
+  transafix :{top:'#a8d6cc',mid:'#7ecabd',deep:'#3fb6a9',wave:'#d0ece4'},
+  transaflow:{top:'#5cc7f3',mid:'#22bbef',deep:'#00a9e4',wave:'#aee2f8'},
+  transaplus:{top:'#cfc9e3',mid:'#a39bc0',deep:'#787eae',wave:'#e3dff0'},
+};
 function hexA(hex,a){const n=parseInt(hex.slice(1),16);return `rgba(${(n>>16)&255},${(n>>8)&255},${n&255},${a})`;}
 function applyBrand(key){
   const b=BRANDS[key];
   document.documentElement.style.setProperty('--accent',b.accent);
   document.documentElement.style.setProperty('--accent10',hexA(b.accent,.1));
-  // title bg + form + logos  (eigener Hintergrund hat Vorrang)
-  const bgSrc=customBg[key]||ASSETS.bg[key];
-  document.querySelectorAll('[data-bg]').forEach(img=>img.src=bgSrc);
+  // Deckblatt-Verlauf + Welle (Vektor)
+  const pal=PALETTE[key]||PALETTE.transaroll;
+  const root=document.documentElement.style;
+  root.setProperty('--bg-top',pal.top); root.setProperty('--bg-mid',pal.mid);
+  root.setProperty('--bg-deep',pal.deep); root.setProperty('--bg-wave',pal.wave);
+  // optionaler Raster-Override (z.B. Sondermotiv) hat Vorrang vor dem Verlauf
+  document.querySelectorAll('[data-bg]').forEach(el=>{
+    if(customBg[key]){ el.classList.add('raster'); el.style.setProperty('--bg-raster','url("'+customBg[key]+'")'); }
+    else { el.classList.remove('raster'); el.style.removeProperty('--bg-raster'); }
+  });
   const rb=document.getElementById('bgReset'); if(rb) rb.style.display=customBg[key]?'block':'none';
   document.querySelectorAll('[data-form]').forEach(el=>{el.innerHTML=ASSETS.form[key];const s=el.querySelector('svg');if(s)s.setAttribute('preserveAspectRatio','none');});
   document.querySelectorAll('[data-logo]').forEach(el=>el.innerHTML=ASSETS.logo[key]);
@@ -476,7 +498,7 @@ document.getElementById('prodUpload').addEventListener('change',e=>{
   const f=e.target.files[0]; if(!f)return;
   const r=new FileReader(); r.onload=()=>{document.getElementById('prodImgWrap').innerHTML=`<img src="${r.result}">`;}; r.readAsDataURL(f);
 });
-// title background upload (hochaufloesend, pro Bereich)
+// optionaler Raster-Hintergrund pro Bereich (Sondermotiv-Override; Standard ist der Vektor-Verlauf)
 document.getElementById('bgUpload').addEventListener('change',e=>{
   const f=e.target.files[0]; if(!f)return;
   const img=new Image();
@@ -485,12 +507,14 @@ document.getElementById('bgUpload').addEventListener('change',e=>{
     img.onload=()=>{
       const key=document.getElementById('brand').value;
       customBg[key]=r.result;
-      document.querySelectorAll('[data-bg]').forEach(b=>b.src=r.result);
+      document.querySelectorAll('[data-bg]').forEach(el=>{
+        el.classList.add('raster'); el.style.setProperty('--bg-raster','url("'+r.result+'")');
+      });
       document.getElementById('bgReset').style.display='block';
       const px=img.naturalWidth+' × '+img.naturalHeight+' px';
       if(img.naturalWidth<2480||img.naturalHeight<3508)
-        flash('⚠ Hintergrund gesetzt – '+px+' ist unter 300 DPI');
-      else flash('✓ Hintergrund gesetzt – '+px);
+        flash('⚠ Raster-Hintergrund gesetzt – '+px+' ist unter 300 DPI');
+      else flash('✓ Raster-Hintergrund gesetzt – '+px);
     };
     img.src=r.result;
   };
@@ -499,9 +523,11 @@ document.getElementById('bgUpload').addEventListener('change',e=>{
 function resetBg(){
   const key=document.getElementById('brand').value;
   delete customBg[key];
-  document.querySelectorAll('[data-bg]').forEach(b=>b.src=ASSETS.bg[key]);
+  document.querySelectorAll('[data-bg]').forEach(el=>{
+    el.classList.remove('raster'); el.style.removeProperty('--bg-raster');
+  });
   document.getElementById('bgReset').style.display='none';
-  flash('↺ Standard-Hintergrund');
+  flash('↺ Vektor-Verlauf aktiv');
 }
 // step image replace
 let curStep=null;
@@ -537,8 +563,7 @@ function gatherProject(){
     toggles:{
       chrome:document.getElementById('chromeLock').checked,
       folge:document.getElementById('folgeBg').checked,
-      bleed:document.getElementById('bleedChk').checked,
-      marks:document.getElementById('marksChk').checked
+      bleed:(document.getElementById('bleedSel')||{}).value||'0'
     },
     inputs:inputs,
     product:prod?prod.innerHTML:'',
@@ -599,8 +624,10 @@ function applyProject(p){
   const tg=p.toggles||{};
   setChk('chromeLock', tg.chrome!==false, toggleChrome);
   setChk('folgeBg',    tg.folge!==false,  toggleFolge);
-  setChk('bleedChk',   !!tg.bleed,        toggleBleed);
-  setChk('marksChk',   !!tg.marks,        toggleMarks);
+  // Beschnitt: neu '0'/'1'/'3' (String); alte Dateien hatten bleed:true/false
+  let bl=tg.bleed;
+  if(bl===true) bl='3'; else if(bl===false||bl==null) bl='0'; else bl=String(bl);
+  setBleed(bl);
 }
 function setChk(id,val,fn){ const el=document.getElementById(id); if(!el)return; el.checked=!!val; if(fn)fn(); }
 let _flashT;
@@ -626,43 +653,21 @@ function renumber(){
 function toggleFolge(){
   document.body.classList.toggle('nofolgebg',!document.getElementById('folgeBg').checked);
 }
-function toggleBleed(){
-  const on=document.getElementById('bleedChk').checked;
-  document.body.classList.toggle('bleed',on);
-  const m=document.getElementById('marksChk');
-  m.disabled=!on;                       // Schnittmarken nur sinnvoll mit Anschnitt
-  if(!on){m.checked=false;document.body.classList.remove('marks');}
-}
-function toggleMarks(){
-  document.body.classList.toggle('marks',document.getElementById('marksChk').checked);
-}
-function buildCropMarks(){
-  const seg=['tl-v','tl-h','tr-v','tr-h','bl-v','bl-h','br-v','br-h'];
-  document.querySelectorAll('.page').forEach(pg=>{
-    if(pg.querySelector('.cmarks'))return;
-    const m=document.createElement('div');m.className='cmarks';m.setAttribute('aria-hidden','true');
-    seg.forEach(c=>{const i=document.createElement('i');i.className=c;m.appendChild(i);});
-    pg.appendChild(m);
-  });
+function setBleed(mm){
+  mm=String(mm);
+  document.body.classList.remove('bleed1','bleed3');
+  if(mm==='1') document.body.classList.add('bleed1');
+  else if(mm==='3') document.body.classList.add('bleed3');
+  const sel=document.getElementById('bleedSel'); if(sel&&sel.value!==mm) sel.value=mm;
 }
 /* ---------- Druck-Preflight ---------- */
 function preflightPrint(){
-  const bleed=document.getElementById('bleedChk').checked;
-  const marks=document.getElementById('marksChk').checked;
-  const paper=document.getElementById('pfPaper');
+  const mm=(document.getElementById('bleedSel')||{}).value||'0';
   const note=document.getElementById('pfBleedNote');
-  if(bleed&&marks){
-    paper.innerHTML='Papierformat: <b>228 × 315 mm</b> (wird über das Dokument vorgegeben)';
-    note.style.display='block';
-    note.innerHTML='Mit <b>Anschnitt + Schnittmarken</b> ist das PDF 228 × 315 mm groß. Steht im Dialog nur „A4" zur Wahl, das Format einfach belassen – das Dokument gibt die Größe selbst vor. Falls Chrome dennoch skaliert: Papierformat „<b>Benutzerdefiniert</b>" wählen.';
-  }else if(bleed){
-    paper.innerHTML='Papierformat: <b>216 × 303 mm</b> (210 × 297 + 3 mm Anschnitt, wird vorgegeben)';
-    note.style.display='block';
-    note.innerHTML='Mit <b>3 mm Anschnitt</b> ist das PDF 216 × 303 mm groß. Das Dokument gibt die Größe selbst vor – ggf. Papierformat „<b>Benutzerdefiniert</b>" wählen, falls der Browser skaliert.';
-  }else{
-    paper.innerHTML='Papierformat: <b>A4</b> (210 × 297 mm)';
-    note.style.display='none';
-  }
+  note.style.display='block';
+  note.innerHTML='Dieser Button erzeugt einen <b>RGB-Korrekturabzug</b> auf Trim-Format (210 × 297 mm) zur Inhalts- und Layoutkontrolle. '+
+    'Das <b>produktive CMYK/PDF-X-3</b> (FOGRA39) inkl. <b>'+(mm==='0'?'ohne':mm+' mm')+' Beschnittzugabe</b> '+
+    'erzeugt die Druck-Engine (PDFreactor/Antenna House) – siehe Export-Anleitung.';
   document.getElementById('pfBack').classList.add('show');
 }
 function closePreflight(){document.getElementById('pfBack').classList.remove('show');}
@@ -679,9 +684,9 @@ window.addEventListener('DOMContentLoaded',()=>{
   // editing the title directly on the cover re-fits the blob
   document.querySelectorAll('.tp-head .tp-name').forEach(el=>el.addEventListener('input',resizeBlob));
   applyBrand('transaroll');
+  setBleed((document.getElementById('bleedSel')||{}).value||'3');
   zoom(0);
   renumber();
-  buildCropMarks();
   fitIfNeeded();
   let rt; window.addEventListener('resize',()=>{clearTimeout(rt);rt=setTimeout(()=>{
     if(window.innerWidth>980){document.querySelector('.sidebar').classList.remove('open');document.getElementById('overlay').classList.remove('show');}
