@@ -80,9 +80,10 @@ select{-webkit-appearance:none;-moz-appearance:none;appearance:none;border:1px s
    CSS-Variablen, in der CMYK-Pipeline 1:1 durch cmyk()-Werte ersetzbar. */
 .page .bg{position:absolute;inset:0;width:100%;height:100%;z-index:0;pointer-events:none;
   overflow:hidden;-webkit-user-select:none;user-select:none;
-  background:linear-gradient(155deg,var(--bg-top) 0%,var(--bg-mid) 52%,var(--bg-deep) 100%);
+  background:linear-gradient(160deg,var(--bg-top) 0%,var(--bg-deep) 100%);
   background-size:cover;background-position:center}
-.page .bg .wave{position:absolute;inset:0;width:100%;height:100%;display:block}
+.page .bg .wave{position:absolute;inset:0;width:100%;height:100%}
+.page .bg .wave svg{width:100%;height:100%;display:block}
 .page .bg.raster{background-image:var(--bg-raster);background-size:cover;background-position:center}
 .page .bg.raster .wave{display:none}
 .page .content{position:relative;z-index:3;padding:18mm 14mm 26mm}
@@ -332,10 +333,7 @@ body.editmode .stepimg .repl{display:flex}
 
   <main class="canvas" id="canvas"><div class="pagelabel">Seite 1</div><div class="pagewrap"><div class="page">
   <div class="bg chrome locked" data-bg>
-    <svg class="wave" viewBox="0 0 210 297" preserveAspectRatio="none" aria-hidden="true">
-      <path data-wave d="M210,118 C170,150 168,196 150,232 C136,262 150,297 178,297 L210,297 Z" fill="var(--bg-wave)" opacity="0.55"/>
-      <path data-wave d="M210,150 C182,176 184,214 165,248 C150,276 168,297 196,297 L210,297 Z" fill="var(--bg-wave)" opacity="0.45"/>
-    </svg>
+    <div class="wave" data-wave aria-hidden="true"></div>
   </div>
   <div class="tp-form chrome locked" data-form></div>
   <div class="tp-head chrome locked">
@@ -432,6 +430,17 @@ const BRANDS={
 
 const customBg={};   // pro Bereich optional hochgeladener Raster-Hintergrund (Override)
 
+/* Offizielle CD-Wellen (transparente weisse Radial-Verlaufsformen, Styleguide).
+   Werden ueber den Verlauf gelegt und auf das A4-Deckblatt gestreckt
+   (preserveAspectRatio="none") -> reproduziert die Original-Deckblaetter exakt.
+   transaplus: bis zur Lieferung der offiziellen Welle Platzhalter (= Form Transafix). */
+const WAVES={
+  transaroll:'<svg width="100%" height="100%" viewBox="0 0 594.99 508.09" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg"><defs><radialGradient id="wv_roll" cx="260.28" cy="-210.99" r="787.15" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#fff" stop-opacity=".4"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></radialGradient></defs><path fill="url(#wv_roll)" d="M594.99,0c-52,29.11-104.38,71.07-147.25,131.56-58.58,82.67-56.55,214.43-124.59,255.54C261.46,424.37,115.2,313.03,0,228.46v279.64h594.99V0Z"/></svg>',
+  transafix :'<svg width="100%" height="100%" viewBox="0 0 612.28 831.71" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg"><defs><radialGradient id="wv_fix" cx="156.98" cy="248.98" r="527.69" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#fff" stop-opacity=".4"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></radialGradient></defs><path fill="url(#wv_fix)" d="M287.18,640.87c-72.15,40.85-174.86,14.53-287.18-49.21v240.05h612.28V0c-40.78,200.07-135.27,533.4-325.1,640.87Z"/></svg>',
+  transaflow:'<svg width="100%" height="100%" viewBox="0 0 613.81 857.93" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg"><defs><radialGradient id="wv_flow" cx="58.13" cy="-72.08" r="965.63" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#fff" stop-opacity=".4"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></radialGradient></defs><path fill="url(#wv_flow)" d="M523.05,268.71c-2.66,104.3-351.68,373.67-523.05,457.72v131.5h613.81V0h-219.59c43.69,58.33,130.96,185.58,128.83,268.71Z"/></svg>',
+};
+WAVES.transaplus=WAVES.transafix; // PLATZHALTER bis offizielle Transaplus-Welle vorliegt
+
 /* PDFreactor setzt einen eigenen User-Agent -> dann Device-CMYK statt HEX ausgeben.
    (PDFreactor muss mit aktiviertem JavaScript konvertieren, damit applyBrand laeuft.) */
 const PRINT_ENGINE=/PDFreactor|AntennaHouse|AHFCmd/i.test(navigator.userAgent||'');
@@ -448,9 +457,9 @@ function applyBrand(key){
   // Verlauf: oben Pale -> unten Primaer; Welle = Pale. HEX (Bildschirm) bzw. CMYK (Engine).
   const top  = PRINT_ENGINE?cmykStr(c.pale.cmyk)    : c.pale.hex;
   const deep = PRINT_ENGINE?cmykStr(c.primary.cmyk) : c.primary.hex;
-  const mid  = PRINT_ENGINE?cmykStr(cmykAvg(c.pale.cmyk,c.primary.cmyk)) : mixHex(c.pale.hex,c.primary.hex);
-  root.setProperty('--bg-top',top); root.setProperty('--bg-mid',mid);
-  root.setProperty('--bg-deep',deep); root.setProperty('--bg-wave',top);
+  root.setProperty('--bg-top',top); root.setProperty('--bg-deep',deep);
+  // offizielle CD-Welle (weisse Radial-Verlaufsform) ueber den Verlauf legen
+  document.querySelectorAll('[data-wave]').forEach(el=>{el.innerHTML=WAVES[key]||WAVES.transaroll;});
   // Bereichs-Akzent + Headline-Blau (CMYK in der Engine, sonst HEX)
   root.setProperty('--accent',   PRINT_ENGINE?cmykStr(c.primary.cmyk):c.primary.hex);
   root.setProperty('--accent10', hexA(c.primary.hex,.1));   // 10%-Tint (wird fuer X-3 geflattet)
