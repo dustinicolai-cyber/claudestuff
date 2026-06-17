@@ -244,6 +244,26 @@ body.editmode .stepimg .repl{display:flex}
 .pf-warn{font-size:12px;color:var(--grey);background:#fff7ed;border:1px solid #f5d9b8;
   border-radius:9px;padding:9px 11px;margin-bottom:16px;line-height:1.45}
 .pf-actions{display:flex;justify-content:flex-end;gap:10px}
+
+/* ---------- Dokumente-Modal ---------- */
+.doc-card{max-width:640px}
+.doc-bar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px}
+.doc-bar .spacer{flex:1}
+.doc-folder{font-size:12px;color:var(--grey);background:#f0f7f9;border-radius:8px;padding:6px 10px;
+  max-width:230px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.doc-folder.on{color:var(--atlantic);background:#e7f3f6;font-weight:600}
+.doc-current{font-size:12px;color:var(--grey);margin:0 0 10px}
+.doc-current b{color:var(--atlantic)}
+.doc-list{max-height:46vh;overflow:auto;border:1px solid var(--line);border-radius:10px;padding:6px;margin-bottom:16px}
+.doc-empty{font-size:13px;color:var(--grey);text-align:center;padding:26px 10px}
+.doc-item{display:flex;align-items:center;gap:10px;padding:9px 10px;border-radius:8px}
+.doc-item:hover{background:#f6fafb}
+.doc-item+.doc-item{border-top:1px solid var(--line)}
+.doc-meta{flex:1;min-width:0}
+.doc-meta b{display:block;font-size:13px;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.doc-meta span{font-size:11px;color:var(--grey)}
+.doc-act{display:flex;gap:6px;flex-shrink:0}
+.doc-act .btn{padding:6px 10px;font-size:12px}
 @media print{.pf-back{display:none!important}}
 </style>
 
@@ -263,7 +283,8 @@ body.editmode .stepimg .repl{display:flex}
   <div class="spacer"></div>
   <div class="zoom"><button onclick="zoom(-1)">−</button><span id="zlabel">75%</span><button onclick="zoom(1)">+</button></div>
   <button class="btn btn-ghost" id="editToggle" onclick="toggleEdit()">✏️ Bearbeiten: an</button>
-  <button class="btn btn-ghost" onclick="saveProject()" title="Texte &amp; Bilder als Projektdatei sichern">💾 Speichern</button>
+  <button class="btn btn-ghost" onclick="openDocs()" title="Gemeinsame Dokumenten-Ablage">📁 Dokumente</button>
+  <button class="btn btn-ghost" onclick="saveProject()" title="Als Datei sichern (Backup)">💾 Speichern</button>
   <label class="btn btn-ghost" title="Projektdatei laden">📂 Laden<input id="projLoad" type="file" accept=".json,.tadoc,application/json" style="display:none" onchange="loadProjectFile(this)"></label>
   <button class="btn btn-primary" onclick="preflightPrint()">⬇ PDF erzeugen</button>
 </div>
@@ -286,6 +307,25 @@ body.editmode .stepimg .repl{display:flex}
     <div class="pf-actions">
       <button class="btn btn-ghost" onclick="closePreflight()">Abbrechen</button>
       <button class="btn btn-primary" onclick="doPrint()">Weiter zum Druckdialog →</button>
+    </div>
+  </div>
+</div>
+
+<div class="pf-back" id="docBack">
+  <div class="pf-card doc-card" role="dialog" aria-modal="true" aria-labelledby="docTitle">
+    <h3 id="docTitle">Dokumente</h3>
+    <p class="lead">Gemeinsame Ablage: einmal den geteilten Ordner (OneDrive&nbsp;/&nbsp;SharePoint&nbsp;/&nbsp;Netzlaufwerk) verbinden – danach alle Dokumente per Klick öffnen, bearbeiten und sichern.</p>
+    <div class="doc-bar">
+      <span id="docFolder" class="doc-folder">Kein Ordner verbunden</span>
+      <span class="spacer"></span>
+      <button class="btn btn-ghost" id="docConnect" onclick="connectFolder()">📁 Ordner verbinden</button>
+      <button class="btn btn-ghost" onclick="saveToFolder()" title="Aktuelles Dokument in den Ordner speichern">💾 Speichern</button>
+      <button class="btn btn-ghost" onclick="newDoc()" title="Neues, leeres Dokument">＋ Neu</button>
+    </div>
+    <div class="doc-current" id="docCurrent"></div>
+    <div class="doc-list" id="docList"><div class="doc-empty">Noch kein Ordner verbunden.</div></div>
+    <div class="pf-actions">
+      <button class="btn btn-primary" onclick="closeDocs()">Schließen</button>
     </div>
   </div>
 </div>
@@ -696,7 +736,177 @@ function preflightPrint(){
 }
 function closePreflight(){document.getElementById('pfBack').classList.remove('show');}
 function doPrint(){closePreflight();setTimeout(()=>window.print(),60);}
-document.addEventListener('keydown',e=>{if(e.key==='Escape')closePreflight();});
+document.addEventListener('keydown',e=>{if(e.key==='Escape'){closePreflight();closeDocs();}});
+
+/* ---------- Dokumente: gemeinsame Ordner-Ablage ----------
+   Nutzt die File System Access API (Chrome/Edge). Der verbundene Ordner wird in
+   IndexedDB gemerkt und beim naechsten Start automatisch wieder angeboten.
+   Faellt der Browser aus, bleiben die Knoepfe Speichern/Laden als Rueckfall. */
+const HAS_FS = ('showDirectoryPicker' in window);
+let dirHandle = null;
+let currentDocName = null;
+const DOC_RE = /\.tadoc(\.json)?$/i;
+
+function idbDir(method, val){
+  return new Promise((res,rej)=>{
+    const op=indexedDB.open('tadocs',1);
+    op.onupgradeneeded=()=>op.result.createObjectStore('kv');
+    op.onerror=()=>rej(op.error);
+    op.onsuccess=()=>{
+      const db=op.result;
+      const tx=db.transaction('kv', method==='get'?'readonly':'readwrite');
+      const st=tx.objectStore('kv');
+      const rq= method==='get'?st.get('dir'):st.put(val,'dir');
+      rq.onsuccess=()=>res(rq.result);
+      rq.onerror=()=>rej(rq.error);
+    };
+  });
+}
+
+function openDocs(){
+  document.getElementById('docBack').classList.add('show');
+  if(!HAS_FS){
+    document.getElementById('docList').innerHTML=
+      '<div class="doc-empty">Dieser Browser kann keine Ordner verbinden.<br>Bitte <b>Chrome</b> oder <b>Edge</b> nutzen – oder die Knöpfe <b>Speichern/Laden</b>.</div>';
+    document.getElementById('docConnect').disabled=true;
+    return;
+  }
+  updateDocStatus();
+  if(dirHandle) verifyAndList(); else listDocs();
+}
+function closeDocs(){ document.getElementById('docBack').classList.remove('show'); }
+
+async function connectFolder(){
+  try{
+    const dir=await window.showDirectoryPicker({mode:'readwrite'});
+    dirHandle=dir;
+    try{ await idbDir('put',dir); }catch(e){}
+    setFolderLabel(dir.name);
+    await listDocs();
+    flash('📁 Ordner verbunden');
+  }catch(e){ if(e.name!=='AbortError') alert('Ordner konnte nicht verbunden werden:\n'+(e.message||e)); }
+}
+
+async function restoreFolder(){
+  if(!HAS_FS) return;
+  try{
+    const dir=await idbDir('get');
+    if(!dir) return;
+    dirHandle=dir;
+    setFolderLabel(dir.name);
+    const perm=await dir.queryPermission({mode:'readwrite'});
+    if(perm!=='granted') setFolderLabel(dir.name,true); // Freigabe erst per Klick moeglich
+  }catch(e){}
+}
+
+function setFolderLabel(name,needGrant){
+  const el=document.getElementById('docFolder');
+  if(!el) return;
+  if(name){ el.textContent=(needGrant?'⚠ ':'📁 ')+name; el.classList.add('on'); }
+  else { el.textContent='Kein Ordner verbunden'; el.classList.remove('on'); }
+}
+
+async function ensurePermission(){
+  if(!dirHandle) return false;
+  if(await dirHandle.queryPermission({mode:'readwrite'})==='granted') return true;
+  try{ return (await dirHandle.requestPermission({mode:'readwrite'}))==='granted'; }
+  catch(e){ return false; }
+}
+async function verifyAndList(){
+  if(!(await ensurePermission())){
+    document.getElementById('docList').innerHTML=
+      '<div class="doc-empty">Bitte den Ordner erneut freigeben.<br><br>'+
+      '<button class="btn btn-primary" onclick="connectFolder()">Ordner freigeben</button></div>';
+    return;
+  }
+  setFolderLabel(dirHandle.name);
+  await listDocs();
+}
+
+async function listDocs(){
+  const box=document.getElementById('docList');
+  if(!dirHandle){ box.innerHTML='<div class="doc-empty">Noch kein Ordner verbunden.</div>'; return; }
+  box.innerHTML='<div class="doc-empty">Lade…</div>';
+  const items=[];
+  try{
+    for await (const [name,handle] of dirHandle.entries()){
+      if(handle.kind!=='file' || !DOC_RE.test(name)) continue;
+      let title=name, date='';
+      try{ const j=JSON.parse(await (await handle.getFile()).text());
+        title=(j.inputs&&(j.inputs.titel||j.inputs.produktname))||name;
+        date=(j.saved||'').slice(0,10);
+      }catch(e){}
+      items.push({name,title,date});
+    }
+  }catch(e){ box.innerHTML='<div class="doc-empty">Konnte den Ordner nicht lesen:<br>'+(e.message||e)+'</div>'; return; }
+  if(!items.length){ box.innerHTML='<div class="doc-empty">Noch keine Dokumente in diesem Ordner.<br>Oben mit „Speichern" das erste anlegen.</div>'; return; }
+  items.sort((a,b)=>a.title.localeCompare(b.title,'de'));
+  box.innerHTML='';
+  items.forEach(it=>{
+    const row=document.createElement('div'); row.className='doc-item';
+    const meta=document.createElement('div'); meta.className='doc-meta';
+    const b=document.createElement('b'); b.textContent=it.title;
+    const s=document.createElement('span'); s.textContent=(it.date?it.date+' · ':'')+it.name;
+    meta.append(b,s);
+    const act=document.createElement('div'); act.className='doc-act';
+    const open=document.createElement('button'); open.className='btn btn-primary'; open.textContent='Öffnen';
+    open.onclick=()=>openDoc(it.name);
+    const del=document.createElement('button'); del.className='btn btn-ghost'; del.textContent='Löschen';
+    del.onclick=()=>deleteDoc(it.name);
+    act.append(open,del); row.append(meta,act); box.append(row);
+  });
+}
+
+async function openDoc(name){
+  try{
+    const fh=await dirHandle.getFileHandle(name);
+    applyProject(JSON.parse(await (await fh.getFile()).text()));
+    currentDocName=name; updateDocStatus(); closeDocs();
+    flash('📂 '+name+' geöffnet');
+  }catch(e){ alert('Konnte nicht öffnen:\n'+(e.message||e)); }
+}
+
+async function saveToFolder(){
+  if(!HAS_FS){ saveProject(); return; }
+  if(!dirHandle){ flash('Bitte zuerst Ordner verbinden'); return; }
+  if(!(await ensurePermission())){ flash('Ordner-Freigabe nötig'); return; }
+  let name=currentDocName;
+  if(!name){
+    const t=((gatherProject().inputs.titel||'Dokument').trim().replace(/[^\w\-]+/g,'_'))||'Dokument';
+    name=prompt('Dateiname im Ordner:', t+'.tadoc.json');
+    if(!name) return;
+    if(!DOC_RE.test(name)) name+='.tadoc.json';
+  }
+  try{
+    const fh=await dirHandle.getFileHandle(name,{create:true});
+    const w=await fh.createWritable();
+    await w.write(JSON.stringify(gatherProject()));
+    await w.close();
+    currentDocName=name; updateDocStatus(); await listDocs();
+    flash('💾 In Ordner gespeichert');
+  }catch(e){ alert('Konnte nicht speichern:\n'+(e.message||e)); }
+}
+
+async function deleteDoc(name){
+  if(!confirm('„'+name+'" wirklich aus dem Ordner löschen?')) return;
+  try{
+    await dirHandle.removeEntry(name);
+    if(currentDocName===name){ currentDocName=null; updateDocStatus(); }
+    await listDocs(); flash('🗑 Gelöscht');
+  }catch(e){ alert('Konnte nicht löschen:\n'+(e.message||e)); }
+}
+
+function newDoc(){
+  if(!confirm('Neues, leeres Dokument? Nicht gespeicherte Änderungen gehen verloren.')) return;
+  location.reload();
+}
+
+function updateDocStatus(){
+  const el=document.getElementById('docCurrent'); if(!el) return;
+  el.innerHTML = currentDocName
+    ? 'Aktuell geöffnet: <b>'+currentDocName+'</b>'
+    : 'Aktuell: <b>neues, ungespeichertes Dokument</b>';
+}
 
 document.getElementById('brand').addEventListener('change',e=>applyBrand(e.target.value));
 window.addEventListener('DOMContentLoaded',()=>{
@@ -712,6 +922,7 @@ window.addEventListener('DOMContentLoaded',()=>{
   zoom(0);
   renumber();
   fitIfNeeded();
+  restoreFolder();   // zuletzt verbundenen gemeinsamen Ordner wieder anbieten
   let rt; window.addEventListener('resize',()=>{clearTimeout(rt);rt=setTimeout(()=>{
     if(window.innerWidth>980){document.querySelector('.sidebar').classList.remove('open');document.getElementById('overlay').classList.remove('show');}
     fitIfNeeded();
