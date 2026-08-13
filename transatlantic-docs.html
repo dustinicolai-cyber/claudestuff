@@ -286,7 +286,7 @@ body.editmode .stepimg .repl{display:flex}
   <button class="btn btn-ghost" onclick="openDocs()" title="Gemeinsame Dokumenten-Ablage">📁 Dokumente</button>
   <button class="btn btn-ghost" onclick="saveProject()" title="Als Datei sichern (Backup)">💾 Speichern</button>
   <label class="btn btn-ghost" title="Projektdatei laden">📂 Laden<input id="projLoad" type="file" accept=".json,.tadoc,application/json" style="display:none" onchange="loadProjectFile(this)"></label>
-  <button class="btn btn-primary" onclick="preflightPrint()">⬇ PDF erzeugen</button>
+  <button class="btn btn-primary" onclick="printPdf()">⬇ PDF erzeugen</button>
 </div>
 
 <div class="overlay" id="overlay" onclick="toggleSidebar()"></div>
@@ -362,9 +362,9 @@ body.editmode .stepimg .repl{display:flex}
     <div class="side-title">Druckvorstufe</div>
     <div class="field"><label>Beschnittzugabe</label>
       <select id="bleedSel" onchange="setBleed(this.value)">
-        <option value="0">Keine (Office / Trim 210 × 297 mm)</option>
+        <option value="0" selected>Keine (Büro / normale PDF, 210 × 297 mm)</option>
         <option value="1">1 mm Beschnittzugabe</option>
-        <option value="3" selected>3 mm Beschnittzugabe (Standard Druckerei)</option>
+        <option value="3">3 mm Beschnittzugabe (für Druckerei)</option>
       </select>
     </div>
     <div class="hint">Die <b>Beschnittzugabe</b> wird beim CMYK/PDF-X-Export von der Engine (PDFreactor/Antenna House) als BleedBox geschrieben; randlose Flächen ziehen automatisch über den Beschnitt. Der Browser-Button erzeugt nur einen <b>RGB-Korrekturabzug</b> auf Trim-Format.</div>
@@ -735,7 +735,16 @@ function preflightPrint(){
   document.getElementById('pfBack').classList.add('show');
 }
 function closePreflight(){document.getElementById('pfBack').classList.remove('show');}
-function doPrint(){closePreflight();setTimeout(()=>window.print(),60);}
+/* Druck robust ausloesen: erst alle Overlays/Modals schliessen, dann zwei
+   Frames auf das Neu-Zeichnen warten -> verhindert die leere Druckvorschau,
+   die entsteht, wenn window.print() zu frueh nach einer DOM-Aenderung laeuft. */
+function printPdf(){
+  closePreflight(); closeDocs();
+  const sb=document.querySelector('.sidebar'), ov=document.getElementById('overlay');
+  if(sb) sb.classList.remove('open'); if(ov) ov.classList.remove('show');
+  requestAnimationFrame(()=>requestAnimationFrame(()=>{ setTimeout(()=>window.print(),120); }));
+}
+function doPrint(){ printPdf(); }
 document.addEventListener('keydown',e=>{if(e.key==='Escape'){closePreflight();closeDocs();}});
 
 /* ---------- Dokumente: gemeinsame Ordner-Ablage ----------
