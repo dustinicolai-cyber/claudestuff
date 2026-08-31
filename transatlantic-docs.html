@@ -164,6 +164,19 @@ body:not(.editmode) .tbtns{display:none}
   background:var(--atlantic);color:#fff;display:none;align-items:center;justify-content:center;cursor:pointer;
   font-size:10px;box-shadow:0 1px 3px rgba(0,0,0,.3)}
 body.editmode .stepimg .repl{display:flex}
+/* Nummern-Badge: vom Tool erzeugt, in der Bereichsfarbe (--accent), im PDF sichtbar.
+   Liegt in der unteren linken Ecke (gegenueber dem Upload-Button) und ueberdeckt
+   die im Bild eingebrannte Nummer. */
+.stepimg .stepno{position:absolute;left:0;bottom:0;width:7.2mm;height:7.2mm;border-radius:50%;
+  background:var(--accent);color:#fff;display:flex;align-items:center;justify-content:center;
+  font-family:var(--ui);font-weight:700;font-size:3.1mm;line-height:1;z-index:6;
+  box-shadow:0 1px 3px rgba(0,0,0,.25)}
+/* Buttons zum Bilder hinzufuegen/entfernen (nur im Bearbeiten-Modus, wie bei Tabellen) */
+.stepbtns{display:flex;gap:6px;margin:-1mm 0 3mm}
+.stepbtns button{font-family:var(--ui);font-size:10px;border:1px solid var(--line);background:#fff;color:var(--grey);
+  border-radius:6px;padding:3px 8px;cursor:pointer}
+.stepbtns button:hover{border-color:var(--accent);color:var(--accent)}
+body:not(.editmode) .stepbtns{display:none}
 .step .stxt{font-size:10.5px;line-height:1.4;min-width:0;overflow-wrap:break-word;word-break:break-word;flex:1 1 auto}
 
 /* ---------- Save/Load toast ---------- */
@@ -182,7 +195,7 @@ body.editmode .stepimg .repl{display:flex}
 @page p3mm {size:210mm 297mm;margin:0;bleed:3mm}   /* 3 mm Beschnittzugabe */
 @media print{
   html,body{margin:0!important;padding:0!important}
-  .topbar,.sidebar,.pagelabel,.zoom,.tbtns,.repl,.menubtn,.overlay,#flashNote{display:none!important}
+  .topbar,.sidebar,.pagelabel,.zoom,.tbtns,.stepbtns,.repl,.menubtn,.overlay,#flashNote{display:none!important}
   body{background:#fff}.shell{padding-top:0}
   .canvas{padding:0;gap:0;display:block;overflow:visible;height:auto}
   .pagewrap{transform:none!important;margin:0!important;position:relative;background:#fff;
@@ -616,6 +629,50 @@ function delRow(btn){
   if(tbl.rows.length>1) tbl.deleteRow(tbl.rows.length-1);
 }
 
+/* ---------- Schritt-Bilder: Nummern-Badges + Hinzufuegen/Entfernen ---------- */
+const STEP_REPL='<div class="repl" title="Bild austauschen"><svg width="10" height="10" viewBox="0 0 24 24" fill="none"><path d="M12 16V4M12 4l-5 5M12 4l5 5M5 20h14" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg></div>';
+const STEP_PLACEHOLDER="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='120' height='120'><rect width='120' height='120' rx='10' fill='%23eef6f8'/><g fill='none' stroke='%2399b8c2' stroke-width='6' stroke-linecap='round'><path d='M60 42v36M42 60h36'/></g></svg>";
+
+// Badges + Buttons sicherstellen (idempotent; laeuft auch nach Laden einer Datei)
+function ensureStepUI(){
+  document.querySelectorAll('.stepimg').forEach(si=>{
+    if(!si.querySelector('.stepno')){ const b=document.createElement('div'); b.className='stepno'; si.appendChild(b); }
+  });
+  document.querySelectorAll('.steps').forEach(st=>{
+    const nx=st.nextElementSibling;
+    if(!nx || !nx.classList.contains('stepbtns')){
+      const bar=document.createElement('div'); bar.className='stepbtns';
+      bar.innerHTML='<button type="button" onclick="addStep(this)">+ Bild</button><button type="button" onclick="delStep(this)">– Bild</button>';
+      st.after(bar);
+    }
+  });
+  numberSteps();
+}
+// Nummerierung pro Gruppe: links->rechts, dann naechste Zeile (DOM-Reihenfolge im Grid)
+function numberSteps(){
+  document.querySelectorAll('.steps').forEach(st=>{
+    st.querySelectorAll(':scope > .step .stepno').forEach((b,i)=>{ b.textContent=String(i+1); });
+  });
+}
+function newStep(){
+  const s=document.createElement('div'); s.className='step';
+  s.innerHTML='<div class="stepimg"><img src="'+STEP_PLACEHOLDER+'" alt="">'+STEP_REPL+'<div class="stepno"></div></div>'+
+              '<div class="stxt editable" contenteditable="'+(editing?'true':'false')+'"></div>';
+  return s;
+}
+function addStep(btn){
+  const st=btn.closest('.stepbtns') && btn.closest('.stepbtns').previousElementSibling;
+  if(!st || !st.classList.contains('steps')) return;
+  st.appendChild(newStep());
+  numberSteps();
+}
+function delStep(btn){
+  const st=btn.closest('.stepbtns') && btn.closest('.stepbtns').previousElementSibling;
+  if(!st || !st.classList.contains('steps')) return;
+  const steps=st.querySelectorAll(':scope > .step');
+  if(steps.length>0){ steps[steps.length-1].remove(); numberSteps(); }
+}
+
 /* ---------- Projekt speichern / laden (Texte & Bilder) ---------- */
 function gatherProject(){
   const inputs={};
@@ -689,7 +746,7 @@ function applyProject(p){
   });
   // 6) Editier-Status, Kapitelnummern, Deckblatt-Form auffrischen
   document.querySelectorAll('.editable').forEach(e=>e.contentEditable=editing);
-  renumber(); resizeBlob();
+  renumber(); ensureStepUI(); resizeBlob();
   // 7) Schalter (ältere Dateien ohne toggles -> sinnvolle Defaults)
   const tg=p.toggles||{};
   setChk('chromeLock', tg.chrome!==false, toggleChrome);
@@ -943,6 +1000,7 @@ window.addEventListener('DOMContentLoaded',()=>{
   setBleed((document.getElementById('bleedSel')||{}).value||'3');
   zoom(0);
   renumber();
+  ensureStepUI();
   fitIfNeeded();
   restoreFolder();   // zuletzt verbundenen gemeinsamen Ordner wieder anbieten
   let rt; window.addEventListener('resize',()=>{clearTimeout(rt);rt=setTimeout(()=>{
