@@ -824,12 +824,133 @@ function refreshChrome(){
     document.querySelectorAll('[data-field="'+k+'"]').forEach(t=>{ if(!t.matches('input')) t.textContent=inp.value; });});
   document.querySelectorAll('.editable').forEach(e=>e.contentEditable=editing);
 }
-function afterStructureChange(){
-  ensurePageTools(); ensureAddHere(); ensureBlockCtrls(); ensureStepUI();
-  renumber(); pageNumbers(); labelPages();
-  document.querySelectorAll('.editable').forEach(e=>e.contentEditable=editing);
-  applyZoom();                               // neue Seiten auf den aktuellen Zoom-Massstab bringen
+/* ---------- Automatischer Seitenumbruch (Reflow, wie Word) ----------
+   Laeuft der Inhalt einer Seite ueber die A4-Hoehe, wird der letzte Absatz
+   wortgenau geteilt bzw. der letzte Block auf die naechste Seite verschoben.
+   Beim Loeschen fliesst der Inhalt zurueck (Fortsetzungen werden gemergt). */
+let _reflowing=false, _reflowT=null;
+function blockList(c){ return [...c.children].filter(x=>x.nodeType===1 && !x.classList.contains('addhere')); }
+function paraOf(block){ if(!block||block.nodeType!==1) return null; return block.matches('p.body')?block:block.querySelector(':scope > p.body'); }
+function footerTop(page){ const f=page.querySelector('.ftr'); return f?f.getBoundingClientRect().top:Infinity; }
+
+function mergeContinuations(){
+  let changed=true, guard=0;
+  while(changed && guard++<600){
+    changed=false;
+    const pages=contentPages();
+    for(let i=1;i<pages.length;i++){
+      const first=blockList(pages[i])[0]; const fp=paraOf(first);
+      if(fp && fp.dataset.cont){
+        const prev=blockList(pages[i-1]); const pp=paraOf(prev[prev.length-1]);
+        if(pp){ pp.textContent=(pp.textContent.replace(/\s+$/,'')+' '+fp.textContent).trim(); first.remove(); changed=true; }
+        else { delete fp.dataset.cont; }
+      }
+    }
+  }
 }
+function makeAutoPageAtEnd(){
+  const nw=makeContentPage(); nw.dataset.auto='1';
+  const wraps=[...document.querySelectorAll('.pagewrap')]; const lastWrap=wraps[wraps.length-1];
+  let anchor=lastWrap; const nx=lastWrap.nextElementSibling; if(nx&&nx.classList.contains('pagetools')) anchor=nx;
+  const label=el('<div class="pagelabel"></div>'); anchor.after(nw); nw.before(label);
+  refreshChrome(); ensurePageTools(); ensureAddHere();
+}
+function splitParaToNext(block, para, limit, nextContent){
+  const words=para.textContent.trim().split(/\s+/);
+  if(words.length<2) return false;
+  let lo=1, hi=words.length, best=1;
+  while(lo<=hi){ const mid=(lo+hi)>>1; para.textContent=words.slice(0,mid).join(' ');
+    if(block.getBoundingClientRect().bottom<=limit){ best=mid; lo=mid+1; } else hi=mid-1; }
+  if(best>=words.length){ para.textContent=words.join(' '); return false; }
+  para.textContent=words.slice(0,best).join(' ');
+  const move=words.slice(best).join(' ');
+  const firstNext=blockList(nextContent)[0], fnp=paraOf(firstNext);
+  if(fnp && fnp.dataset.cont){ fnp.textContent=(move+' '+fnp.textContent).trim(); }
+  else {
+    const cp=el('<p class="body editable" data-cont="1"></p>'); cp.textContent=move;
+    cp.contentEditable=editing; nextContent.insertBefore(cp, nextContent.firstChild);
+  }
+  return true;
+}
+function pushDown(){
+  let pages=contentPages(), guard=0;
+  for(let i=0;i<pages.length;i++){
+    const c=pages[i], page=c.closest('.page');
+    while(guard++<4000){
+      const limit=footerTop(page)-3;
+      const blocks=blockList(c);
+      if(!blocks.length) break;
+      const last=blocks[blocks.length-1];
+      const r=last.getBoundingClientRect();
+      if(r.bottom<=limit) break;                       // passt
+      if(i+1>=pages.length){ makeAutoPageAtEnd(); pages=contentPages(); }
+      const next=pages[i+1];
+      const para=paraOf(last);
+      let done=false;
+      if(para && r.top<limit) done=splitParaToNext(last, para, limit, next);  // Absatz teilen
+      if(!done){ next.insertBefore(last, next.firstChild); }                  // ganzen Block verschieben
+    }
+  }
+}
+function removeEmptyAutoPages(){
+  const pages=contentPages();
+  for(let i=pages.length-1;i>=5;i--){
+    const wrap=pages[i].closest('.pagewrap');
+    if(wrap.dataset.auto && blockList(pages[i]).length===0){
+      const lbl=wrap.previousElementSibling; if(lbl&&lbl.classList.contains('pagelabel')) lbl.remove();
+      const tools=wrap.nextElementSibling; if(tools&&tools.classList.contains('pagetools')) tools.remove();
+      wrap.remove();
+    }
+  }
+}
+function saveCaret(){
+  const s=window.getSelection(); if(!s||!s.rangeCount) return null;
+  const r=s.getRangeAt(0); const node=r.endContainer;
+  const atEnd = node.nodeType===3 ? r.endOffset===node.length : true;
+  return {node, offset:r.endOffset, atEnd};
+}
+function placeCaretEnd(elm){ try{ const r=document.createRange(); r.selectNodeContents(elm); r.collapse(false); const s=window.getSelection(); s.removeAllRanges(); s.addRange(r); }catch(e){} }
+function followTail(pEl){
+  let cur=pEl, guard=0;
+  while(guard++<600){
+    const c=cur.closest('.content'); if(!c) break;
+    const blocks=blockList(c); const lastP=paraOf(blocks[blocks.length-1]);
+    if(lastP!==cur) break;
+    const pages=contentPages(); const idx=pages.indexOf(c); const next=pages[idx+1]; if(!next) break;
+    const fp=paraOf(blockList(next)[0]); if(fp && fp.dataset.cont) cur=fp; else break;
+  }
+  return cur;
+}
+function restoreCaret(ct){
+  if(!ct||!ct.node) return;
+  const inDoc=document.contains(ct.node);
+  if(inDoc && ct.atEnd){
+    const pEl = ct.node.nodeType===3 ? ct.node.parentElement : ct.node;
+    const p = (pEl&&pEl.closest)?pEl.closest('p.body'):null;
+    const tail = p?followTail(p):null;
+    if(tail){ tail.focus(); placeCaretEnd(tail); return; }
+  }
+  if(inDoc){ try{ const r=document.createRange(); const n=ct.node; const off=Math.min(ct.offset, n.nodeType===3?n.length:n.childNodes.length); r.setStart(n,off); r.collapse(true); const s=window.getSelection(); s.removeAllRanges(); s.addRange(r); }catch(e){} }
+}
+function reflowAll(){
+  if(_reflowing) return; _reflowing=true;
+  const caret=saveCaret();
+  try{
+    ensurePageTools(); ensureAddHere(); ensureBlockCtrls(); ensureStepUI();
+    mergeContinuations();
+    pushDown();
+    removeEmptyAutoPages();
+    ensurePageTools(); ensureAddHere();
+    renumber(); pageNumbers(); labelPages();
+    document.querySelectorAll('.editable').forEach(e=>e.contentEditable=editing);
+    applyZoom();
+  } finally { _reflowing=false; }
+  restoreCaret(caret);
+}
+function scheduleReflow(){ clearTimeout(_reflowT); _reflowT=setTimeout(reflowAll,350); }
+function afterStructureChange(){ reflowAll(); }
+// Beim Tippen automatisch umbrechen (leicht verzoegert)
+document.addEventListener('input',e=>{ if(editing && e.target.closest && e.target.closest('.page .content')) scheduleReflow(); });
 
 /* Drag & Drop von Bildern auf Bild-Bereiche */
 (function(){
@@ -932,7 +1053,7 @@ function applyProject(p){
   });
   // 6) Editier-Status, Kapitelnummern, Deckblatt-Form auffrischen
   document.querySelectorAll('.editable').forEach(e=>e.contentEditable=editing);
-  renumber(); ensureStepUI(); ensurePageTools(); ensureAddHere(); ensureBlockCtrls(); pageNumbers(); labelPages(); applyZoom(); resizeBlob();
+  renumber(); ensureStepUI(); ensurePageTools(); ensureAddHere(); ensureBlockCtrls(); pageNumbers(); labelPages(); reflowAll(); resizeBlob();
   // 7) Schalter (ältere Dateien ohne toggles -> sinnvolle Defaults)
   const tg=p.toggles||{};
   setChk('chromeLock', tg.chrome!==false, toggleChrome);
@@ -1188,6 +1309,7 @@ window.addEventListener('DOMContentLoaded',()=>{
   renumber();
   ensureStepUI();
   ensurePageTools(); ensureAddHere(); ensureBlockCtrls(); labelPages();
+  reflowAll();
   fitIfNeeded();
   restoreFolder();   // zuletzt verbundenen gemeinsamen Ordner wieder anbieten
   let rt; window.addEventListener('resize',()=>{clearTimeout(rt);rt=setTimeout(()=>{
