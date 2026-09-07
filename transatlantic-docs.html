@@ -178,6 +178,31 @@ body.editmode .stepimg .repl{display:flex}
 body:not(.editmode) .stepbtns{display:none}
 .step .stxt{font-size:10.5px;line-height:1.4;min-width:0;overflow-wrap:break-word;word-break:break-word;flex:1 1 auto}
 
+/* ---------- Blöcke / Bild+Text / Seitenverwaltung ---------- */
+.blockbar{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:5mm;padding-top:2.5mm;border-top:1px dashed var(--line)}
+.blockbar button{font-family:var(--ui);font-size:10px;border:1px solid var(--line);background:#fff;color:var(--grey);border-radius:6px;padding:4px 9px;cursor:pointer}
+.blockbar button:hover{border-color:var(--accent);color:var(--accent)}
+.blockbar .sep{flex:0 0 1px;align-self:stretch;background:var(--line);margin:2px 3px}
+.blockbar .pdel{color:#c0392b}
+.blockbar .pdel:hover{border-color:#c0392b;color:#c0392b}
+body:not(.editmode) .blockbar{display:none}
+
+.ublock{position:relative}
+.ublock>.uctrl{position:absolute;top:-8px;right:-4px;display:none;gap:3px;z-index:8}
+body.editmode .ublock:hover>.uctrl{display:flex}
+.uctrl button{width:18px;height:18px;border:1px solid var(--line);background:#fff;color:var(--grey);border-radius:5px;font-size:11px;line-height:1;cursor:pointer;display:flex;align-items:center;justify-content:center;box-shadow:0 1px 2px rgba(0,0,0,.12)}
+.uctrl button:hover{border-color:var(--accent);color:var(--accent)}
+
+.imgblock{display:flex;gap:5mm;align-items:flex-start;margin:2mm 0 3mm}
+.ibimg{flex:0 0 45mm;width:45mm;position:relative;border-radius:8px;overflow:hidden;background:#eef6f8}
+.ibimg img{width:100%;height:auto;max-height:70mm;object-fit:contain;display:block}
+.ibimg .repl{position:absolute;right:3px;bottom:3px;width:18px;height:18px;border-radius:50%;
+  background:var(--atlantic);color:#fff;display:none;align-items:center;justify-content:center;cursor:pointer;
+  font-size:10px;box-shadow:0 1px 3px rgba(0,0,0,.3)}
+body.editmode .ibimg .repl{display:flex}
+.ibtxt{flex:1 1 auto;min-width:0;font-size:11px;line-height:1.5;overflow-wrap:break-word}
+.dragover{outline:2px dashed var(--accent);outline-offset:-2px}
+
 /* ---------- Save/Load toast ---------- */
 #flashNote{position:fixed;left:50%;bottom:26px;transform:translateX(-50%) translateY(10px);
   background:var(--atlantic);color:#fff;padding:9px 16px;border-radius:10px;font-size:13px;font-family:var(--ui);
@@ -194,7 +219,7 @@ body:not(.editmode) .stepbtns{display:none}
 @page p3mm {size:210mm 297mm;margin:0;bleed:3mm}   /* 3 mm Beschnittzugabe */
 @media print{
   html,body{margin:0!important;padding:0!important}
-  .topbar,.sidebar,.pagelabel,.zoom,.tbtns,.stepbtns,.repl,.menubtn,.overlay,#flashNote{display:none!important}
+  .topbar,.sidebar,.pagelabel,.zoom,.tbtns,.stepbtns,.blockbar,.uctrl,.repl,.menubtn,.overlay,#flashNote{display:none!important}
   body{background:#fff}.shell{padding-top:0}
   .canvas{padding:0;gap:0;display:block;overflow:visible;height:auto}
   .pagewrap{transform:none!important;margin:0!important;position:relative;background:#fff;
@@ -203,6 +228,9 @@ body:not(.editmode) .stepbtns{display:none}
   .pagewrap:last-child{page-break-after:auto;break-after:auto}
   .page{box-shadow:none;margin:0;width:210mm;height:297mm;overflow:visible;position:relative;
     page-break-after:auto;break-after:auto}
+  /* Manueller Umbruch: zu viel Inhalt wird auf Seitenhoehe geklippt statt auf die
+     naechste Seite zu laufen. Auf dem Bildschirm waechst die Seite -> Ueberlauf sichtbar. */
+  .page .content{max-height:283mm;overflow:hidden}
   .editable:hover,.editable:focus{background:none!important;box-shadow:none!important}
   *{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}
 
@@ -672,11 +700,123 @@ function delStep(btn){
   if(steps.length>0){ steps[steps.length-1].remove(); numberSteps(); }
 }
 
+/* ---------- Inhalts-Bloecke + Seitenverwaltung (manuell, wie Word) ---------- */
+function el(html){ const t=document.createElement('template'); t.innerHTML=html.trim(); return t.content.firstElementChild; }
+function ed(){ return editing?'true':'false'; }
+const UCTRL='<div class="uctrl" contenteditable="false">'+
+  '<button type="button" onmousedown="event.preventDefault()" onclick="uMove(this,-1)" title="nach oben">↑</button>'+
+  '<button type="button" onmousedown="event.preventDefault()" onclick="uMove(this,1)" title="nach unten">↓</button>'+
+  '<button type="button" onmousedown="event.preventDefault()" onclick="uDel(this)" title="löschen">✕</button></div>';
+function contentPages(){ return [...document.querySelectorAll('.page .content')]; }
+
+function ensureBlockBars(){
+  contentPages().forEach(c=>{
+    let bar=[...c.children].find(x=>x.classList&&x.classList.contains('blockbar'));
+    if(!bar){
+      bar=el('<div class="blockbar" contenteditable="false">'+
+        '<button type="button" onclick="addBlock(this,\'chapter\')">+ Kapitel</button>'+
+        '<button type="button" onclick="addBlock(this,\'sub\')">+ Unterkapitel</button>'+
+        '<button type="button" onclick="addBlock(this,\'text\')">+ Text</button>'+
+        '<button type="button" onclick="addBlock(this,\'img\')">+ Bild + Text</button>'+
+        '<span class="sep"></span>'+
+        '<button type="button" onclick="pageInsertAfter(this)">＋ Seite danach</button>'+
+        '<button type="button" class="pdel" onclick="pageDelete(this)">🗑 Seite</button>'+
+        '</div>');
+      c.appendChild(bar);
+    } else { c.appendChild(bar); }   // Leiste immer ans Ende
+  });
+  updatePageControls();
+}
+function ensureBlockCtrls(){
+  document.querySelectorAll('.ublock').forEach(b=>{ if(!b.querySelector(':scope > .uctrl')) b.appendChild(el(UCTRL)); });
+}
+function updatePageControls(){
+  const wraps=[...document.querySelectorAll('.pagewrap')];
+  document.querySelectorAll('.blockbar .pdel').forEach(btn=>{
+    btn.style.display=(wraps.indexOf(btn.closest('.pagewrap'))>=5)?'':'none';   // nur Seiten ab #6 loeschbar
+  });
+}
+function blkText(){ return el('<div class="ublock"><p class="body editable" contenteditable="'+ed()+'">Neuer Text …</p></div>'); }
+function blkChapter(){ return el('<div class="ublock"><h2 class="chapter editable" contenteditable="'+ed()+'">Neues Kapitel</h2></div>'); }
+function blkSub(){ return el('<div class="ublock"><h3 class="sub editable" contenteditable="'+ed()+'">Neues Unterkapitel</h3></div>'); }
+function blkImg(){ return el('<div class="ublock"><div class="imgblock">'+
+  '<div class="ibimg"><img src="'+STEP_PLACEHOLDER+'" alt="">'+STEP_REPL+'</div>'+
+  '<div class="ibtxt editable" contenteditable="'+ed()+'">Text …</div></div></div>'); }
+function addBlock(btn,kind){
+  const c=btn.closest('.content'); const bar=btn.closest('.blockbar');
+  const node = kind==='chapter'?blkChapter() : kind==='sub'?blkSub() : kind==='img'?blkImg() : blkText();
+  node.appendChild(el(UCTRL));
+  c.insertBefore(node,bar);
+  afterStructureChange();
+  const t=node.querySelector('[contenteditable="true"]'); if(t) t.focus();
+}
+function uMove(btn,dir){
+  const b=btn.closest('.ublock'); if(!b)return;
+  if(dir<0){ const p=b.previousElementSibling; if(p&&p.classList.contains('ublock')) b.parentNode.insertBefore(b,p); }
+  else { const n=b.nextElementSibling; if(n&&n.classList.contains('ublock')) b.parentNode.insertBefore(n,b); }
+  afterStructureChange();
+}
+function uDel(btn){ const b=btn.closest('.ublock'); if(b){ b.remove(); afterStructureChange(); } }
+
+function makeContentPage(){
+  return el('<div class="pagewrap"><div class="page">'+
+    '<div class="cbg chrome locked" data-cbg></div>'+
+    '<div class="chead chrome locked"><span class="logo" data-logo></span><span class="ptitle" data-field="titel"></span></div>'+
+    '<div class="content" style="padding-top:26mm"></div>'+
+    '<div class="ftr chrome locked"><span>Rev. <span data-field="rev"></span></span><span class="pageno"></span><span>©Transatlantic</span></div>'+
+    '</div></div>');
+}
+function insertPageAfter(wrap){
+  const nw=makeContentPage(); const label=el('<div class="pagelabel"></div>');
+  wrap.after(nw); nw.before(label);
+  refreshChrome(); afterStructureChange();
+  nw.scrollIntoView({behavior:'smooth',block:'center'});
+  return nw;
+}
+function pageInsertAfter(btn){ insertPageAfter(btn.closest('.pagewrap')); }
+function pageDelete(btn){
+  const w=btn.closest('.pagewrap'); const wraps=[...document.querySelectorAll('.pagewrap')];
+  if(wraps.indexOf(w)<5){ flash('Diese Seite kann nicht gelöscht werden'); return; }
+  if(!confirm('Diese Seite wirklich löschen?')) return;
+  const lbl=w.previousElementSibling; if(lbl&&lbl.classList.contains('pagelabel')) lbl.remove();
+  w.remove(); afterStructureChange();
+}
+function labelPages(){ document.querySelectorAll('.pagelabel').forEach((l,i)=>l.textContent='Seite '+(i+1)); }
+function refreshChrome(){
+  applyBrand(document.getElementById('brand').value);
+  document.querySelectorAll('[data-bind]').forEach(inp=>{const k=inp.getAttribute('data-bind');
+    document.querySelectorAll('[data-field="'+k+'"]').forEach(t=>{ if(!t.matches('input')) t.textContent=inp.value; });});
+  document.querySelectorAll('.editable').forEach(e=>e.contentEditable=editing);
+}
+function afterStructureChange(){
+  ensureBlockBars(); ensureBlockCtrls(); ensureStepUI();
+  renumber(); pageNumbers(); labelPages();
+  document.querySelectorAll('.editable').forEach(e=>e.contentEditable=editing);
+}
+
+/* Drag & Drop von Bildern auf Bild-Bereiche */
+(function(){
+  const zoneOf=e=>(editing&&e.target&&e.target.closest)?e.target.closest('.stepimg,.ibimg'):null;
+  document.addEventListener('dragover',e=>{ const z=zoneOf(e); if(z){ e.preventDefault(); z.classList.add('dragover'); } });
+  document.addEventListener('dragleave',e=>{ const z=e.target&&e.target.closest?e.target.closest('.stepimg,.ibimg'):null; if(z) z.classList.remove('dragover'); });
+  document.addEventListener('drop',e=>{
+    const z=zoneOf(e); if(!z)return; e.preventDefault(); z.classList.remove('dragover');
+    const f=e.dataTransfer&&e.dataTransfer.files&&e.dataTransfer.files[0];
+    if(f&&f.type.indexOf('image/')===0){ const img=z.querySelector('img'); const r=new FileReader(); r.onload=()=>{ if(img) img.src=r.result; }; r.readAsDataURL(f); }
+  });
+  window.addEventListener('dragover',e=>{ const z=e.target&&e.target.closest?e.target.closest('.stepimg,.ibimg'):null; if(!z) e.preventDefault(); });
+  window.addEventListener('drop',e=>{ const z=e.target&&e.target.closest?e.target.closest('.stepimg,.ibimg'):null; if(!z) e.preventDefault(); });
+})();
+
 /* ---------- Projekt speichern / laden (Texte & Bilder) ---------- */
 function gatherProject(){
   const inputs={};
   document.querySelectorAll('[data-bind]').forEach(i=>inputs[i.getAttribute('data-bind')]=i.value);
-  const pages=[...document.querySelectorAll('.page .content')].map(c=>c.innerHTML);
+  const pages=[...document.querySelectorAll('.page .content')].map(c=>{
+    const clone=c.cloneNode(true);
+    clone.querySelectorAll('.blockbar,.stepbtns,.stepno,.uctrl').forEach(x=>x.remove());
+    return clone.innerHTML;
+  });
   const prod=document.getElementById('prodImgWrap');
   return {
     app:'Transatlantic Docs', version:1, saved:new Date().toISOString(),
@@ -730,10 +870,20 @@ function applyProject(p){
   // 2) Sidebar-Felder
   if(p.inputs){ document.querySelectorAll('[data-bind]').forEach(i=>{
       const k=i.getAttribute('data-bind'); if(k in p.inputs) i.value=p.inputs[k]; }); }
-  // 3) Seiteninhalte: Texte, Tabellen (inkl. hinzugefügter Zeilen), Schritt-Bilder
+  // 3) Seiteninhalte: Seitenanzahl angleichen (hinzugefügte Seiten ab #6), dann füllen
   if(Array.isArray(p.pages)){
-    const cs=[...document.querySelectorAll('.page .content')];
-    if(p.pages.length!==cs.length) console.warn('Seitenanzahl der Datei weicht von der Vorlage ab.');
+    const wraps=()=>[...document.querySelectorAll('.pagewrap')];
+    // zu viele (frühere) Zusatzseiten entfernen
+    while(contentPages().length>Math.max(5,p.pages.length)){
+      const ws=wraps(); const w=ws[ws.length-1];
+      const lbl=w.previousElementSibling; if(lbl&&lbl.classList.contains('pagelabel')) lbl.remove();
+      w.remove();
+    }
+    // fehlende Seiten anlegen
+    while(contentPages().length<p.pages.length){
+      const ws=wraps(); insertPageAfter(ws[ws.length-1]);
+    }
+    const cs=contentPages();
     p.pages.forEach((html,i)=>{ if(cs[i]&&typeof html==='string') cs[i].innerHTML=html; });
   }
   // 4) Deckblatt-Produktbild
@@ -745,7 +895,7 @@ function applyProject(p){
   });
   // 6) Editier-Status, Kapitelnummern, Deckblatt-Form auffrischen
   document.querySelectorAll('.editable').forEach(e=>e.contentEditable=editing);
-  renumber(); ensureStepUI(); resizeBlob();
+  renumber(); ensureStepUI(); ensureBlockBars(); ensureBlockCtrls(); pageNumbers(); labelPages(); resizeBlob();
   // 7) Schalter (ältere Dateien ohne toggles -> sinnvolle Defaults)
   const tg=p.toggles||{};
   setChk('chromeLock', tg.chrome!==false, toggleChrome);
@@ -1000,6 +1150,7 @@ window.addEventListener('DOMContentLoaded',()=>{
   zoom(0);
   renumber();
   ensureStepUI();
+  ensureBlockBars(); ensureBlockCtrls(); labelPages();
   fitIfNeeded();
   restoreFolder();   // zuletzt verbundenen gemeinsamen Ordner wieder anbieten
   let rt; window.addEventListener('resize',()=>{clearTimeout(rt);rt=setTimeout(()=>{
