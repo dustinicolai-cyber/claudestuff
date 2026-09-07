@@ -190,6 +190,16 @@ body:not(.editmode) .stepbtns{display:none}
 .pagetools .pdel:hover{border-color:#c0392b;color:#c0392b}
 body:not(.editmode) .pagetools{display:none}
 
+/* In-Page "Inhalt hinzufügen" – direkt im Seiteninhalt (native) */
+.addhere{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-top:4mm;padding:6px 9px;
+  border:1px dashed var(--line);border-radius:8px;opacity:.55;transition:.15s}
+.addhere:hover{opacity:1;border-color:var(--accent);background:#fbfdfe}
+.addhere .ah-plus{color:var(--accent);font-weight:700;font-size:15px;line-height:1}
+.addhere .ah-lbl{font-size:11px;color:var(--grey);font-weight:600;margin-right:2px}
+.addhere button{font-family:var(--ui);font-size:10.5px;border:1px solid var(--line);background:#fff;color:var(--grey);border-radius:6px;padding:3px 9px;cursor:pointer}
+.addhere button:hover{border-color:var(--accent);color:var(--accent)}
+body:not(.editmode) .addhere{display:none}
+
 .ublock{position:relative}
 .ublock>.uctrl{position:absolute;top:-8px;right:-4px;display:none;gap:3px;z-index:8}
 body.editmode .ublock:hover>.uctrl{display:flex}
@@ -222,7 +232,7 @@ body.editmode .ibimg .repl{display:flex}
 @page p3mm {size:210mm 297mm;margin:0;bleed:3mm}   /* 3 mm Beschnittzugabe */
 @media print{
   html,body{margin:0!important;padding:0!important}
-  .topbar,.sidebar,.pagelabel,.zoom,.tbtns,.stepbtns,.pagetools,.uctrl,.repl,.menubtn,.overlay,#flashNote{display:none!important}
+  .topbar,.sidebar,.pagelabel,.zoom,.tbtns,.stepbtns,.pagetools,.addhere,.uctrl,.repl,.menubtn,.overlay,#flashNote{display:none!important}
   body{background:#fff}.shell{padding-top:0}
   .canvas{padding:0;gap:0;display:block;overflow:visible;height:auto}
   .pagewrap{transform:none!important;margin:0!important;position:relative;background:#fff;
@@ -717,20 +727,30 @@ const UCTRL='<div class="uctrl" contenteditable="false">'+
   '<button type="button" onmousedown="event.preventDefault()" onclick="uDel(this)" title="löschen">✕</button></div>';
 function contentPages(){ return [...document.querySelectorAll('.page .content')]; }
 
-// Werkzeug-Leiste UNTER jede Inhaltsseite (ausserhalb der A4-Flaeche -> immer erreichbar,
-// auch wenn die Seite voll ist)
+// In-Page "Inhalt hinzufügen"-Zeile am Ende jedes Seiteninhalts (native, direkt auf der Seite).
+// Auf einer leeren (neuen) Seite steht sie oben -> man fuegt direkt auf der Seite hinzu.
+function ensureAddHere(){
+  contentPages().forEach(c=>{
+    let ah=[...c.children].find(x=>x.classList&&x.classList.contains('addhere'));
+    if(!ah){
+      ah=el('<div class="addhere" contenteditable="false">'+
+        '<span class="ah-plus">＋</span><span class="ah-lbl">Inhalt hinzufügen:</span>'+
+        '<button type="button" onclick="addBlock(this,\'text\')">Text</button>'+
+        '<button type="button" onclick="addBlock(this,\'img\')">Bild + Text</button>'+
+        '<button type="button" onclick="addBlock(this,\'chapter\')">Kapitel</button>'+
+        '<button type="button" onclick="addBlock(this,\'sub\')">Unterkapitel</button>'+
+        '</div>');
+      c.appendChild(ah);
+    } else { c.appendChild(ah); }   // immer als letztes Element
+  });
+}
+// Schlanke Leiste UNTER der Seite -> nur Seiten-Aktionen (immer erreichbar, auch bei voller Seite)
 function ensurePageTools(){
   document.querySelectorAll('.pagewrap').forEach(w=>{
     if(!w.querySelector('.content')) return;              // Deckblatt: keine Werkzeuge
     const nx=w.nextElementSibling;
     if(nx && nx.classList.contains('pagetools')) return;
     const bar=el('<div class="pagetools">'+
-      '<span class="lbl">Inhalt hinzufügen:</span>'+
-      '<button type="button" onclick="addBlock(this,\'chapter\')">+ Kapitel</button>'+
-      '<button type="button" onclick="addBlock(this,\'sub\')">+ Unterkapitel</button>'+
-      '<button type="button" onclick="addBlock(this,\'text\')">+ Text</button>'+
-      '<button type="button" onclick="addBlock(this,\'img\')">+ Bild + Text</button>'+
-      '<span class="sep"></span>'+
       '<button type="button" onclick="pageInsertAfter(this)">＋ Neue Seite danach</button>'+
       '<button type="button" class="pdel" onclick="pageDelete(this)">🗑 Seite löschen</button>'+
       '</div>');
@@ -755,10 +775,11 @@ function blkImg(){ return el('<div class="ublock"><div class="imgblock">'+
   '<div class="ibimg"><img src="'+STEP_PLACEHOLDER+'" alt="">'+STEP_REPL+'</div>'+
   '<div class="ibtxt editable" contenteditable="'+ed()+'">Text …</div></div></div>'); }
 function addBlock(btn,kind){
-  const w=toolsPage(btn); if(!w) return; const c=w.querySelector('.content'); if(!c) return;
+  const c=btn.closest('.content'); if(!c) return;
+  const ah=[...c.children].find(x=>x.classList&&x.classList.contains('addhere'));
   const node = kind==='chapter'?blkChapter() : kind==='sub'?blkSub() : kind==='img'?blkImg() : blkText();
   node.appendChild(el(UCTRL));
-  c.appendChild(node);                       // ans Ende des Seiteninhalts
+  if(ah) c.insertBefore(node,ah); else c.appendChild(node);   // vor der Hinzufügen-Zeile
   afterStructureChange();
   const t=node.querySelector('[contenteditable="true"]'); if(t) t.focus();
 }
@@ -804,7 +825,7 @@ function refreshChrome(){
   document.querySelectorAll('.editable').forEach(e=>e.contentEditable=editing);
 }
 function afterStructureChange(){
-  ensurePageTools(); ensureBlockCtrls(); ensureStepUI();
+  ensurePageTools(); ensureAddHere(); ensureBlockCtrls(); ensureStepUI();
   renumber(); pageNumbers(); labelPages();
   document.querySelectorAll('.editable').forEach(e=>e.contentEditable=editing);
   applyZoom();                               // neue Seiten auf den aktuellen Zoom-Massstab bringen
@@ -830,7 +851,7 @@ function gatherProject(){
   document.querySelectorAll('[data-bind]').forEach(i=>inputs[i.getAttribute('data-bind')]=i.value);
   const pages=[...document.querySelectorAll('.page .content')].map(c=>{
     const clone=c.cloneNode(true);
-    clone.querySelectorAll('.blockbar,.stepbtns,.stepno,.uctrl').forEach(x=>x.remove());
+    clone.querySelectorAll('.addhere,.stepbtns,.stepno,.uctrl').forEach(x=>x.remove());
     return clone.innerHTML;
   });
   const prod=document.getElementById('prodImgWrap');
@@ -911,7 +932,7 @@ function applyProject(p){
   });
   // 6) Editier-Status, Kapitelnummern, Deckblatt-Form auffrischen
   document.querySelectorAll('.editable').forEach(e=>e.contentEditable=editing);
-  renumber(); ensureStepUI(); ensurePageTools(); ensureBlockCtrls(); pageNumbers(); labelPages(); applyZoom(); resizeBlob();
+  renumber(); ensureStepUI(); ensurePageTools(); ensureAddHere(); ensureBlockCtrls(); pageNumbers(); labelPages(); applyZoom(); resizeBlob();
   // 7) Schalter (ältere Dateien ohne toggles -> sinnvolle Defaults)
   const tg=p.toggles||{};
   setChk('chromeLock', tg.chrome!==false, toggleChrome);
@@ -1166,7 +1187,7 @@ window.addEventListener('DOMContentLoaded',()=>{
   zoom(0);
   renumber();
   ensureStepUI();
-  ensurePageTools(); ensureBlockCtrls(); labelPages();
+  ensurePageTools(); ensureAddHere(); ensureBlockCtrls(); labelPages();
   fitIfNeeded();
   restoreFolder();   // zuletzt verbundenen gemeinsamen Ordner wieder anbieten
   let rt; window.addEventListener('resize',()=>{clearTimeout(rt);rt=setTimeout(()=>{
