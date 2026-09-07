@@ -239,6 +239,8 @@ def quartale_view(ue: dict, modus: str, jahre: list[int], offene_vorschlaege: in
         "abzugsfaehig": "Nach Sonderregeln (Bewirtung 70 %, Privatanteile, Deckel, Geschenke, GWG/AfA) – das fließt in die EÜR.",
     }[modus]
     ev = ue["entgangene_vorsteuer"]
+    bestaetigt = sum(r["jahr"].anzahl for r in ue["zeilen"] if r["kategorie"].schluessel != "afa")
+    quote = 100.0 * bestaetigt / (bestaetigt + offene_vorschlaege) if (bestaetigt + offene_vorschlaege) else 100.0
     anl = "".join(f'<tr><td>{h(a.bezeichnung)}</td><td>{d(a.anschaffung)}</td><td class="num">{eur_fmt(a.anschaffungskosten)}</td>'
                   f'<td><form hx-post="/api/anlage/{a.id}" hx-target="#main" class="inline"><input type="number" name="nutzungsdauer_jahre" value="{a.nutzungsdauer_jahre}" min="1" max="50" style="width:4em"> J. '
                   f'<input type="hidden" name="jahr" value="{jahr}"><button class="klein">ok</button></form></td>'
@@ -250,6 +252,13 @@ def quartale_view(ue: dict, modus: str, jahre: list[int], offene_vorschlaege: in
     <div class="tabs">{tabs}</div>
   </div>
   <p class="muted">{erkl} {f'<span class="badge mid">{offene_vorschlaege} unbestätigte Vorschläge nicht enthalten</span>' if offene_vorschlaege else ''}</p>
+  <div class="kpis">
+    <div class="kpi gruen"><div class="l">Einnahmen {jahr}</div><div class="w">{eur_fmt(ue["einnahmen"][4].abzugsfaehig)}</div></div>
+    <div class="kpi rot"><div class="l">Ausgaben (abzugsfähig)</div><div class="w">{eur_fmt(ue["ausgaben"][4].abzugsfaehig)}</div></div>
+    <div class="kpi {"gruen" if ue["gewinn"][4] >= 0 else "rot"}"><div class="l">Gewinn</div><div class="w">{eur_fmt(ue["gewinn"][4])}</div></div>
+    <div class="kpi gelb"><div class="l">Entgangene Vorsteuer (§19)</div><div class="w">{eur_fmt(ev[4])}</div></div>
+    <div class="kpi"><div class="ring"><div class="kreis" style="--p:{quote}"><span>{quote:.0f} %</span></div><div><div class="l">Belege bestätigt</div><div class="fett">{bestaetigt} von {bestaetigt + offene_vorschlaege}</div></div></div></div>
+  </div>
   <div class="scroll"><table class="tabelle"><thead><tr><th>Kategorie</th><th>Zeile</th><th>Q1</th><th>Q2</th><th>Q3</th><th>Q4</th><th>Jahr {jahr}</th></tr></thead>
   <tbody>{zeilen or '<tr><td colspan=7 class="muted">Noch keine bestätigten Buchungen in diesem Jahr.</td></tr>'}</tbody><tfoot>{summen}</tfoot></table></div>
 
