@@ -1,0 +1,125 @@
+{
+  "_hinweis": "Einzige Stelle für steuerliche Grenzwerte und die EÜR-Zeilenzuordnung. Bei Gesetzes- oder Formularänderungen hier anpassen, kein Codeeingriff nötig. Zeilennummern beziehen sich auf die Anlage EÜR 2024/2025 — jährlich gegen das aktuelle Formular prüfen.",
+  "formular_jahr": 2025,
+
+  "kleinunternehmer": true,
+  "ust_saetze": [0, 7, 19],
+  "regelsteuersatz": 19,
+
+  "gwg_grenze_netto": 800.00,
+  "bewirtung_abzug_prozent": 70,
+  "km_pauschale": 0.30,
+  "homeoffice_tagespauschale": 6.00,
+  "homeoffice_max_jahr": 1260.00,
+  "privatanteil_standard_prozent": 50,
+  "geschenk_grenze_je_empfaenger": 50.00,
+  "afa_nutzungsdauer_standard_jahre": 3,
+
+  "matching_tage_toleranz": 5,
+
+  "ustva_kennzahlen": {
+    "reverse_charge_eu_basis": "46",
+    "reverse_charge_eu_steuer": "47",
+    "reverse_charge_drittland_basis": "84",
+    "reverse_charge_drittland_steuer": "85"
+  },
+  "eu_laender": ["AT","BE","BG","CY","CZ","DK","EE","EL","ES","FI","FR","HR","HU","IE","IT","LT","LU","LV","MT","NL","PL","PT","RO","SE","SI","SK","XI"],
+
+  "reverse_charge_lieferanten": [
+    "adobe", "figma", "framer", "google", "meta", "facebook", "microsoft ireland",
+    "apple distribution", "dropbox", "notion", "canva", "openai", "anthropic",
+    "github", "linkedin", "zoom", "slack", "atlassian", "webflow", "squarespace",
+    "envato", "shutterstock", "spotify", "vimeo", "mailchimp", "typeform", "miro"
+  ],
+
+  "eur_zeilen": {
+    "11": "Betriebseinnahmen als umsatzsteuerlicher Kleinunternehmer",
+    "14": "Umsatzsteuerpflichtige Betriebseinnahmen",
+    "25": "Waren, Rohstoffe und Hilfsstoffe",
+    "26": "Bezogene Fremdleistungen",
+    "29": "AfA auf immaterielle Wirtschaftsgüter",
+    "30": "AfA auf bewegliche Wirtschaftsgüter",
+    "33": "Aufwendungen für geringwertige Wirtschaftsgüter",
+    "36": "Miete/Pacht für Geschäftsräume",
+    "38": "Aufwendungen für Telekommunikation",
+    "39": "Übernachtungs- und Reisenebenkosten",
+    "40": "Fortbildungskosten",
+    "41": "Rechts- und Steuerberatung, Buchführung",
+    "43": "Beiträge, Gebühren, Abgaben und Versicherungen",
+    "44": "Werbekosten",
+    "48": "An das Finanzamt gezahlte Umsatzsteuer (§13b)",
+    "50": "Übrige unbeschränkt abziehbare Betriebsausgaben",
+    "51": "Geschenke (abziehbar)",
+    "52": "Bewirtungsaufwendungen (abziehbarer Anteil)",
+    "53": "Verpflegungsmehraufwendungen",
+    "54": "Häusliches Arbeitszimmer / Tagespauschale",
+    "59": "Sonstige tatsächliche Fahrtkosten (Kilometerpauschale)"
+  },
+
+  "kategorien": [
+    {"schluessel": "einnahmen",          "name": "Betriebseinnahmen",              "richtung": "einnahme", "eur_zeile": 11, "sonderfall": null},
+    {"schluessel": "wareneingang",       "name": "Wareneingang",                   "richtung": "ausgabe",  "eur_zeile": 25, "sonderfall": null},
+    {"schluessel": "fremdleistungen",    "name": "Fremdleistungen",                "richtung": "ausgabe",  "eur_zeile": 26, "sonderfall": null},
+    {"schluessel": "software",           "name": "Software und Lizenzen",          "richtung": "ausgabe",  "eur_zeile": 50, "sonderfall": null},
+    {"schluessel": "buerobedarf",        "name": "Bürobedarf",                     "richtung": "ausgabe",  "eur_zeile": 50, "sonderfall": null},
+    {"schluessel": "fachliteratur",      "name": "Fachliteratur",                  "richtung": "ausgabe",  "eur_zeile": 50, "sonderfall": null},
+    {"schluessel": "weiterbildung",      "name": "Weiterbildung",                  "richtung": "ausgabe",  "eur_zeile": 40, "sonderfall": null},
+    {"schluessel": "telekommunikation",  "name": "Telekommunikation",              "richtung": "ausgabe",  "eur_zeile": 38, "sonderfall": "privatanteil"},
+    {"schluessel": "porto",              "name": "Porto und Versand",              "richtung": "ausgabe",  "eur_zeile": 50, "sonderfall": null},
+    {"schluessel": "werbekosten",        "name": "Werbekosten",                    "richtung": "ausgabe",  "eur_zeile": 44, "sonderfall": null},
+    {"schluessel": "reisekosten",        "name": "Reisekosten",                    "richtung": "ausgabe",  "eur_zeile": 39, "sonderfall": null},
+    {"schluessel": "bewirtung",          "name": "Bewirtung",                      "richtung": "ausgabe",  "eur_zeile": 52, "sonderfall": "bewirtung"},
+    {"schluessel": "fahrtkosten",        "name": "Fahrtkosten (privates Kfz)",     "richtung": "ausgabe",  "eur_zeile": 59, "sonderfall": "fahrtkosten"},
+    {"schluessel": "versicherungen",     "name": "Versicherungen und Beiträge",    "richtung": "ausgabe",  "eur_zeile": 43, "sonderfall": null},
+    {"schluessel": "bankgebuehren",      "name": "Bankgebühren",                   "richtung": "ausgabe",  "eur_zeile": 50, "sonderfall": null},
+    {"schluessel": "miete",              "name": "Miete Geschäftsräume",           "richtung": "ausgabe",  "eur_zeile": 36, "sonderfall": null},
+    {"schluessel": "arbeitszimmer",      "name": "Homeoffice-Tagespauschale",      "richtung": "ausgabe",  "eur_zeile": 54, "sonderfall": "homeoffice"},
+    {"schluessel": "gwg",                "name": "Geringwertige Wirtschaftsgüter", "richtung": "ausgabe",  "eur_zeile": 33, "sonderfall": "gwg"},
+    {"schluessel": "anlagevermoegen",    "name": "Anlagevermögen (wird abgeschrieben)", "richtung": "ausgabe", "eur_zeile": null, "sonderfall": "afa"},
+    {"schluessel": "afa",                "name": "Abschreibungen (AfA)",           "richtung": "ausgabe",  "eur_zeile": 30, "sonderfall": null},
+    {"schluessel": "geschenke",          "name": "Geschenke",                      "richtung": "ausgabe",  "eur_zeile": 51, "sonderfall": "geschenk"},
+    {"schluessel": "steuerberatung",     "name": "Rechts- und Steuerberatung",     "richtung": "ausgabe",  "eur_zeile": 41, "sonderfall": null},
+    {"schluessel": "sonstige",           "name": "Sonstige Betriebsausgaben",      "richtung": "ausgabe",  "eur_zeile": 50, "sonderfall": null},
+    {"schluessel": "privat",             "name": "Privat (nicht betrieblich)",     "richtung": "ausgabe",  "eur_zeile": null, "sonderfall": "privat"}
+  ],
+
+  "mail": {
+    "bekannte_domains": [
+      "adobe.com", "figma.com", "framer.com", "google.com", "df.eu", "ionos.de",
+      "strato.de", "hetzner.com", "all-inkl.com", "united-domains.de", "checkdomain.de",
+      "telekom.de", "vodafone.de", "o2online.de", "1und1.de",
+      "amazon.de", "apple.com", "dropbox.com", "notion.so", "github.com",
+      "hallesche.de", "allianz.de", "huk.de", "signal-iduna.de", "exali.de", "hiscox.de",
+      "n26.com", "dkb.de", "ing.de", "qonto.com", "finom.co",
+      "lexoffice.de", "sevdesk.de"
+    ],
+    "betreff_heuristik": [
+      "rechnung", "invoice", "beleg", "quittung", "zahlungsbestätigung", "zahlungsbestaetigung",
+      "ihre bestellung", "your order", "receipt", "payment confirmation", "gutschrift", "abrechnung"
+    ],
+    "standard_ordner": "Belege"
+  },
+
+  "ollama": {
+    "url": "http://127.0.0.1:11434",
+    "vision_modell": "qwen2.5vl:7b",
+    "text_modell": "qwen2.5:7b",
+    "timeout_sekunden": 180
+  },
+
+  "jahresabschluss_fragen": [
+    {"key": "fachliteratur",   "frage": "Fachbücher, Fachzeitschriften, Online-Magazine?",          "kategorie": "fachliteratur"},
+    {"key": "software",        "frage": "Software-Abos (Adobe, Figma, Fonts, Plugins)?",            "kategorie": "software"},
+    {"key": "domains",         "frage": "Domains, Hosting, E-Mail-Postfächer?",                     "kategorie": "software"},
+    {"key": "weiterbildung",   "frage": "Kurse, Workshops, Konferenzen, Online-Trainings?",         "kategorie": "weiterbildung"},
+    {"key": "versicherung",    "frage": "Berufshaftpflicht, Rechtsschutz, Berufsverband, IHK/HWK?", "kategorie": "versicherungen"},
+    {"key": "bank",            "frage": "Kontoführungsgebühren, Kartengebühren, PayPal-Gebühren?",  "kategorie": "bankgebuehren"},
+    {"key": "fahrten",         "frage": "Kundenfahrten mit dem privaten Auto (Kilometer)?",         "kategorie": "fahrtkosten"},
+    {"key": "homeoffice",      "frage": "Wie viele Tage überwiegend zu Hause gearbeitet?",          "kategorie": "arbeitszimmer"},
+    {"key": "arbeitsmittel",   "frage": "Arbeitsmittel: Monitor, Tablet, Stift, Drucker, Papier?", "kategorie": "gwg"},
+    {"key": "telefon",         "frage": "Handyvertrag, Internetanschluss (Privatanteil beachten)?", "kategorie": "telekommunikation"},
+    {"key": "porto",           "frage": "Porto, Paketversand, Kurier?",                             "kategorie": "porto"},
+    {"key": "werbung",         "frage": "Visitenkarten, Website, Anzeigen, Portfolio-Druck?",       "kategorie": "werbekosten"},
+    {"key": "steuerberatung",  "frage": "Steuerberatung oder Buchhaltungssoftware?",                "kategorie": "steuerberatung"}
+  ]
+}

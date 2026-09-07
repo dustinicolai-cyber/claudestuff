@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Steuertool</title>
+<link rel="icon" href="data:,">
+<script src="/static/htmx.min.js"></script>
+<style>
+:root{--bg:#f6f5f2;--fg:#1c1c1c;--muted:#6b6b6b;--line:#dcdad4;--card:#fff;--akzent:#0f5c4a;--akzent-hell:#e3f1ec;--warn:#b45309;--warn-bg:#fff4e5;--rot:#b91c1c;--ok:#15803d}
+@media (prefers-color-scheme:dark){:root{--bg:#161616;--fg:#ececec;--muted:#9a9a9a;--line:#333;--card:#1f1f1f;--akzent:#4fc3a1;--akzent-hell:#173b32;--warn:#f59e0b;--warn-bg:#3a2a10;--rot:#f87171;--ok:#4ade80}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.45 -apple-system,BlinkMacSystemFont,"Helvetica Neue",Helvetica,Arial,sans-serif}
+header{display:flex;align-items:center;gap:1.2rem;padding:.6rem 1.2rem;border-bottom:1px solid var(--line);background:var(--card);position:sticky;top:0;z-index:5}
+header h1{font-size:1rem;margin:0;letter-spacing:.02em}
+header h1 small{color:var(--muted);font-weight:normal;margin-left:.4rem}
+nav{display:flex;gap:.2rem;flex-wrap:wrap}
+nav button{background:none;border:1px solid transparent;padding:.4rem .7rem;border-radius:6px;cursor:pointer;color:var(--fg);font:inherit}
+nav button:hover{background:var(--akzent-hell)}
+nav button.aktiv{background:var(--akzent);color:#fff}
+nav button .z{display:inline-block;min-width:1.3em;padding:0 .35em;margin-left:.3em;border-radius:9px;background:var(--warn);color:#fff;font-size:.75em;text-align:center}
+nav button .z:empty{display:none}
+main{max-width:1400px;margin:0 auto;padding:1.2rem}
+h2{font-size:1.25rem;margin:.2rem 0 .6rem}
+h3{font-size:1rem;margin:1.4rem 0 .4rem}
+h4{margin:.2rem 0 .4rem}
+.muted{color:var(--muted)} .klein{font-size:.85em} .fett{font-weight:600} .num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+.neg{color:var(--rot)} .pos{color:var(--ok)}
+.row{display:flex;gap:.6rem;align-items:center;flex-wrap:wrap;margin:.5rem 0} .row.zwischen{justify-content:space-between}
+.inline{display:inline-flex;gap:.3rem;align-items:center;margin:0}
+button,.button{background:var(--akzent);color:#fff;border:0;border-radius:6px;padding:.45rem .9rem;font:inherit;cursor:pointer;text-decoration:none;display:inline-block}
+button.sekundaer,.button.sekundaer{background:transparent;color:var(--fg);border:1px solid var(--line)}
+button.gefahr{background:transparent;color:var(--rot);border:1px solid var(--rot)}
+button.klein,.button.klein{padding:.2rem .55rem;font-size:.85em}
+button:disabled{opacity:.5}
+input,select{font:inherit;padding:.4rem .5rem;border:1px solid var(--line);border-radius:6px;background:var(--card);color:var(--fg);max-width:100%}
+input[type=number]{text-align:right}
+label{display:flex;flex-direction:column;gap:.2rem;font-size:.9em;color:var(--muted)} label input,label select{color:var(--fg)}
+label.check{flex-direction:row;align-items:center;gap:.5rem;color:var(--fg)}
+.link{color:var(--akzent);cursor:pointer;text-decoration:underline}
+a{color:var(--akzent)}
+.tabelle{width:100%;border-collapse:collapse;background:var(--card);border:1px solid var(--line);border-radius:8px;overflow:hidden}
+.tabelle th,.tabelle td{padding:.45rem .6rem;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
+.tabelle th{background:var(--akzent-hell);font-weight:600;font-size:.85em;text-transform:uppercase;letter-spacing:.03em}
+.tabelle.kompakt th,.tabelle.kompakt td{padding:.3rem .5rem}
+.tabelle tfoot td{background:var(--akzent-hell)} tr.summe td{font-weight:500} tr.einnahme td:first-child{color:var(--ok)}
+.scroll{overflow-x:auto}
+.badge{display:inline-block;padding:.05rem .45rem;border-radius:9px;font-size:.78em;border:1px solid var(--line);background:var(--card);white-space:nowrap}
+.badge.ok{background:#dcfce7;color:#14532d;border-color:#86efac} .badge.mid{background:#fef3c7;color:#78350f;border-color:#fcd34d} .badge.low{background:#fee2e2;color:#7f1d1d;border-color:#fca5a5}
+.badge.rc{background:#ede9fe;color:#4c1d95;border-color:#c4b5fd} .badge.stufe{background:var(--akzent-hell);color:var(--akzent)}
+@media (prefers-color-scheme:dark){.badge.ok{background:#14532d;color:#dcfce7}.badge.mid{background:#78350f;color:#fef3c7}.badge.low{background:#7f1d1d;color:#fee2e2}.badge.rc{background:#4c1d95;color:#ede9fe}}
+.dropzone{border:2px dashed var(--line);border-radius:12px;padding:2.2rem;text-align:center;background:var(--card);margin:.8rem 0;transition:border-color .15s}
+.dropzone.aktiv{border-color:var(--akzent);background:var(--akzent-hell)}
+.karte{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:.9rem 1rem;margin:.8rem 0}
+.karten{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:.8rem}
+.ok-box{background:var(--akzent-hell);border-left:4px solid var(--akzent);padding:.6rem .9rem;border-radius:6px}
+.warn-box{background:var(--warn-bg);border-left:4px solid var(--warn);padding:.6rem .9rem;border-radius:6px}
+.tabs button{background:transparent;color:var(--fg);border:1px solid var(--line);border-radius:0;margin-left:-1px} .tabs button:first-child{border-radius:6px 0 0 6px} .tabs button:last-child{border-radius:0 6px 6px 0} .tabs button.aktiv{background:var(--akzent);color:#fff;border-color:var(--akzent)}
+.pruefen{display:grid;grid-template-columns:260px 1fr 1fr;gap:1rem;align-items:start}
+@media (max-width:1100px){.pruefen{grid-template-columns:1fr}.vorschau{min-height:50vh}}
+.pruefen aside{position:sticky;top:60px;max-height:calc(100vh - 80px);overflow:auto}
+.liste{list-style:none;margin:0;padding:0} .liste li a{display:block;padding:.35rem .5rem;border-radius:6px;color:var(--fg);text-decoration:none;font-size:.85em;border:1px solid transparent} .liste li a:hover{background:var(--akzent-hell)} .liste li.aktiv a{border-color:var(--akzent);background:var(--card)}
+.vorschau{width:100%;height:78vh;border:1px solid var(--line);border-radius:8px;background:#fff;object-fit:contain}
+pre.vorschau{overflow:auto;padding:.8rem;font-size:.8em}
+.formular{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:1rem}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:.6rem .8rem} .grid2 .breit{grid-column:1/-1}
+fieldset.sonderfall{border:1px solid var(--line);border-radius:8px;margin:.8rem 0 0;padding:.5rem .8rem .7rem;display:flex;gap:.8rem;flex-wrap:wrap;align-items:end} fieldset legend{color:var(--muted);font-size:.85em;padding:0 .3rem}
+.hinweise{margin:.8rem 0 0;padding-left:1.2rem;font-size:.9em} .hinweise li{margin:.15rem 0} .hinweise .warn{color:var(--warn)}
+.aktionen{margin-top:1rem}
+.aktionen-zelle{white-space:nowrap}
+.frage{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:.6rem .9rem;margin:.5rem 0} .frage.erledigt{opacity:.6}
+kbd{font:inherit;font-size:.8em;border:1px solid var(--line);border-bottom-width:2px;border-radius:4px;padding:0 .35em;background:var(--card)}
+code{font-size:.9em;background:var(--akzent-hell);padding:.05em .3em;border-radius:4px;word-break:break-all}
+details summary{cursor:pointer;margin:.6rem 0}
+.spinner{display:inline-block;width:1em;height:1em;border:2px solid var(--line);border-top-color:var(--akzent);border-radius:50%;animation:dreh .8s linear infinite;vertical-align:middle}
+.htmx-indicator{display:none} .htmx-request .htmx-indicator,.htmx-request.htmx-indicator{display:inline-block}
+@keyframes dreh{to{transform:rotate(360deg)}}
+footer{color:var(--muted);font-size:.8em;text-align:center;padding:2rem 1rem}
+</style>
+</head>
+<body>
+<header>
+  <h1>Steuertool <small>§19 · EÜR · offline</small></h1>
+  <nav id="nav">
+    <button data-ansicht="import" hx-get="/ui/import" hx-target="#main">Import</button>
+    <button data-ansicht="pruefen" hx-get="/ui/pruefen" hx-target="#main">Prüfen<span class="z" id="z-vorschlaege"></span></button>
+    <button data-ansicht="quartale" hx-get="/ui/quartale" hx-target="#main">Quartale</button>
+    <button data-ansicht="offen" hx-get="/ui/offen" hx-target="#main">Offene Punkte<span class="z" id="z-offen"></span></button>
+    <button data-ansicht="jahresabschluss" hx-get="/ui/jahresabschluss" hx-target="#main">Jahresabschluss</button>
+    <button data-ansicht="export" hx-get="/ui/export" hx-target="#main">Export</button>
+    <button data-ansicht="manuell" hx-get="/ui/manuell" hx-target="#main">＋ Manuell</button>
+    <button data-ansicht="einstellungen" hx-get="/ui/einstellungen" hx-target="#main">Einstellungen</button>
+  </nav>
+  <span id="ki-status" class="badge muted" title="Lokale KI (Ollama)"></span>
+</header>
+<main id="main" hx-history="false"><p class="muted">Lade…</p></main>
+<footer>Alles lokal: SQLite + Belegordner im Nutzerverzeichnis. Keine Cloud, keine Telemetrie. Kein Ersatz für steuerliche Beratung.</footer>
+<script>
+(function(){
+  const nav = document.getElementById('nav');
+  function markiere(url){
+    const ansicht = (url.match(/\/ui\/([a-z]+)/) || [])[1];
+    nav.querySelectorAll('button').forEach(b => b.classList.toggle('aktiv', b.dataset.ansicht === ansicht));
+  }
+  document.body.addEventListener('htmx:afterRequest', e => {
+    const p = e.detail.pathInfo && e.detail.pathInfo.requestPath || '';
+    if (p.startsWith('/ui/')) markiere(p);
+    zaehler();
+  });
+  async function zaehler(){
+    try {
+      const r = await fetch('/api/status'); const s = await r.json();
+      document.getElementById('z-vorschlaege').textContent = s.vorschlaege || '';
+      document.getElementById('z-offen').textContent = (s.beleg_fehlt + s.manuell_holen) || '';
+      const k = document.getElementById('ki-status');
+      k.textContent = s.ollama ? 'KI lokal' : 'KI aus'; k.className = 'badge ' + (s.ollama ? 'ok' : '');
+    } catch(e) {}
+  }
+  document.addEventListener('zaehler-aktualisieren', zaehler);
+  document.addEventListener('keydown', e => {
+    if (e.target.matches('input,select,textarea')) return;
+    const map = {'1':'import','2':'pruefen','3':'quartale','4':'offen','5':'jahresabschluss','6':'export'};
+    if (map[e.key]) { const b = nav.querySelector('[data-ansicht="'+map[e.key]+'"]'); if (b) b.click(); }
+  });
+  htmx.ajax('GET', '/ui/pruefen', '#main').then(() => markiere('/ui/pruefen'));
+  zaehler();
+})();
+</script>
+</body>
+</html>
