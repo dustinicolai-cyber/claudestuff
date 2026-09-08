@@ -213,8 +213,8 @@ details.frage[open] summary .btn-ghost{text-decoration:underline}
 .abgleich tr.doppelt td{background:var(--rot-hell)}
 .abgleich-tabelle td:nth-child(5){max-width:30em} .abgleich-tabelle td:nth-child(6){min-width:12em}
 .abgleich-tabelle .aktionen-zelle,.abgleich-tabelle .aktion-kopf{white-space:nowrap;width:1%}
-.abgleich-tabelle .aktionen-zelle{display:flex;gap:.35rem;align-items:center;flex-wrap:nowrap}
-.abgleich-tabelle .aktionen-zelle form{display:inline}
+.abgleich-tabelle .aktionen-inline{display:flex;gap:.35rem;align-items:center;flex-wrap:nowrap}
+.abgleich-tabelle .aktionen-inline form{display:inline}
 .klebe-leiste{position:sticky;top:0;z-index:4;background:var(--bg);padding:.3rem 0 .4rem;margin-bottom:.3rem}
 .klebe-leiste .row{margin:.2rem 0}
 /* Nach oben */
@@ -321,7 +321,7 @@ footer{color:var(--muted);font-size:.78em;padding:1.4rem 0 0}
     if (map[e.key]) { const b = nav.querySelector('[data-ansicht="'+map[e.key]+'"]'); if (b) b.click(); }
   });
   const nachOben = document.getElementById('nach-oben');
-  window.addEventListener('scroll', () => nachOben.classList.toggle('sichtbar', window.scrollY > 400), {passive: true});
+  window.addEventListener('scroll', () => nachOben.classList.toggle('sichtbar', window.scrollY > 240), {passive: true});
   nachOben.addEventListener('click', () => window.scrollTo({top: 0, behavior: 'smooth'}));
   const tg = document.getElementById('theme-toggle');
   function aktuellesTheme(){ return document.documentElement.dataset.theme === 'light' ? 'light' : 'dark'; }

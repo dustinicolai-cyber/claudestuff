@@ -830,7 +830,7 @@ def abgleich_view(zeilen: list[dict], regeln: list[IgnorRegel], jahr: int, filte
         f'<td><span class="badge {"plus-b" if z["k"].betrag > 0 else "minus-b"}">{"Einnahme" if z["k"].betrag > 0 else "Ausgabe"}</span></td>'
         f'<td>{h(z["k"].gegenkonto)}<div class="muted klein">{h(z["k"].verwendungszweck[:110])}</div>'
         + (f'<div class="klein"><span class="badge low">evtl. doppelt</span> <span class="muted">gleicher Betrag und Empfänger am {d(z["doppelt"].datum)} – prüfen, ob beide echt sind</span></div>' if z["doppelt"] else "")
-        + f'</td><td>{status_zelle(z)}</td><td class="aktionen-zelle">{aktionen(z)}</td></tr>'
+        + f'</td><td>{status_zelle(z)}</td><td class="aktionen-zelle"><div class="aktionen-inline">{aktionen(z)}</div></td></tr>'
         for z in zeilen)
     regeln_html = "".join(f'<li><code>{h(r.muster)}</code> <span class="muted klein">{r.treffer} Treffer</span> '
                           f'<button class="klein btn-ghost" hx-post="/api/ignorregel/{r.id}/loeschen" hx-vals=\'{{"jahr":"{jahr}"}}\' hx-target="#main">entfernen</button></li>' for r in regeln)
