@@ -323,4 +323,5 @@ Reverse charge: VAT to be accounted for by the recipient.
             b = s.get(Buchung, b.id); assert b.status == "bestaetigt" and b.waehrung == "USD" and b.betrag_fremd == 15.0
         assert "USD 15,00" in c.get("/export/belegjournal.csv?jahr=2025").text
         a = c.get("/ui/abgleich?jahr=2025&filter=alle").text
-        assert 'data-sort="betrag"' in a and "listen-suche" in a
+        assert 'data-sort="betrag"' in a and 'data-sort="status"' in a and "listen-suche" in a
+        assert 'data-status="3"' in a  # zugeordnete Bewegung trägt ihren Sortier-Rang

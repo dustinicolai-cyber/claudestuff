@@ -880,8 +880,17 @@ def abgleich_view(zeilen: list[dict], regeln: list[IgnorRegel], jahr: int, filte
                 f'<button class="klein btn-ghost" {vals("ignorieren")}>ignorieren</button> '
                 f'<button class="klein btn-ghost" {vals("regel")} title="Regel: „{h(k.gegenkonto or k.verwendungszweck[:40])}“ künftig immer ignorieren">immer ignorieren</button>')
 
+    def status_rang(z: dict) -> int:
+        """Sortierreihenfolge der Abgleich-Spalte: erst Rückfragen, dann Dubletten, dann ohne Beleg, dann erledigt."""
+        st = z["status"]
+        if st == "rueckfrage":
+            return 0
+        if st == "kein_beleg":
+            return 1 if z["doppelt"] else 2
+        return 3 if st == "zugeordnet" else 4
+
     rows = "".join(
-        f'<tr class="{"doppelt" if z["doppelt"] else ""}" data-datum="{z["k"].datum.isoformat()}" data-betrag="{z["k"].betrag:.2f}"><td><input type="checkbox" name="ids" value="{z["k"].id}"></td>'
+        f'<tr class="{"doppelt" if z["doppelt"] else ""}" data-datum="{z["k"].datum.isoformat()}" data-betrag="{z["k"].betrag:.2f}" data-status="{status_rang(z)}"><td><input type="checkbox" name="ids" value="{z["k"].id}"></td>'
         f'<td>{d(z["k"].datum)}</td><td class="num">{eur_fmt(z["k"].betrag)}<div><span class="badge {"plus-b" if z["k"].betrag > 0 else "minus-b"}">{"Einnahme" if z["k"].betrag > 0 else "Ausgabe"}</span></div></td>'
         f'<td class="zweck">{h(z["k"].gegenkonto)}<div class="muted klein">{h(z["k"].verwendungszweck[:140])}</div>'
         + (f'<div class="klein"><span class="badge low">evtl. doppelt</span> <span class="muted">gleicher Betrag und Empfänger am {d(z["doppelt"].datum)} – prüfen, ob beide echt sind</span></div>' if z["doppelt"] else "")
@@ -919,7 +928,7 @@ def abgleich_view(zeilen: list[dict], regeln: list[IgnorRegel], jahr: int, filte
       <button type="submit" name="aktion" value="regel" class="btn-ghost klein" hx-confirm="Für jede ausgewählte Bewegung eine Ignorier-Regel auf das Gegenkonto anlegen?">Immer ignorieren</button>
       <button type="submit" name="aktion" value="loesen" class="btn-ghost klein">Zuordnung lösen</button></div>
     </div>
-    <div class="scroll"><table class="tabelle kompakt abgleich-tabelle"><colgroup><col class="c-wahl"><col class="c-datum"><col class="c-betrag"><col class="c-zweck"><col class="c-status"><col class="c-aktion"></colgroup><thead><tr><th></th><th class="sortierbar" data-sort="datum" title="nach Datum sortieren">Datum <span class="pfeil"></span></th><th class="num sortierbar" data-sort="betrag" title="nach Betrag sortieren">Betrag <span class="pfeil"></span></th><th>Gegenkonto / Zweck</th><th>Abgleich</th><th class="aktion-kopf">Aktion</th></tr></thead>
+    <div class="scroll"><table class="tabelle kompakt abgleich-tabelle"><colgroup><col class="c-wahl"><col class="c-datum"><col class="c-betrag"><col class="c-zweck"><col class="c-status"><col class="c-aktion"></colgroup><thead><tr><th></th><th class="sortierbar" data-sort="datum" title="nach Datum sortieren">Datum <span class="pfeil"></span></th><th class="num sortierbar" data-sort="betrag" title="nach Betrag sortieren">Betrag <span class="pfeil"></span></th><th>Gegenkonto / Zweck</th><th class="sortierbar" data-sort="status" title="nach Status sortieren: Rückfragen, Dubletten, ohne Beleg, zugeordnet, ignoriert">Abgleich <span class="pfeil"></span></th><th class="aktion-kopf">Aktion</th></tr></thead>
     <tbody>{rows or '<tr><td colspan=6 class="muted">Nichts in dieser Liste.</td></tr>'}</tbody></table></div>
   </form>
   <details class="karte" {"open" if regeln else ""}><summary><strong>Ignorier-Regeln</strong> <span class="muted">({len(regeln)}) – Bewegungen, die nie betrieblich sind</span></summary>
@@ -945,11 +954,12 @@ def abgleich_view(zeilen: list[dict], regeln: list[IgnorRegel], jahr: int, filte
       zaehler.textContent = q ? n + ' von ' + zeilen().length : '';
     }}
     if (suche) suche.addEventListener('input', filtern);
-    // Sortieren per Klick auf Datum/Betrag
+    // Sortieren per Klick auf Datum/Betrag/Abgleich (Status: Rückfrage → Dublette → kein Beleg → zugeordnet → ignoriert, gleiche Stufe nach Datum absteigend)
     let sortKey = null, sortDir = -1;
+    const vgl = (a, b, key) => {{ const va = a.dataset[key], vb = b.dataset[key]; return (key === 'betrag' || key === 'status') ? (+va - +vb) : (va < vb ? -1 : va > vb ? 1 : 0); }};
     f.querySelectorAll('th.sortierbar').forEach(th => th.addEventListener('click', () => {{
       const key = th.dataset.sort; sortDir = (sortKey === key) ? -sortDir : (key === 'datum' ? -1 : 1); sortKey = key;
-      const rows = zeilen(); rows.sort((a, b) => {{ const va = a.dataset[key], vb = b.dataset[key]; const r = key === 'betrag' ? (+va - +vb) : (va < vb ? -1 : va > vb ? 1 : 0); return r * sortDir; }});
+      const rows = zeilen(); rows.sort((a, b) => {{ const r = vgl(a, b, key) * sortDir; return r || (key === 'status' ? -vgl(a, b, 'datum') : 0); }});
       rows.forEach(r => tbody.appendChild(r));
       f.querySelectorAll('th.sortierbar').forEach(t => {{ t.classList.toggle('aktiv', t === th); t.querySelector('.pfeil').textContent = t === th ? (sortDir > 0 ? '▲' : '▼') : ''; }});
     }}));
