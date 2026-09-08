@@ -16,8 +16,10 @@ APP_DIR = Path(__file__).resolve().parent
 DEFAULT_REGELN = APP_DIR / "steuerregeln.json"
 
 
+@lru_cache(maxsize=1)
 def version() -> str:
-    """Build-Kennung aus der Datei VERSION (wird beim Packen geschrieben), sonst „dev“."""
+    """Build-Kennung aus der Datei VERSION (beim Packen geschrieben), sonst „dev“. Einmal beim Start gelesen,
+    damit ein laufender Server die Version meldet, mit der er gestartet wurde."""
     p = APP_DIR.parent / "VERSION"
     try:
         return p.read_text(encoding="utf-8").strip() or "dev"

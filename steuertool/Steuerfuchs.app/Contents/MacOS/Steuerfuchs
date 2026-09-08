@@ -1,32 +1,47 @@
 #!/bin/bash
-# Dock-Starter: läuft der Server schon, nur den Browser öffnen. Sonst im Hintergrund
-# starten (Log in ~/Steuertool/server.log) und den Browser öffnen, sobald er antwortet.
+# Dock-Starter für Steuerfuchs.
+#  - läuft schon dieselbe Version: nur den Browser öffnen
+#  - läuft eine andere Version (alter Ordner): sauber beenden, notfalls über den Port stoppen, neu starten
+#  - läuft nichts: Server im Hintergrund starten, Browser öffnen, sobald er antwortet
+# Alles wird in ~/Steuertool/app.log protokolliert.
 PROJEKT="$(cd "$(dirname "$0")/../../.." && pwd)"
 PORT="${PORT:-8347}"
 URL="http://127.0.0.1:$PORT"
-LOKAL="$(cat "$PROJEKT/VERSION" 2>/dev/null || echo dev)"
-if curl -s --max-time 1 "$URL/gesund" >/dev/null 2>&1; then
-  LAUFEND="$(curl -s --max-time 1 "$URL/api/version" | sed -E 's/.*"version": *"([^"]*)".*/\1/')"
-  if [ "$LAUFEND" = "$LOKAL" ]; then open "$URL"; exit 0; fi
-  # Andere Version läuft (z. B. aus einem alten Ordner): sauber beenden und neu starten
-  curl -s -X POST "$URL/api/beenden" >/dev/null 2>&1
-  for i in $(seq 1 20); do sleep 0.3; curl -s --max-time 1 "$URL/gesund" >/dev/null 2>&1 || break; done
-fi
 export STEUERTOOL_HOME="${STEUERTOOL_HOME:-$HOME/Steuertool}"
 mkdir -p "$STEUERTOOL_HOME"
-cd "$PROJEKT" || exit 1
+LOG="$STEUERTOOL_HOME/app.log"
+export PATH="/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
+log(){ echo "$(date '+%Y-%m-%d %H:%M:%S') $*" >> "$LOG"; }
+alarm(){ log "FEHLER: $1"; osascript -e "display alert \"Steuerfuchs\" message \"$1\"" >/dev/null 2>&1; }
+lebt(){ curl -s --max-time 1 "$URL/gesund" >/dev/null 2>&1; }
+
+log "Start aus $PROJEKT"
+LOKAL="$(cat "$PROJEKT/VERSION" 2>/dev/null || echo dev)"
+
+if lebt; then
+  LAUFEND="$(curl -s --max-time 1 "$URL/api/version" 2>/dev/null | sed -E 's/.*"version": *"([^"]*)".*/\1/')"
+  log "Server läuft (Version '${LAUFEND:-unbekannt}'), lokal '$LOKAL'"
+  if [ -n "$LAUFEND" ] && [ "$LAUFEND" = "$LOKAL" ]; then open "$URL"; exit 0; fi
+  log "Andere Version – beende laufenden Server"
+  curl -s -X POST --max-time 2 "$URL/api/beenden" >/dev/null 2>&1
+  for i in $(seq 1 15); do sleep 0.3; lebt || break; done
+  if lebt; then
+    log "Server reagiert nicht auf Beenden – stoppe über Port $PORT"
+    PIDS="$(lsof -ti tcp:"$PORT" 2>/dev/null)"
+    [ -n "$PIDS" ] && kill $PIDS 2>/dev/null
+    for i in $(seq 1 15); do sleep 0.3; lebt || break; done
+  fi
+  if lebt; then alarm "Ein anderer Steuerfuchs auf Port $PORT lässt sich nicht beenden. Bitte im Terminal: pkill -f 'uvicorn app.main'"; exit 1; fi
+fi
+
+cd "$PROJEKT" || { alarm "Programmordner nicht gefunden: $PROJEKT"; exit 1; }
+if ! command -v python3 >/dev/null 2>&1; then alarm "python3 wurde nicht gefunden. Bitte Python 3.12 installieren (brew install python@3.12)."; exit 1; fi
 chmod +x start.sh 2>/dev/null
+log "Starte Server"
 STEUERFUCHS_KEIN_BROWSER=1 nohup ./start.sh >> "$STEUERTOOL_HOME/server.log" 2>&1 &
 for i in $(seq 1 240); do
   sleep 0.5
-  LOKAL="$(cat "$PROJEKT/VERSION" 2>/dev/null || echo dev)"
-if curl -s --max-time 1 "$URL/gesund" >/dev/null 2>&1; then
-  LAUFEND="$(curl -s --max-time 1 "$URL/api/version" | sed -E 's/.*"version": *"([^"]*)".*/\1/')"
-  if [ "$LAUFEND" = "$LOKAL" ]; then open "$URL"; exit 0; fi
-  # Andere Version läuft (z. B. aus einem alten Ordner): sauber beenden und neu starten
-  curl -s -X POST "$URL/api/beenden" >/dev/null 2>&1
-  for i in $(seq 1 20); do sleep 0.3; curl -s --max-time 1 "$URL/gesund" >/dev/null 2>&1 || break; done
-fi
+  if lebt; then log "Server antwortet – öffne Browser"; open "$URL"; exit 0; fi
 done
-osascript -e 'display alert "Steuerfuchs konnte nicht starten" message "Details stehen in ~/Steuertool/server.log. Ist Python 3 installiert?"' 2>/dev/null
+alarm "Steuerfuchs konnte nicht starten. Details stehen in $STEUERTOOL_HOME/server.log"
 exit 1
