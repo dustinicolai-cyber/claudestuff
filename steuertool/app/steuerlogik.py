@@ -341,7 +341,43 @@ def quartalsuebersicht(buchungen: list[Buchung], kategorien: dict[int, Kategorie
     einnahmen, ausgaben = summe("einnahme"), summe("ausgabe")
     gewinn = [runde(einnahmen[i].abzugsfaehig - ausgaben[i].abzugsfaehig) for i in range(5)]
     return {"jahr": jahr, "zeilen": reihen, "einnahmen": einnahmen, "ausgaben": ausgaben, "gewinn": gewinn,
-            "entgangene_vorsteuer": [runde(ausgaben[i].ust) for i in range(5)]}
+            "entgangene_vorsteuer": [runde(ausgaben[i].ust) for i in range(5)],
+            "monate": monatsverlauf(jahres, kategorien, anlagegueter, jahr, cfg)}
+
+
+def monatsverlauf(buchungen: list[Buchung], kategorien: dict[int, Kategorie],
+                  anlagegueter: list[Anlagegut], jahr: int, cfg: dict) -> list[dict]:
+    """12 Monate: Einnahmen, abzugsfähige Ausgaben, entgangene Vorsteuer, kumulierter Gewinn."""
+    monate = [{"monat": m, "einnahmen": 0.0, "ausgaben": 0.0, "ust": 0.0} for m in range(1, 13)]
+    homeoffice_tage, geschenke = 0, {}
+    for b in sorted(buchungen, key=lambda x: (x.datum, x.id or 0)):
+        if b.datum.year != jahr or b.status != "bestaetigt":
+            continue
+        k = kategorien.get(b.kategorie_id or -1)
+        if k is None:
+            continue
+        bw = bewerte(b, k, cfg, {"homeoffice_tage_bisher": homeoffice_tage, "geschenke_je_empfaenger": dict(geschenke)})
+        m = meta(b)
+        if k.sonderfall == "homeoffice":
+            homeoffice_tage += int(m.get("tage") or 0)
+        if k.sonderfall == "geschenk":
+            e = str(m.get("empfaenger", "")).strip()
+            geschenke[e] = geschenke.get(e, 0.0) + b.betrag_brutto
+        z = monate[b.datum.month - 1]
+        if b.richtung == "einnahme":
+            z["einnahmen"] += bw.abzugsfaehig
+        else:
+            z["ausgaben"] += bw.abzugsfaehig
+            z["ust"] += b.ust_betrag + bw.ust_13b
+    afa = sum(afa_fuer_jahr(a, jahr) for a in anlagegueter) / 12
+    kum = 0.0
+    for z in monate:
+        z["ausgaben"] += afa
+        for f in ("einnahmen", "ausgaben", "ust"):
+            z[f] = runde(z[f])
+        kum += z["einnahmen"] - z["ausgaben"]
+        z["gewinn_kumuliert"] = runde(kum)
+    return monate
 
 
 def eur_zeilen(buchungen: list[Buchung], kategorien: dict[int, Kategorie],

@@ -1,4 +1,4 @@
-# Steuertool – lokales Steuer- und Belegtool (§19 UStG, Anlage EÜR)
+# Steuerfuchs – lokales Steuer- und Belegtool (§19 UStG, Anlage EÜR)
 
 Ersetzt die handgepflegte Tabelle. Läuft komplett offline auf dem Mac, Daten bleiben
 in `~/Steuertool/` (SQLite + Belegordner). Keine Cloud, keine Telemetrie.
@@ -39,10 +39,12 @@ Sichern = diese Dateien kopieren. Pfad überschreibbar per `STEUERTOOL_HOME`.
    automatisch eine Regel für den Lieferanten an.
 3. **Quartale** – Kategorien × Q1–Q4 + Jahr. Umschalter Brutto / Netto / USt / Abzugsfähig.
    Die USt-Spalte ist der Was-wäre-wenn-Rechner: so viel Vorsteuer kostet §19 pro Quartal.
-4. **Offene Punkte** – Kontobewegungen ohne Beleg (wichtigste Liste), Mails „manuell holen“,
+4. **Auswertung** – dieselben Zahlen als Diagramm, per Button umschaltbar: Quartale, Monate,
+   Gewinnverlauf, Kategorien, Anteile, Tabelle. Grün = Plus, Gelb = neutral, Rot = Minus.
+5. **Offene Punkte** – Kontobewegungen ohne Beleg (wichtigste Liste), Mails „manuell holen“,
    Belege ohne Kontobewegung, mögliche Doppelbuchungen.
-5. **Jahresabschluss** – Fragebogen gegen vergessene Posten, pro Frage Direkterfassung.
-6. **Export** – Anlage EÜR (Zeile, Bezeichnung, Betrag – abtippfertig), UStVA je Quartal
+6. **Jahresabschluss** – Fragebogen gegen vergessene Posten, pro Frage Direkterfassung.
+7. **Export** – Anlage EÜR (Zeile, Bezeichnung, Betrag – abtippfertig), UStVA je Quartal
    (nur §13b, Kz 46/47 bzw. 84/85), Quartalstabelle CSV/PDF, Belegjournal.
 
 Kontoauszüge (CSV deutscher Banken oder CAMT.053) unter Import einlesen; Matching läuft

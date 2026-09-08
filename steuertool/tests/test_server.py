@@ -15,11 +15,11 @@ def client():
 
 def test_startseite_und_status():
     with client() as c:
-        assert "Steuertool" in c.get("/").text
+        assert "Steuerfuchs" in c.get("/").text
         assert c.get("/static/htmx.min.js").status_code == 200
         s = c.get("/api/status").json()
         assert s["vorschlaege"] == 0 and isinstance(s["jahre"], list)
-        for pfad in ("/ui/import", "/ui/pruefen", "/ui/quartale", "/ui/offen", "/ui/jahresabschluss", "/ui/export", "/ui/manuell", "/ui/einstellungen"):
+        for pfad in ("/ui/import", "/ui/pruefen", "/ui/quartale", "/ui/auswertung", "/ui/offen", "/ui/jahresabschluss", "/ui/export", "/ui/manuell", "/ui/einstellungen"):
             r = c.get(pfad)
             assert r.status_code == 200, pfad
 
@@ -101,3 +101,18 @@ def test_jahresabschluss_direkterfassung():
         assert z[54] == 720.0
         r = c.post("/api/fragebogen/2025/homeoffice/toggle")
         assert "1/" in r.text
+
+
+def test_auswertung_daten():
+    with client() as c:
+        with Session(engine()) as s:
+            k = {x.schluessel: x for x in s.exec(select(Kategorie)).all()}
+            s.add(Buchung(datum=date(2025, 2, 1), richtung="einnahme", betrag_netto=1000, betrag_brutto=1000, kategorie_id=k["einnahmen"].id, status="bestaetigt"))
+            s.add(Buchung(datum=date(2025, 8, 9), richtung="ausgabe", betrag_netto=84.03, ust_satz=19, ust_betrag=15.97, betrag_brutto=100, kategorie_id=k["bewirtung"].id, status="bestaetigt"))
+            s.commit()
+        d = c.get("/api/auswertung?jahr=2025").json()
+        assert d["quartale"][0]["einnahmen"] == 1000.0 and d["quartale"][2]["ausgaben"] == 70.0
+        assert d["monate"][1]["gewinn_kumuliert"] == 1000.0 and d["monate"][11]["gewinn_kumuliert"] == 930.0
+        assert d["monate"][7]["ust"] == 15.97
+        assert [k["name"] for k in d["kategorien"] if k["richtung"] == "ausgabe"] == ["Bewirtung"]
+        assert d["jahr_summe"]["gewinn"] == 930.0

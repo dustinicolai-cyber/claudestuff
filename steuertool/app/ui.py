@@ -231,7 +231,7 @@ def quartale_view(ue: dict, modus: str, jahre: list[int], offene_vorschlaege: in
     summen = (
         f'<tr class="summe"><td>Summe Einnahmen</td><td></td>' + "".join(f'<td class="num">{eur_fmt(w(z))}</td>' for z in ue["einnahmen"]) + '</tr>'
         f'<tr class="summe"><td>Summe Ausgaben</td><td></td>' + "".join(f'<td class="num">{eur_fmt(w(z))}</td>' for z in ue["ausgaben"]) + '</tr>'
-        f'<tr class="summe fett"><td>Gewinn (abzugsfähig)</td><td></td>' + "".join(f'<td class="num">{eur_fmt(g)}</td>' for g in ue["gewinn"]) + '</tr>')
+        f'<tr class="summe fett"><td>Gewinn (abzugsfähig)</td><td></td>' + "".join(f'<td class="num {"plus" if g >= 0 else "minus"}">{eur_fmt(g)}</td>' for g in ue["gewinn"]) + '</tr>')
     erkl = {
         "brutto": "Bei §19 ist der Bruttobetrag die Betriebsausgabe – das ist die maßgebliche Ansicht.",
         "netto": "Netto dient nur der Darstellung. So sähen die Ausgaben bei Regelbesteuerung mit Vorsteuerabzug aus.",
@@ -266,7 +266,7 @@ def quartale_view(ue: dict, modus: str, jahre: list[int], offene_vorschlaege: in
     <h3>Was-wäre-wenn: Was kostet §19 an Vorsteuer?</h3>
     <p class="muted">Bei Regelbesteuerung wäre diese USt (inkl. §13b-Steuer) als Vorsteuer abziehbar. Dagegen stünde USt-Pflicht auf eigene Rechnungen – Entscheidungsgrundlage, keine Empfehlung.</p>
     <table class="tabelle kompakt"><tr><th>Q1</th><th>Q2</th><th>Q3</th><th>Q4</th><th>Jahr</th></tr>
-    <tr>{''.join(f'<td class="num">{eur_fmt(v)}</td>' for v in ev)}</tr></table>
+    <tr>{''.join(f'<td class="num neutral">{eur_fmt(v)}</td>' for v in ev)}</tr></table>
   </div>
 
   <div class="row">
@@ -302,7 +302,7 @@ def offen_view(op: dict, kandidaten: dict[int, list[Buchung]], funde: list[MailF
 
     ohne_beleg = "".join(konto_zeile(k) for k in op["ohne_beleg"])
     ohne_konto = "".join(
-        f'<tr><td>{d(b.datum)}</td><td class="num">{eur_fmt(b.betrag_brutto)}</td><td>{h(b.lieferant)} <span class="muted klein">{h(b.beschreibung[:60])}</span></td>'
+        f'<tr><td>{d(b.datum)}</td><td class="num {"plus" if b.richtung == "einnahme" else "minus"}">{eur_fmt(b.betrag_brutto)}</td><td>{h(b.lieferant)} <span class="muted klein">{h(b.beschreibung[:60])}</span></td>'
         f'<td>{h(kategorien[b.kategorie_id].name) if b.kategorie_id in kategorien else "–"}</td><td><a href="#" hx-get="/ui/pruefen/{b.id}" hx-target="#main">öffnen</a></td></tr>'
         for b in op["ohne_konto"][:200])
     doppel = "".join(
@@ -327,7 +327,7 @@ def offen_view(op: dict, kandidaten: dict[int, list[Buchung]], funde: list[MailF
   <p class="muted">Mails, die nur einen Link zur Rechnung enthalten. Kein Login-Automatismus – Link öffnen, PDF laden, importieren.</p>
   <div class="scroll"><table class="tabelle kompakt"><thead><tr><th>Datum</th><th>Absender</th><th>Betreff</th><th>Link</th><th></th></tr></thead><tbody>{mail or '<tr><td colspan=5 class="muted">Keine offenen Mail-Funde.</td></tr>'}</tbody></table></div>
 
-  <h3>Beleg ohne Kontobewegung <span class="badge">{len(op["ohne_konto"])}</span></h3>
+  <h3>Beleg ohne Kontobewegung <span class="badge {"mid" if op["ohne_konto"] else "ok"}">{len(op["ohne_konto"])}</span></h3>
   <p class="muted">Bar bezahlt, privat verauslagt oder Kontoauszug fehlt noch.</p>
   <div class="scroll"><table class="tabelle kompakt"><thead><tr><th>Datum</th><th>Brutto</th><th>Lieferant</th><th>Kategorie</th><th></th></tr></thead><tbody>{ohne_konto or '<tr><td colspan=5 class="muted">Alle Buchungen haben eine Kontobewegung.</td></tr>'}</tbody></table></div>
 
@@ -382,7 +382,13 @@ def jahresabschluss_view(jahr: int, fragen: list[dict], status: dict[str, dict],
 
 def export_view(jahr: int, eur: list[dict], ustva_liste: list[dict], jahre: list[int]) -> str:
     jahr_opts = "".join(f'<option value="{j}" {"selected" if j == jahr else ""}>{j}</option>' for j in jahre)
-    eur_html = "".join(f'<tr class="{"fett" if z["zeile"] is None else ""}"><td>{z["zeile"] or ""}</td><td>{h(z["bezeichnung"])}</td><td class="num">{eur_fmt(z["betrag"])}</td></tr>' for z in eur)
+    def _cls(z):
+        if z["bezeichnung"].startswith("Gewinn"):
+            return "plus" if z["betrag"] >= 0 else "minus"
+        if z["bezeichnung"].startswith("Summe Betriebseinnahmen") or z["zeile"] in (11, 14):
+            return "plus"
+        return "minus" if z["zeile"] or z["bezeichnung"].startswith("Summe") else ""
+    eur_html = "".join(f'<tr class="{"fett" if z["zeile"] is None else ""}"><td>{z["zeile"] or ""}</td><td>{h(z["bezeichnung"])}</td><td class="num {_cls(z)}">{eur_fmt(z["betrag"])}</td></tr>' for z in eur)
     ustva_html = ""
     for u in ustva_liste:
         if not u["positionen"]:
@@ -465,3 +471,168 @@ def einstellungen_view(ollama_status: dict, mail: dict, hat_pw: bool, regeln: li
 
 def meldung_box(text: str, cls: str = "ok-box") -> str:
     return f'<p class="{cls}">{h(text)}</p>'
+
+
+# ------------------------------------------------------------ Auswertung
+
+def auswertung_view(jahr: int, jahre: list[int]) -> str:
+    jahr_opts = "".join(f'<option value="{j}" {"selected" if j == jahr else ""}>{j}</option>' for j in jahre)
+    formen = (("saeulen", "Quartale"), ("monate", "Monate"), ("linie", "Gewinnverlauf"), ("balken", "Kategorien"),
+              ("donut", "Anteile"), ("tabelle", "Tabelle"))
+    knoepfe = "".join(f'<button type="button" data-form="{f}" class="{"aktiv" if f == "saeulen" else ""}">{n}</button>' for f, n in formen)
+    return f"""
+<section id="auswertung" data-jahr="{jahr}">
+  <div class="row zwischen">
+    <h2>Auswertung <select hx-get="/ui/auswertung" hx-target="#main" name="jahr" hx-trigger="change">{jahr_opts}</select></h2>
+    <div class="tabs" id="chart-formen">{knoepfe}</div>
+  </div>
+  <p class="muted" id="chart-erkl">Einnahmen und abzugsfähige Ausgaben je Quartal. Nur bestätigte Buchungen; Grün = Plus, Gelb = neutral, Rot = Minus.</p>
+  <div class="karte chart-karte">
+    <div class="legende" id="chart-legende"></div>
+    <div class="chart-wrap" id="chart-wrap"><svg id="chart" viewBox="0 0 960 380" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Diagramm"></svg><div class="tooltip" id="chart-tip" hidden></div></div>
+    <div id="chart-tabelle" hidden></div>
+  </div>
+</section>
+<script>
+(function(){{
+  const wurzel = document.getElementById('auswertung'); if (!wurzel) return;
+  const jahr = wurzel.dataset.jahr, svg = document.getElementById('chart'), tip = document.getElementById('chart-tip');
+  const legende = document.getElementById('chart-legende'), tabelle = document.getElementById('chart-tabelle'), wrap = document.getElementById('chart-wrap');
+  const erkl = document.getElementById('chart-erkl');
+  const NS = 'http://www.w3.org/2000/svg';
+  const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+  const dunkel = () => document.documentElement.dataset.theme !== 'light';
+  const KAT = () => dunkel() ? ['#3987e5','#d95926','#199e70','#c98500','#d55181','#008300','#9085e9'] : ['#2a78d6','#eb6834','#1baf7a','#eda100','#e87ba4','#008300','#4a3aa7'];
+  const MON = ['Jan','Feb','Mär','Apr','Mai','Jun','Jul','Aug','Sep','Okt','Nov','Dez'];
+  const eur = x => x.toLocaleString('de-DE', {{minimumFractionDigits: 2, maximumFractionDigits: 2}}) + ' €';
+  const kurz = x => Math.abs(x) >= 1000 ? (x/1000).toLocaleString('de-DE', {{maximumFractionDigits: 1}}) + ' k' : x.toLocaleString('de-DE', {{maximumFractionDigits: 0}});
+  function el(tag, attrs, text){{ const e = document.createElementNS(NS, tag); for (const k in attrs) e.setAttribute(k, attrs[k]); if (text != null) e.textContent = text; return e; }}
+  function leer(){{ while (svg.firstChild) svg.removeChild(svg.firstChild); legende.innerHTML = ''; }}
+  function ticks(max){{ if (max <= 0) return [0, 1]; const roh = max / 4, p = Math.pow(10, Math.floor(Math.log10(roh))); const s = [1,2,2.5,5,10].map(m => m*p).find(m => m >= roh); const out=[]; for (let v=0; v <= max + s*0.999; v += s) out.push(Math.round(v*100)/100); return out; }}
+  function zeigeTip(ev, html){{ tip.innerHTML = html; tip.hidden = false; const r = wrap.getBoundingClientRect(); let x = ev.clientX - r.left + 14, y = ev.clientY - r.top - 10; if (x + 220 > r.width) x -= 240; tip.style.left = x + 'px'; tip.style.top = y + 'px'; }}
+  function hideTip(){{ tip.hidden = true; }}
+  function legendeSetzen(eintraege){{ legende.innerHTML = eintraege.map(e => `<span><i style="background:${{e.farbe}}"></i>${{e.name}}${{e.wert != null ? ' <b>' + e.wert + '</b>' : ''}}</span>`).join(''); }}
+  function saeule(x, y0, y1, breite, farbe, r){{ const h = Math.max(0, y0 - y1); if (h < 0.5) return el('rect', {{x, y: y0 - 1, width: breite, height: 1, fill: farbe, opacity: .35}}); const rr = Math.min(r, h, breite/2); return el('path', {{d: `M${{x}} ${{y0}} V${{y1+rr}} a${{rr}} ${{rr}} 0 0 1 ${{rr}} -${{rr}} H${{x+breite-rr}} a${{rr}} ${{rr}} 0 0 1 ${{rr}} ${{rr}} V${{y0}} Z`, fill: farbe}}); }}
+  function balkenH(x0, x1, y, hoehe, farbe, r){{ const w = Math.max(0, x1 - x0); if (w < 0.5) return el('rect', {{x: x0, y, width: 1, height: hoehe, fill: farbe, opacity: .35}}); const rr = Math.min(r, w, hoehe/2); return el('path', {{d: `M${{x0}} ${{y}} H${{x1-rr}} a${{rr}} ${{rr}} 0 0 1 ${{rr}} ${{rr}} V${{y+hoehe-rr}} a${{rr}} ${{rr}} 0 0 1 -${{rr}} ${{rr}} H${{x0}} Z`, fill: farbe}}); }}
+  function achsen(L, R, T, B, tk, max){{
+    tk.forEach(v => {{ const y = B - (B - T) * v / max; svg.appendChild(el('line', {{x1: L, x2: R, y1: y, y2: y, class: 'grid'}})); svg.appendChild(el('text', {{x: L - 8, y: y + 4, class: 'tick', 'text-anchor': 'end'}}, kurz(v))); }});
+  }}
+
+  function gruppen(d, labels, reihen, hinweis){{
+    // reihen: [{{name, farbe, werte[]}}] – Säulen je Gruppe, 2px Luft, ≤24px dick
+    const L = 70, R = 940, T = 20, B = 330, n = labels.length;
+    const max = Math.max(1, ...reihen.flatMap(r => r.werte)); const tk = ticks(max); const mx = tk[tk.length - 1];
+    achsen(L, R, T, B, tk, mx);
+    svg.appendChild(el('line', {{x1: L, x2: R, y1: B, y2: B, class: 'achse'}}));
+    const band = (R - L) / n, dick = Math.min(24, (band * 0.6 - 2 * (reihen.length - 1)) / reihen.length);
+    labels.forEach((lab, i) => {{
+      const cx = L + band * (i + 0.5); svg.appendChild(el('text', {{x: cx, y: B + 20, class: 'tick', 'text-anchor': 'middle'}}, lab));
+      const gesamt = dick * reihen.length + 2 * (reihen.length - 1);
+      reihen.forEach((r, j) => {{
+        const x = cx - gesamt / 2 + j * (dick + 2), y1 = B - (B - T) * r.werte[i] / mx;
+        const s = saeule(x, B, y1, dick, r.farbe, 4); svg.appendChild(s);
+        const hit = el('rect', {{x: x - 3, y: T, width: dick + 6, height: B - T, fill: 'transparent'}});
+        hit.addEventListener('mousemove', ev => zeigeTip(ev, `<b>${{lab}}</b><br>${{reihen.map(q => `<i style="background:${{q.farbe}}"></i>${{q.name}}: ${{eur(q.werte[i])}}`).join('<br>')}}`));
+        hit.addEventListener('mouseleave', hideTip); svg.appendChild(hit);
+      }});
+    }});
+    legendeSetzen(reihen.map(r => ({{name: r.name, farbe: r.farbe, wert: eur(r.werte.reduce((a, b) => a + b, 0))}})));
+    erkl.textContent = hinweis;
+  }}
+
+  function linie(d){{
+    const L = 70, R = 900, T = 30, B = 330, m = d.monate, w = m.map(z => z.gewinn_kumuliert);
+    const lo = Math.min(0, ...w), hi = Math.max(0, ...w);
+    const basis = ticks(Math.max(hi, -lo, 1)), schritt = basis[1] - basis[0];   // ein Schritt für beide Seiten
+    const mnLo = Math.floor(lo / schritt) * schritt, mxHi = Math.ceil(hi / schritt) * schritt || schritt;
+    const tk = []; for (let v = mnLo; v <= mxHi + schritt * 0.001; v += schritt) tk.push(Math.round(v * 100) / 100);
+    const y = v => B - (B - T) * (v - mnLo) / (mxHi - mnLo || 1);
+    tk.forEach(v => {{ svg.appendChild(el('line', {{x1: L, x2: R, y1: y(v), y2: y(v), class: v === 0 ? 'achse' : 'grid'}})); svg.appendChild(el('text', {{x: L - 8, y: y(v) + 4, class: 'tick', 'text-anchor': 'end'}}, kurz(v))); }});
+    const x = i => L + (R - L) * i / 11; const farbe = css('--orange');
+    const pfad = w.map((v, i) => (i ? 'L' : 'M') + x(i) + ' ' + y(v)).join(' ');
+    svg.appendChild(el('path', {{d: pfad + ` L${{x(11)}} ${{y(0)}} L${{x(0)}} ${{y(0)}} Z`, fill: farbe, opacity: .1}}));
+    svg.appendChild(el('path', {{d: pfad, fill: 'none', stroke: farbe, 'stroke-width': 2, 'stroke-linejoin': 'round', 'stroke-linecap': 'round'}}));
+    m.forEach((z, i) => {{
+      svg.appendChild(el('text', {{x: x(i), y: B + 20, class: 'tick', 'text-anchor': 'middle'}}, MON[i]));
+      const c = el('circle', {{cx: x(i), cy: y(w[i]), r: 4.5, fill: farbe, stroke: css('--card'), 'stroke-width': 2}}); svg.appendChild(c);
+      const hit = el('rect', {{x: x(i) - (R - L) / 22, y: T, width: (R - L) / 11, height: B - T, fill: 'transparent'}});
+      hit.addEventListener('mousemove', ev => zeigeTip(ev, `<b>${{MON[i]}} ${{jahr}}</b><br>Einnahmen: ${{eur(z.einnahmen)}}<br>Ausgaben: ${{eur(z.ausgaben)}}<br>Gewinn kumuliert: ${{eur(z.gewinn_kumuliert)}}`));
+      hit.addEventListener('mouseleave', hideTip); svg.appendChild(hit);
+    }});
+    const ende = w[11]; const t = el('text', {{x: x(11) + 10, y: y(ende) + 4, class: 'wert'}}, eur(ende)); svg.appendChild(t);
+    legendeSetzen([{{name: 'Gewinn kumuliert', farbe, wert: eur(ende)}}]);
+    erkl.textContent = 'Kumulierter Gewinn über das Jahr (Einnahmen minus abzugsfähige Ausgaben, AfA gleichmäßig verteilt). Nulllinie hervorgehoben.';
+  }}
+
+  function balken(d){{
+    const kats = d.kategorien.filter(k => k.richtung === 'ausgabe' && k.abzugsfaehig > 0).sort((a, b) => b.abzugsfaehig - a.abzugsfaehig).slice(0, 12);
+    if (!kats.length) return leerHinweis();
+    const L = 240, R = 880, T = 24, schritt = Math.min(56, (330 - T) / kats.length), hoehe = Math.min(24, schritt - 8);
+    const max = Math.max(...kats.map(k => k.abzugsfaehig)); const farbe = css('--rot');
+    kats.forEach((k, i) => {{
+      const y = T + schritt * i + (schritt - hoehe) / 2, x1 = L + (R - L) * k.abzugsfaehig / max;
+      svg.appendChild(el('text', {{x: L - 10, y: y + hoehe / 2 + 4, class: 'tick', 'text-anchor': 'end'}}, k.name.length > 30 ? k.name.slice(0, 29) + '…' : k.name));
+      const b = balkenH(L, x1, y, hoehe, farbe, 4); svg.appendChild(b);
+      svg.appendChild(el('text', {{x: x1 + 8, y: y + hoehe / 2 + 4, class: 'wert'}}, eur(k.abzugsfaehig)));
+      const hit = el('rect', {{x: 0, y: y - 3, width: 960, height: hoehe + 6, fill: 'transparent'}});
+      hit.addEventListener('mousemove', ev => zeigeTip(ev, `<b>${{k.name}}</b><br>abzugsfähig: ${{eur(k.abzugsfaehig)}}<br>brutto: ${{eur(k.brutto)}}<br>USt enthalten: ${{eur(k.ust)}}<br>${{k.anzahl}} Buchungen`));
+      hit.addEventListener('mouseleave', hideTip); svg.appendChild(hit);
+    }});
+    legendeSetzen([]);
+    erkl.textContent = 'Abzugsfähige Ausgaben je Kategorie, absteigend. Rot, weil Ausgaben das Minus sind.';
+  }}
+
+  function donut(d){{
+    let kats = d.kategorien.filter(k => k.richtung === 'ausgabe' && k.abzugsfaehig > 0).sort((a, b) => b.abzugsfaehig - a.abzugsfaehig);
+    if (!kats.length) return leerHinweis();
+    if (kats.length > 6) {{ const rest = kats.slice(5).reduce((a, k) => a + k.abzugsfaehig, 0); kats = kats.slice(0, 5).concat([{{name: 'Sonstige (zusammengefasst)', abzugsfaehig: rest}}]); }}
+    const gesamt = kats.reduce((a, k) => a + k.abzugsfaehig, 0), cx = 300, cy = 190, r = 140, ri = 92, farben = KAT();
+    let winkel = -Math.PI / 2;
+    kats.forEach((k, i) => {{
+      const a = k.abzugsfaehig / gesamt * 2 * Math.PI, a2 = winkel + a, gross = a > Math.PI ? 1 : 0;
+      const p = (rad, w) => [cx + rad * Math.cos(w), cy + rad * Math.sin(w)];
+      const [x1, y1] = p(r, winkel), [x2, y2] = p(r, a2), [x3, y3] = p(ri, a2), [x4, y4] = p(ri, winkel);
+      const seg = el('path', {{d: `M${{x1}} ${{y1}} A${{r}} ${{r}} 0 ${{gross}} 1 ${{x2}} ${{y2}} L${{x3}} ${{y3}} A${{ri}} ${{ri}} 0 ${{gross}} 0 ${{x4}} ${{y4}} Z`, fill: farben[i], stroke: css('--card'), 'stroke-width': 2}});
+      seg.addEventListener('mousemove', ev => zeigeTip(ev, `<b>${{k.name}}</b><br>${{eur(k.abzugsfaehig)}} · ${{(k.abzugsfaehig / gesamt * 100).toFixed(1)}} %`));
+      seg.addEventListener('mouseleave', hideTip); svg.appendChild(seg);
+      winkel = a2;
+    }});
+    svg.appendChild(el('text', {{x: cx, y: cy - 6, class: 'hero', 'text-anchor': 'middle'}}, eur(gesamt)));
+    svg.appendChild(el('text', {{x: cx, y: cy + 16, class: 'tick', 'text-anchor': 'middle'}}, 'Ausgaben gesamt'));
+    kats.forEach((k, i) => {{
+      const y = 60 + i * 42; svg.appendChild(el('rect', {{x: 520, y: y - 12, width: 14, height: 14, rx: 4, fill: farben[i]}}));
+      svg.appendChild(el('text', {{x: 544, y, class: 'label'}}, k.name));
+      svg.appendChild(el('text', {{x: 544, y: y + 17, class: 'tick'}}, `${{eur(k.abzugsfaehig)}} · ${{(k.abzugsfaehig / gesamt * 100).toFixed(1)}} %`));
+    }});
+    legendeSetzen([]);
+    erkl.textContent = 'Anteile der abzugsfähigen Ausgaben. Mehr als sechs Kategorien werden zu „Sonstige“ zusammengefasst.';
+  }}
+
+  function tabelleZeigen(d){{
+    const q = d.quartale.map(z => `<tr><td>Q${{z.q}}</td><td class="num plus">${{eur(z.einnahmen)}}</td><td class="num minus">${{eur(z.ausgaben)}}</td><td class="num ${{z.gewinn >= 0 ? 'plus' : 'minus'}}">${{eur(z.gewinn)}}</td><td class="num neutral">${{eur(z.ust)}}</td></tr>`).join('');
+    const m = d.monate.map((z, i) => `<tr><td>${{MON[i]}}</td><td class="num plus">${{eur(z.einnahmen)}}</td><td class="num minus">${{eur(z.ausgaben)}}</td><td class="num ${{z.gewinn_kumuliert >= 0 ? 'plus' : 'minus'}}">${{eur(z.gewinn_kumuliert)}}</td><td class="num neutral">${{eur(z.ust)}}</td></tr>`).join('');
+    tabelle.innerHTML = `<div class="karten"><div><h4>Quartale</h4><table class="tabelle kompakt"><thead><tr><th></th><th>Einnahmen</th><th>Ausgaben</th><th>Gewinn</th><th>Entg. Vorsteuer</th></tr></thead><tbody>${{q}}</tbody></table></div>
+      <div><h4>Monate</h4><table class="tabelle kompakt"><thead><tr><th></th><th>Einnahmen</th><th>Ausgaben</th><th>Gewinn kum.</th><th>Entg. Vorsteuer</th></tr></thead><tbody>${{m}}</tbody></table></div></div>`;
+    erkl.textContent = 'Dieselben Zahlen als Tabelle – für Screenreader, Kopieren und Gegenrechnen.';
+  }}
+
+  function leerHinweis(){{ svg.appendChild(el('text', {{x: 480, y: 190, class: 'label', 'text-anchor': 'middle'}}, 'Noch keine bestätigten Buchungen in ' + jahr + '.')); legendeSetzen([]); }}
+
+  let daten = null, form = 'saeulen';
+  function render(){{
+    leer(); hideTip(); const ist = form === 'tabelle'; svg.hidden = ist; tabelle.hidden = !ist; if (!daten) return;
+    const g = css('--gruen'), r = css('--rot'), y = css('--gelb'), d = daten;
+    const ohne = d.jahr_summe.einnahmen === 0 && d.jahr_summe.ausgaben === 0;
+    if (ohne && !ist) return leerHinweis();
+    if (form === 'saeulen') gruppen(d, d.quartale.map(z => 'Q' + z.q), [{{name: 'Einnahmen', farbe: g, werte: d.quartale.map(z => z.einnahmen)}}, {{name: 'Ausgaben (abzugsfähig)', farbe: r, werte: d.quartale.map(z => z.ausgaben)}}, {{name: 'Entgangene Vorsteuer', farbe: y, werte: d.quartale.map(z => z.ust)}}], 'Einnahmen, abzugsfähige Ausgaben und entgangene Vorsteuer je Quartal. Grün = Plus, Rot = Minus, Gelb = neutral.');
+    else if (form === 'monate') gruppen(d, MON, [{{name: 'Einnahmen', farbe: g, werte: d.monate.map(z => z.einnahmen)}}, {{name: 'Ausgaben (abzugsfähig)', farbe: r, werte: d.monate.map(z => z.ausgaben)}}], 'Einnahmen und abzugsfähige Ausgaben je Monat.');
+    else if (form === 'linie') linie(d);
+    else if (form === 'balken') balken(d);
+    else if (form === 'donut') donut(d);
+    else tabelleZeigen(d);
+  }}
+  document.getElementById('chart-formen').addEventListener('click', e => {{ const b = e.target.closest('button'); if (!b) return; form = b.dataset.form; document.querySelectorAll('#chart-formen button').forEach(x => x.classList.toggle('aktiv', x === b)); render(); }});
+  document.getElementById('theme-toggle').addEventListener('click', () => setTimeout(render, 30));
+  fetch('/api/auswertung?jahr=' + jahr).then(r => r.json()).then(d => {{ daten = d; render(); }});
+}})();
+</script>"""

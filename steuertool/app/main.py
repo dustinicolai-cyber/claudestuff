@@ -24,7 +24,7 @@ async def _lebenszyklus(_: FastAPI):
     yield
 
 
-app = FastAPI(title="Steuertool", docs_url=None, redoc_url=None, openapi_url=None, lifespan=_lebenszyklus)
+app = FastAPI(title="Steuerfuchs", docs_url=None, redoc_url=None, openapi_url=None, lifespan=_lebenszyklus)
 STATIC = config.APP_DIR / "static"
 KI_AN = {"wert": True}
 
@@ -330,6 +330,31 @@ def api_anlage(anlage_id: int, nutzungsdauer_jahre: int = Form(...), jahr: int =
         s.add(a)
         s.commit()
     return ui_quartale(jahr, "brutto", s)
+
+
+# ------------------------------------------------------------ Auswertung
+
+@app.get("/ui/auswertung", response_class=HTMLResponse)
+def ui_auswertung(jahr: Optional[int] = None, s: Session = Depends(get_session)) -> HTMLResponse:
+    jahr = jahr or _standardjahr(s)
+    return _html(ui.auswertung_view(jahr, _jahre(s)))
+
+
+@app.get("/api/auswertung")
+def api_auswertung(jahr: int, s: Session = Depends(get_session)) -> JSONResponse:
+    ue = _uebersicht(s, jahr)
+    kategorien = [{"name": r["kategorie"].name, "richtung": r["kategorie"].richtung, "brutto": round(r["jahr"].brutto, 2),
+                   "abzugsfaehig": round(r["jahr"].abzugsfaehig, 2), "ust": round(r["jahr"].ust, 2), "anzahl": r["jahr"].anzahl}
+                  for r in ue["zeilen"]]
+    return JSONResponse({
+        "jahr": jahr,
+        "quartale": [{"q": i + 1, "einnahmen": round(ue["einnahmen"][i].abzugsfaehig, 2), "ausgaben": round(ue["ausgaben"][i].abzugsfaehig, 2),
+                      "gewinn": ue["gewinn"][i], "ust": ue["entgangene_vorsteuer"][i]} for i in range(4)],
+        "jahr_summe": {"einnahmen": round(ue["einnahmen"][4].abzugsfaehig, 2), "ausgaben": round(ue["ausgaben"][4].abzugsfaehig, 2),
+                       "gewinn": ue["gewinn"][4], "ust": ue["entgangene_vorsteuer"][4]},
+        "monate": ue["monate"],
+        "kategorien": kategorien,
+    })
 
 
 # -------------------------------------------------------- Offene Punkte

@@ -23,7 +23,7 @@ fi
 PORT="${PORT:-8347}"
 export STEUERTOOL_HOME="${STEUERTOOL_HOME:-$HOME/Steuertool}"
 echo "→ Daten liegen in $STEUERTOOL_HOME"
-echo "→ Server auf http://127.0.0.1:$PORT  (Beenden mit Ctrl+C)"
+echo "→ Steuerfuchs läuft auf http://127.0.0.1:$PORT  (Beenden mit Ctrl+C)"
 
 ( sleep 1.5; if command -v open >/dev/null; then open "http://127.0.0.1:$PORT"; elif command -v xdg-open >/dev/null; then xdg-open "http://127.0.0.1:$PORT"; fi ) &
 exec python -m uvicorn app.main:app --host 127.0.0.1 --port "$PORT" --log-level warning
