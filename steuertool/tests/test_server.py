@@ -5,7 +5,7 @@ from sqlmodel import Session, select
 
 from app.db import engine
 from app.main import app
-from app.models import Anlagegut, Buchung, Kategorie, Regel
+from app.models import Anlagegut, Beleg, Buchung, Kategorie, Regel
 from tests.fixtures import erzeuge
 
 
@@ -116,3 +116,39 @@ def test_auswertung_daten():
         assert d["monate"][7]["ust"] == 15.97
         assert [k["name"] for k in d["kategorien"] if k["richtung"] == "ausgabe"] == ["Bewirtung"]
         assert d["jahr_summe"]["gewinn"] == 930.0
+
+
+def test_sammel_loeschen_mit_papierkorb(tmp_path):
+    from pathlib import Path
+    from app import config
+    with client() as c:
+        for name in ("a.pdf", "b.pdf"):
+            c.post("/api/import", files={"datei": (name, erzeuge.text_pdf(erzeuge.ADOBE_TEXT.replace("INV1234567890", name)), "application/pdf")}, data={"ki": "0"})
+        with Session(engine()) as s:
+            ids = [b.id for b in s.exec(select(Buchung)).all()]
+            pfade = [Path(x.dateipfad) for x in s.exec(select(Beleg)).all()]
+        assert len(ids) == 2 and all(p.exists() for p in pfade)
+        r = c.post("/api/buchungen/loeschen", data={"ids": [str(i) for i in ids]})
+        assert "2 Buchungen gelöscht" in r.text
+        with Session(engine()) as s:
+            assert s.exec(select(Buchung)).all() == [] and s.exec(select(Beleg)).all() == []
+        assert all(not p.exists() for p in pfade)
+        assert len(list((config.beleg_dir() / "Papierkorb").iterdir())) == 2
+        # erneuter Import ist kein Duplikat mehr
+        r = c.post("/api/import", files={"datei": ("a.pdf", erzeuge.text_pdf(erzeuge.ADOBE_TEXT.replace("INV1234567890", "a.pdf")), "application/pdf")}, data={"ki": "0"})
+        assert ">neu<" in r.text
+
+
+def test_neu_erkennen_aktualisiert_vorschlag():
+    with client() as c:
+        c.post("/api/import", files={"datei": ("buero.pdf", erzeuge.text_pdf(erzeuge.BUERO_TEXT), "application/pdf")}, data={"ki": "0"})
+        with Session(engine()) as s:
+            b = s.exec(select(Buchung)).first()
+            b.betrag_brutto = 999999.0; b.lieferant = "kaputt"; s.add(b); s.commit(); bid = b.id
+        r = c.post(f"/api/buchung/{bid}/neu-erkennen")
+        assert r.status_code == 200
+        with Session(engine()) as s:
+            b = s.get(Buchung, bid)
+            assert b.betrag_brutto == 99.78 and "Meier" in b.lieferant
+        r = c.post("/api/buchungen/neu-erkennen", data={"ids": [str(bid)]})
+        assert "1 von 1" in r.text

@@ -75,3 +75,23 @@ def test_ubl_xrechnung():
     </Invoice>"""
     f = zugferd.parse_xml(ubl)
     assert f["format"] == "ubl" and f["lieferant"] == "Figma Inc." and f["reverse_charge_hinweis"] and f["betrag_brutto"] == 15.0
+
+
+def test_steuernummer_ist_kein_betrag(cfg):
+    text = """Adobe Systems Software Ireland Ltd
+Kunde: Designstudio Test
+Steuernummer: 114.103.475,00
+Kundennummer 114103475
+VAT ID: IE6364992H
+Invoice Number: IE1234567
+Invoice Date: 28-FEB-2025
+Creative Cloud All Apps        EUR 71.38
+Total (EUR)                    71.38
+"""
+    # Die „Steuernummer“-Zeile trägt zwar Nachkommastellen, aber „Total“ ist ein Schlüsselwort und gewinnt
+    f = extrahiere_felder(text, cfg)
+    assert f["betrag_brutto"] == 71.38
+    text2 = "Steuernummer 114.103.475\nTelefon 030 123 456 78\nSumme 59,49 €\n"
+    assert extrahiere_felder(text2, cfg)["betrag_brutto"] == 59.49
+    text3 = "Rechnungsnummer 114.103.475\nirgendwas ohne Betrag\n"
+    assert extrahiere_felder(text3, cfg)["betrag_brutto"] is None

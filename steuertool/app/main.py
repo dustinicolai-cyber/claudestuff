@@ -293,18 +293,120 @@ async def api_buchung_neu(request: Request, s: Session = Depends(get_session)) -
                  ui.manuell_view(Buchung(datum=b.datum, ust_satz=b.ust_satz, richtung=b.richtung), _kat_liste(s), config.regeln()))
 
 
+def _buchung_loeschen(s: Session, b: Buchung) -> None:
+    """Buchung samt Beleg-Eintrag entfernen. Die Datei wandert in Belege/Papierkorb,
+    damit nichts verloren geht und ein erneuter Import nicht als Duplikat abgewiesen wird."""
+    for k in s.exec(select(Kontobewegung).where(Kontobewegung.buchung_id == b.id)).all():
+        k.buchung_id = None
+        s.add(k)
+    for a in s.exec(select(Anlagegut).where(Anlagegut.buchung_id == b.id)).all():
+        s.delete(a)
+    if b.beleg_id:
+        beleg = s.get(Beleg, b.beleg_id)
+        andere = s.exec(select(Buchung).where(Buchung.beleg_id == b.beleg_id, Buchung.id != b.id)).first()
+        if beleg and not andere:
+            quelle = Path(beleg.dateipfad)
+            if quelle.exists():
+                papierkorb = config.beleg_dir() / "Papierkorb"
+                papierkorb.mkdir(parents=True, exist_ok=True)
+                ziel = papierkorb / quelle.name
+                n = 1
+                while ziel.exists():
+                    ziel = papierkorb / f"{quelle.stem}_{n}{quelle.suffix}"
+                    n += 1
+                try:
+                    quelle.rename(ziel)
+                except OSError:
+                    pass
+            s.delete(beleg)
+    s.delete(b)
+
+
 @app.post("/api/buchung/{buchung_id}/loeschen", response_class=HTMLResponse)
 def api_buchung_loeschen(buchung_id: int, s: Session = Depends(get_session)) -> HTMLResponse:
     b = s.get(Buchung, buchung_id)
     if b:
-        for k in s.exec(select(Kontobewegung).where(Kontobewegung.buchung_id == b.id)).all():
-            k.buchung_id = None
-            s.add(k)
-        for a in s.exec(select(Anlagegut).where(Anlagegut.buchung_id == b.id)).all():
-            s.delete(a)
-        s.delete(b)
+        _buchung_loeschen(s, b)
         s.commit()
     return ui_pruefen(None, s)
+
+
+def _neu_erkennen(s: Session, b: Buchung) -> bool:
+    """Extraktion auf der gespeicherten Belegdatei wiederholen, Vorschlag aktualisieren."""
+    if b.status != "vorschlag" or not b.beleg_id:
+        return False
+    beleg = s.get(Beleg, b.beleg_id)
+    if not beleg or not Path(beleg.dateipfad).exists():
+        return False
+    cfg = config.regeln()
+    daten = Path(beleg.dateipfad).read_bytes()
+    stufe, felder, text = pipeline.extrahiere(daten, beleg.original_name or Path(beleg.dateipfad).name, cfg, KI_AN["wert"])
+    if stufe == "keine":
+        return False
+    netto, satz, ust, brutto = steuerlogik.betraege_vervollstaendigen(
+        felder.get("betrag_netto"), felder.get("ust_satz"), felder.get("ust_betrag"), felder.get("betrag_brutto"))
+    lieferant = (felder.get("lieferant") or b.lieferant or "").strip()
+    rc, gruende = steuerlogik.erkenne_reverse_charge(text or felder.get("volltext", ""), felder.get("ust_idnr", ""), lieferant, ust, cfg)
+    if felder.get("reverse_charge_hinweis") and ust == 0:
+        rc = True
+    if rc and satz == 0 and netto == 0 and brutto:
+        netto = brutto
+    b.datum = felder.get("datum") or b.datum
+    b.betrag_netto, b.ust_satz, b.ust_betrag, b.betrag_brutto = netto, satz, ust, brutto
+    b.lieferant, b.rechnungsnummer = lieferant, felder.get("rechnungsnummer") or b.rechnungsnummer
+    b.ust_idnr = felder.get("ust_idnr") or b.ust_idnr
+    b.reverse_charge = rc
+    b.extraktion_stufe = stufe
+    b.konfidenz = round(min(felder.get("konfidenz", 0.0), 1.0) * 0.7 + (0.95 if b.klassifizierung_weg.startswith("regel") else 0.3) * 0.3, 2)
+    b.extraktion_json = json.dumps({k: v for k, v in felder.items() if k != "volltext"}, default=str, ensure_ascii=False)
+    b.hinweise_json = json.dumps(gruende + (["Kein Betrag erkannt."] if not brutto else []), ensure_ascii=False)
+    beleg.quelle = stufe
+    s.add(beleg)
+    s.add(b)
+    return True
+
+
+@app.post("/api/buchung/{buchung_id}/neu-erkennen", response_class=HTMLResponse)
+def api_neu_erkennen(buchung_id: int, s: Session = Depends(get_session)) -> HTMLResponse:
+    b = s.get(Buchung, buchung_id)
+    if not b:
+        raise HTTPException(404)
+    ok = _neu_erkennen(s, b)
+    s.commit()
+    s.refresh(b)
+    antwort = _pruefen_detail(s, b)
+    if not ok:
+        return _html(ui.meldung_box("Neu erkennen nicht möglich (bereits bestätigt, Datei fehlt oder keine Stufe greift).", "warn-box") + antwort.body.decode())
+    return antwort
+
+
+@app.post("/api/buchungen/neu-erkennen", response_class=HTMLResponse)
+async def api_buchungen_neu_erkennen(request: Request, s: Session = Depends(get_session)) -> HTMLResponse:
+    form = await request.form()
+    ids = [int(x) for x in form.getlist("ids") if str(x).isdigit()]
+    n = 0
+    for bid in ids:
+        b = s.get(Buchung, bid)
+        if b and _neu_erkennen(s, b):
+            n += 1
+    s.commit()
+    return _html(ui.meldung_box(f"{n} von {len(ids)} Vorschlägen neu erkannt.") + ui_pruefen(None, s).body.decode())
+
+
+@app.post("/api/buchungen/loeschen", response_class=HTMLResponse)
+async def api_buchungen_loeschen(request: Request, s: Session = Depends(get_session)) -> HTMLResponse:
+    """Sammel-Löschen aus der Prüfliste (Checkboxen)."""
+    form = await request.form()
+    ids = [int(x) for x in form.getlist("ids") if str(x).isdigit()]
+    n = 0
+    for bid in ids:
+        b = s.get(Buchung, bid)
+        if b:
+            _buchung_loeschen(s, b)
+            n += 1
+    s.commit()
+    antwort = ui_pruefen(None, s)
+    return _html(ui.meldung_box(f"{n} Buchungen gelöscht. Belegdateien liegen in Belege/Papierkorb.") + antwort.body.decode())
 
 
 # ------------------------------------------------------------ Quartale

@@ -110,7 +110,9 @@ a{color:var(--orange)}
 @media (max-width:1200px){.pruefen{grid-template-columns:1fr}.vorschau{min-height:50vh}}
 .pruefen aside{position:sticky;top:1rem;max-height:calc(100vh - 2rem);overflow:auto}
 .liste{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:.35rem}
-.liste li a{display:block;padding:.55rem .7rem;border-radius:12px;color:var(--fg);text-decoration:none;font-size:.86em;border:1px solid var(--line);background:var(--card)}
+.liste li{display:flex;align-items:center;gap:.45rem} .liste li input[type=checkbox]{flex:none;width:16px;height:16px;margin:0}
+.liste li a{display:block;flex:1;min-width:0;padding:.55rem .7rem;border-radius:12px;color:var(--fg);text-decoration:none;font-size:.86em;border:1px solid var(--line);background:var(--card)}
+.listen-leiste{margin:.2rem 0 .5rem;padding:0 .1rem}
 .liste li a:hover{border-color:var(--orange)} .liste li.aktiv a{border-color:var(--orange);background:var(--orange-hell)}
 .vorschau{width:100%;height:78vh;border:1px solid var(--line);border-radius:16px;background:var(--vorschau-bg);object-fit:contain}
 pre.vorschau{overflow:auto;padding:.8rem;font-size:.8em;background:var(--card);color:var(--fg)}

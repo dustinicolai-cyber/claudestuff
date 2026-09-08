@@ -113,9 +113,10 @@ def pruefen_leer() -> str:
 def pruefen_view(b: Buchung, beleg: Beleg | None, kategorien: list[Kategorie], offene: list[Buchung],
                  bw: Bewertung | None, extraktion: dict, cfg: dict) -> str:
     liste = "".join(
-        f'<li class="{"aktiv" if x.id == b.id else ""}"><a href="#" hx-get="/ui/pruefen/{x.id}" hx-target="#main">'
+        f'<li class="{"aktiv" if x.id == b.id else ""}"><input type="checkbox" name="ids" value="{x.id}" aria-label="auswählen">'
+        f'<a href="#" hx-get="/ui/pruefen/{x.id}" hx-target="#main">'
         f'{konf_badge(x.konfidenz)} {h(d(x.datum))} · {h(x.lieferant or "?")} · {eur_fmt(x.betrag_brutto)}</a></li>'
-        for x in offene[:60])
+        for x in offene[:200])
     vorschau = ""
     if beleg:
         if beleg.mime == "application/pdf" or beleg.dateipfad.lower().endswith(".pdf"):
@@ -131,7 +132,27 @@ def pruefen_view(b: Buchung, beleg: Beleg | None, kategorien: list[Kategorie], o
   <aside>
     <h2>Prüfen <span class="muted">({len(offene)})</span></h2>
     <p class="muted">Niedrigste Konfidenz zuerst. <kbd>⏎</kbd> bestätigen &amp; weiter · <kbd>Esc</kbd> überspringen</p>
-    <ul class="liste">{liste}</ul>
+    <form id="pruef-liste" hx-post="/api/buchungen/loeschen" hx-target="#main" hx-confirm="Ausgewählte Buchungen löschen? Die Belegdateien wandern in Belege/Papierkorb.">
+      <div class="row zwischen listen-leiste">
+        <label class="check klein"><input type="checkbox" id="alle-waehlen"> alle</label>
+        <span><button type="button" class="klein sekundaer auswahl-aktion" disabled hx-post="/api/buchungen/neu-erkennen" hx-include="#pruef-liste" hx-target="#main" title="Extraktion mit den aktuellen Regeln wiederholen">Neu erkennen</button>
+        <button type="submit" class="klein gefahr auswahl-aktion" id="auswahl-loeschen" disabled>Löschen (0)</button></span>
+      </div>
+      <ul class="liste">{liste}</ul>
+    </form>
+    <script>
+    (function(){{
+      const f = document.getElementById('pruef-liste'), alle = document.getElementById('alle-waehlen'), knopf = document.getElementById('auswahl-loeschen');
+      const boxen = () => [...f.querySelectorAll('input[name=ids]')];
+      function zaehlen(){{ const n = boxen().filter(b => b.checked).length; f.querySelectorAll('.auswahl-aktion').forEach(k => k.disabled = !n); knopf.textContent = 'Löschen (' + n + ')'; }}
+      alle.addEventListener('change', () => {{ boxen().forEach(b => b.checked = alle.checked); zaehlen(); }});
+      f.addEventListener('change', e => {{ if (e.target.name === 'ids') zaehlen(); }});
+      // Shift-Klick: Bereich markieren
+      let letzte = null;
+      f.addEventListener('click', e => {{ if (e.target.name !== 'ids') return; const b = boxen(); const i = b.indexOf(e.target);
+        if (e.shiftKey && letzte !== null) {{ const [a, z] = [Math.min(i, letzte), Math.max(i, letzte)]; for (let k = a; k <= z; k++) b[k].checked = e.target.checked; zaehlen(); }} letzte = i; }});
+    }})();
+    </script>
   </aside>
   <div class="vorschau-spalte">
     {vorschau}
@@ -152,7 +173,8 @@ def buchung_formular(b: Buchung, kategorien: list[Kategorie], cfg: dict, action:
                    f'{h(k.name)}{f" (Zeile {k.eur_zeile})" if k.eur_zeile else ""}</option>' for k in kategorien)
     knopf = "Bestätigen &amp; weiter ⏎" if naechste else "Speichern"
     skip = f'<button type="button" class="sekundaer" hx-get="/ui/pruefen?ueberspringen={b.id}" hx-target="#main">Überspringen (Esc)</button>' if naechste and b.id else ""
-    loeschen = f'<button type="button" class="gefahr" hx-post="/api/buchung/{b.id}/loeschen" hx-confirm="Buchung wirklich löschen? Der Beleg bleibt im Belegordner." hx-target="#main">Löschen</button>' if b.id else ""
+    loeschen = f'<button type="button" class="gefahr" hx-post="/api/buchung/{b.id}/loeschen" hx-confirm="Buchung wirklich löschen? Die Belegdatei wandert nach Belege/Papierkorb." hx-target="#main">Löschen</button>' if b.id else ""
+    neu_erkennen = f'<button type="button" class="sekundaer" hx-post="/api/buchung/{b.id}/neu-erkennen" hx-target="#main" title="Felder aus der Belegdatei neu ziehen">Neu erkennen</button>' if b.id and b.beleg_id and b.status == "vorschlag" else ""
     return f"""
 <form id="buchung-form" hx-post="{action}" hx-target="#main" class="formular" autocomplete="off">
   <h3>{h(titel or "Buchung")} {konf_badge(b.konfidenz) if b.id else ""} {'<span class="badge rc">§13b</span>' if b.reverse_charge else ''}</h3>
@@ -185,7 +207,7 @@ def buchung_formular(b: Buchung, kategorien: list[Kategorie], cfg: dict, action:
     <label>Nutzungsdauer (Jahre) <input type="number" step="1" name="meta_nutzungsdauer_jahre" value="{h(str(m.get("nutzungsdauer_jahre", cfg["afa_nutzungsdauer_standard_jahre"])))}"></label>
     <span class="muted">GWG-Grenze {cfg["gwg_grenze_netto"]:.0f} € netto – darüber automatisch AfA</span></fieldset>
   {hinweise_html(b, bw)}
-  <div class="row aktionen"><button type="submit">{knopf}</button> {skip} {loeschen}</div>
+  <div class="row aktionen"><button type="submit">{knopf}</button> {skip} {neu_erkennen} {loeschen}</div>
 </form>
 <script>
 (function(){{

@@ -20,8 +20,12 @@ RE_DATUM_WORT = re.compile(r"\b(\d{1,2})\.?\s+([A-Za-zäöüÄÖÜ]{3,9})\.?\s+(
 RE_DATUM_WORT_EN = re.compile(r"\b([A-Za-z]{3,9})\.?\s+(\d{1,2}),?\s+(\d{4})\b")
 DATUM_KEYWORDS = re.compile(r"rechnungsdatum|belegdatum|invoice date|date of issue|datum|date|ausgestellt|issued", re.I)
 
-# Betrag: 1.234,56 | 1234,56 | 1,234.56 | 1234.56 | 12,- ; optional Währung
-RE_BETRAG = re.compile(r"(?<![\d,.])(-?\d{1,3}(?:[.\s]\d{3})+(?:[,.]\d{2})?|-?\d+[,.]\d{2}|-?\d+,-)(?!\d)")
+# Betrag: 1.234,56 | 1234,56 | 1,234.56 | 1234.56 | 12,- – immer mit Nachkommastellen oder „,-“.
+# Bewusst KEINE Ganzzahlen mit Tausenderpunkten (114.103.475): das sind Steuer-, Kunden-
+# oder Telefonnummern, keine Beträge. Ganzzahlen zählen nur direkt neben € / EUR.
+RE_BETRAG = re.compile(r"(?<![\d,./-])(-?\d{1,3}(?:[.,]\d{3})+[.,]\d{2}|-?\d+[,.]\d{2}|-?\d+,-|"
+                       r"(?<=€\s)\d{1,6}(?![\d,.])|(?<=EUR\s)\d{1,6}(?![\d,.])|\d{1,6}(?=\s?(?:€|EUR\b)))(?![\d])")
+BETRAG_MAX_PLAUSIBEL = 1_000_000.0
 RE_WAEHRUNG = re.compile(r"€|EUR\b|Euro\b", re.I)
 
 BRUTTO_KEYS = re.compile(r"gesamtbetrag|rechnungsbetrag|zu zahlen|zahlbetrag|endbetrag|bruttobetrag|summe brutto|"
@@ -211,9 +215,11 @@ def extrahiere_felder(text: str, cfg: dict) -> dict:
     satz, ust_betrag = finde_ust(text)
     brutto = finde_betrag_mit_keyword(text, BRUTTO_KEYS)
     netto = finde_betrag_mit_keyword(text, NETTO_KEYS)
-    if brutto is None:
-        alle = [v for z in text.splitlines() for v in betraege_in_zeile(z)]
+    if brutto is None or abs(brutto) > BETRAG_MAX_PLAUSIBEL:
+        alle = [v for z in text.splitlines() for v in betraege_in_zeile(z) if abs(v) <= BETRAG_MAX_PLAUSIBEL]
         brutto = max(alle, key=abs) if alle else None
+    if netto is not None and abs(netto) > BETRAG_MAX_PLAUSIBEL:
+        netto = None
     if brutto is not None and netto is not None and abs(netto) > abs(brutto):
         netto, brutto = brutto, netto
     rc_hinweis = bool(RC_HINWEISE.search(text))
