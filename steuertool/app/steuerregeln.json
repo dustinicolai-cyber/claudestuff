@@ -32,6 +32,12 @@
     "envato", "shutterstock", "spotify", "vimeo", "mailchimp", "typeform", "miro"
   ],
 
+  "bekannte_lieferanten": [
+    "congstar", "telekom", "vodafone", "o2", "1&1", "amazon", "ionos", "strato", "hetzner", "df.eu",
+    "all-inkl", "united-domains", "deutsche post", "dhl", "hermes", "dpd", "bahn", "flixbus",
+    "hallesche", "allianz", "huk", "signal iduna", "exali", "hiscox", "n26", "dkb", "ing", "qonto"
+  ],
+
   "eur_zeilen": {
     "11": "Betriebseinnahmen als umsatzsteuerlicher Kleinunternehmer",
     "14": "Umsatzsteuerpflichtige Betriebseinnahmen",

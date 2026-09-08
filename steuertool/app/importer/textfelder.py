@@ -29,10 +29,17 @@ RE_BETRAG = re.compile(r"(?<![\d,./-])(-?\d{1,3}(?:[.,]\d{3})+[.,]\d{2}|-?\d+[,.
 BETRAG_MAX_PLAUSIBEL = 1_000_000.0
 RE_WAEHRUNG = re.compile(r"€|EUR\b|Euro\b", re.I)
 
-BRUTTO_KEYS = re.compile(r"gesamtbetrag|rechnungsbetrag|zu zahlen|zahlbetrag|endbetrag|bruttobetrag|summe brutto|"
-                         r"gesamtsumme|gesamt\b|total amount|amount due|grand total|total due|\btotal\b|betrag\b|"
-                         r"amount paid|charged|summe\b", re.I)
-NETTO_KEYS = re.compile(r"nettobetrag|summe netto|netto\b|zwischensumme|subtotal|net amount|net total|sub-total", re.I)
+# Stark = eindeutig die Endsumme; schwach = kann auch Zwischensumme oder Tabellenkopf sein.
+BRUTTO_STARK = re.compile(r"gesamtbetrag|rechnungsbetrag|zu zahlen(?:der betrag)?|zahlbetrag|endbetrag|bruttobetrag|summe brutto|"
+                          r"gesamtsumme|gesamtpreis|total amount|amount due|grand total|total due|amount paid|invoice total|"
+                          r"zahlungsbetrag|forderungsbetrag|einzugsbetrag", re.I)
+BRUTTO_SCHWACH = re.compile(r"\bgesamt\b|\btotal\b|\bbetrag\b|\bsumme\b|charged", re.I)
+BRUTTO_KEYS = re.compile(BRUTTO_STARK.pattern + "|" + BRUTTO_SCHWACH.pattern, re.I)
+NETTO_STARK = re.compile(r"nettobetrag|summe netto|zwischensumme|subtotal|sub-total|net amount|net total|nettosumme", re.I)
+NETTO_SCHWACH = re.compile(r"\bnetto\b|\bnet\b", re.I)
+NETTO_KEYS = re.compile(NETTO_STARK.pattern + "|" + NETTO_SCHWACH.pattern, re.I)
+# Zahlen mit Einheit sind keine Beträge (Datenvolumen, Prozent, Laufzeiten)
+RE_EINHEIT_DANACH = re.compile(r"^\s?(?:GB|MB|KB|TB|kWh|Std\.?|Min\.?|min|km|%|Stk\.?|St\.|Monate?|Tage?|h)\b", re.I)
 UST_KEYS = re.compile(r"umsatzsteuer|mehrwertsteuer|mwst|ust\b|u\.st|vat\b|tax\b|steuer\b", re.I)
 RE_PROZENT = re.compile(r"(\d{1,2}(?:[,.]\d{1,2})?)\s?%")
 
@@ -45,8 +52,12 @@ RE_USTID_KONTEXT = re.compile(r"(?i:ust[-.\s]?id(?:nr)?\.?|umsatzsteuer[-\s]?id(
 RE_RECHNUNGSNR = re.compile(r"(?:rechnungs?[-\s]?(?:nummer|nr\.?|no\.?)|invoice\s*(?:no\.?|number|#|id)|beleg[-\s]?nr\.?|"
                             r"receipt\s*(?:no\.?|number|#)|order\s*(?:no\.?|number|#)|bestell[-\s]?nr\.?)\s*[:#]?\s*([A-Z0-9][A-Z0-9\-/_.]{2,30})", re.I)
 
-FIRMEN_SUFFIX = re.compile(r"\b(GmbH|AG|UG|KG|OHG|GbR|e\.\s?K\.|e\.V\.|Inc\.?|Ltd\.?|LLC|B\.V\.|S\.A\.|S\.L\.|Limited|"
-                           r"Co\.|Corp\.?|SE|SAS|SARL|Oy|AB|ApS|s\.r\.o\.|Sp\. z o\.o\.|PLC|LP|Ireland|International)\b")
+FIRMEN_SUFFIX = re.compile(r"(?:\bGmbH\s*&\s*Co\.\s*KG|\bSE\s*&\s*Co\.\s*KG|S\.?\s?à\s?r\.?\s?l\.?|S\.?\s?a\.?\s?r\.?\s?[lL]\.?|"
+                           r"\b(?:GmbH|AG|UG|KG|OHG|GbR|e\.\s?K\.|e\.V\.|Inc\.?|Ltd\.?|LLC|B\.V\.|S\.A\.|S\.L\.|Limited|"
+                           r"Co\.|Corp\.?|SE|SAS|SARL|Oy|AB|ApS|s\.r\.o\.|Sp\. z o\.o\.|PLC|LP|Ireland|International)\b)")
+VERKAEUFER_PREFIX = re.compile(r"(?:verkauft von|verkäufer|rechnungssteller|leistungserbringer|sold by|seller)\s*:?\s*", re.I)
+KEIN_LIEFERANT = re.compile(r"mandat|kundennummer|kunden-nr|rechnung|invoice|seite\b|page\b|datum|date|vertrag|iban|ust|vat|steuer|"
+                            r"zahlungsreferenz|bestell|order|lieferadresse|rechnungsadresse|telefon|e-mail|www\.|@", re.I)
 
 
 def parse_betrag(s: str) -> float | None:
@@ -135,33 +146,91 @@ def finde_datum(text: str) -> date | None:
 
 
 def betraege_in_zeile(z: str) -> list[float]:
+    """Geldbeträge einer Zeile. Zahlen mit Einheit (GB, %, Std.) fallen raus; steht ein €/EUR in der
+    Zeile, zählen nur Zahlen direkt neben einer Währungsangabe."""
+    hat_waehrung = bool(RE_WAEHRUNG.search(z))
     out = []
     for m in RE_BETRAG.finditer(z):
+        rest = z[m.end():]
+        if RE_EINHEIT_DANACH.match(rest):
+            continue
+        if hat_waehrung:
+            davor = z[max(0, m.start() - 5):m.start()]
+            if not (RE_WAEHRUNG.search(rest[:5]) or RE_WAEHRUNG.search(davor)):
+                continue
         v = parse_betrag(m[1])
         if v is not None:
             out.append(v)
     return out
 
 
-def finde_betrag_mit_keyword(text: str, keys: re.Pattern) -> float | None:
-    """Betrag aus Zeilen mit Schlüsselwort. Gleiche Zeile schlägt Folgezeile; die letzte
-    Treffer-Zeile gewinnt, weil Summen unten stehen (Tabellenköpfe oben tragen keine Zahl)."""
+def finde_betrag_mit_keyword(text: str, keys: re.Pattern, stark: re.Pattern | None = None) -> float | None:
+    """Betrag aus Zeilen mit Schlüsselwort. Starke Schlüsselwörter (Zahlbetrag, Gesamtbetrag …) schlagen
+    schwache (Summe, Gesamt …); innerhalb einer Stufe gewinnt die letzte Zeile, weil Summen unten stehen.
+    Gleiche Zeile schlägt Folgezeile."""
     zeilen = text.splitlines()
-    gleiche: list[float] = []
-    folge: list[float] = []
+    treffer: list[tuple[int, int, float]] = []   # (rang, zeilenindex, betrag)
     for i, z in enumerate(zeilen):
         if not keys.search(z):
             continue
+        rang = 2 if (stark and stark.search(z)) else 1
         b = betraege_in_zeile(z)
         if b:
-            gleiche.append(b[-1])
+            treffer.append((rang * 2, i, b[-1]))
         elif i + 1 < len(zeilen):
             b2 = betraege_in_zeile(zeilen[i + 1])
             if len(b2) == 1:
-                folge.append(b2[0])
-    if gleiche:
-        return gleiche[-1]
-    return folge[-1] if folge else None
+                treffer.append((rang * 2 - 1, i, b2[0]))
+    if not treffer:
+        return None
+    treffer.sort(key=lambda t: (t[0], t[1]))
+    return treffer[-1][2]
+
+
+RE_PROZENT_SPALTE = re.compile(r"(?:steuer|ust\.?|mwst\.?|vat|tax)[-\s]*(?:satz|%|\(%\)|rate)", re.I)
+SPALTEN_KOPF = {
+    "netto": re.compile(r"\bnetto\b|zwischensumme|\bnet\b|ohne ust|excl", re.I),
+    "steuer": re.compile(r"\bsteuer\b|\bust\.?\b|mwst|\bvat\b|\btax\b", re.I),
+    "brutto": re.compile(r"\bbrutto\b|inkl\.? ust|\bgross\b|\btotal\b|gesamt", re.I),
+}
+
+
+def tabelle_zuordnen(text: str) -> dict:
+    """Steuertabellen: Kopfzeile mit Netto/Steuer/Brutto, darunter eine Zahlenzeile.
+    Die Spaltenreihenfolge im Kopf bestimmt, welche Zahl was ist. Letzte passende Tabelle gewinnt."""
+    zeilen = text.splitlines()
+    ergebnis: dict = {}
+    for i, z in enumerate(zeilen[:-1]):
+        # Prozent-Spalten („Steuer %“, „UST-SATZ“, „MwSt (%)“) sind keine Betragsspalten
+        kopf = RE_PROZENT_SPALTE.sub(" ", z)
+        spalten = []
+        for name, muster in SPALTEN_KOPF.items():
+            m = muster.search(kopf)
+            if m:
+                spalten.append((m.start(), name))
+        namen = [n for _, n in sorted(spalten)]
+        if len(namen) < 2 or "steuer" not in namen or len(set(namen)) != len(namen):
+            continue
+        if betraege_in_zeile(z):
+            continue                      # Kopfzeilen tragen keine Beträge
+        for j in range(i + 1, min(i + 4, len(zeilen))):
+            betraege = betraege_in_zeile(zeilen[j])
+            if not betraege:
+                continue
+            if len(betraege) >= len(namen):
+                kandidat = dict(zip(namen, betraege[-len(namen):]))
+            elif len(betraege) == len(namen) - 1 and "brutto" in namen:
+                kandidat = dict(zip([n for n in namen if n != "brutto"], betraege))
+            else:
+                break
+            n, st, br = kandidat.get("netto"), kandidat.get("steuer"), kandidat.get("brutto")
+            if n is not None and st is not None and st > n:
+                break
+            if n is not None and st is not None and br is not None and abs(n + st - br) > 0.05:
+                break
+            ergebnis = kandidat
+            break
+    return ergebnis
 
 
 SAETZE_GUELTIG = (0.0, 5.0, 7.0, 16.0, 19.0, 20.0, 21.0, 23.0)
@@ -221,24 +290,69 @@ def finde_rechnungsnummer(text: str) -> str:
     return m[1].strip(".") if m else ""
 
 
-def finde_lieferant(text: str, bekannte: list[str]) -> str:
+def _firma_aus_zeile(z: str, start: int = 0) -> str:
+    """Firmenname aus einer (evtl. mit Spalten verschmolzenen) Zeile: bis zum Suffix, ab einem sinnvollen Anfang."""
+    treffer = [m for m in FIRMEN_SUFFIX.finditer(z) if m.start() >= start]
+    if not treffer:
+        return ""
+    m = treffer[0]
+    ende = m.end()
+    # Folgesuffixe mitnehmen: „Ireland Ltd“, „GmbH & Co. KG“
+    while True:
+        w = re.match(r"\s+", z[ende:])
+        nxt = FIRMEN_SUFFIX.match(z, ende + (w.end() if w else 0)) if w else None
+        if not nxt:
+            break
+        ende = nxt.end()
+    kopf = z[start:m.start()]
+    kopf = re.split(r"[•|:]|\s{3,}", kopf)[-1]
+    kopf = kopf[-60:]
+    kopf = re.sub(r"^[^A-Za-zÄÖÜäöü0-9]+", "", kopf)
+    name = (kopf + z[m.start():ende]).strip(" ,-")
+    return name if len(name) >= 4 else ""
+
+
+def finde_lieferant(text: str, bekannte: list[str], weitere: list[str] | None = None) -> str:
     unten = text.lower()
     zeilen = [z.strip() for z in text.splitlines() if z.strip()]
-    for name in bekannte:
+    # 1) „Verkauft von …“ / „Rechnungssteller …“
+    for z in zeilen[:40]:
+        m = VERKAEUFER_PREFIX.match(z)
+        if m:
+            rest = z[m.end():].strip()
+            firma = _firma_aus_zeile(rest)
+            if firma:
+                # Zusatz wie „, Niederlassung Deutschland“ mitnehmen, wenn er direkt folgt
+                nach = rest[rest.find(firma) + len(firma):]
+                zusatz = re.match(r",\s*([A-ZÄÖÜ][\w .-]{2,40})", nach)
+                return firma + (", " + zusatz.group(1).strip() if zusatz else "")
+            firma = re.split(r"\s{2,}|,", rest)[0].strip()
+            if 3 <= len(firma) <= 80 and not RE_BETRAG.search(firma):
+                return firma
+    # 2) bekannte Anbieter
+    for name in list(bekannte) + list(weitere or []):
         if name in unten:
-            for z in zeilen[:30]:
-                if name in z.lower() and FIRMEN_SUFFIX.search(z) and len(z) <= 80:
-                    # Firmenzeile kann mit anderen Spalten verschmolzen sein: bis zum Suffix schneiden
-                    start = z.lower().find(name)
-                    treffer = [m for m in FIRMEN_SUFFIX.finditer(z) if m.end() - start <= 70]
-                    return z[start:treffer[-1].end()].strip()
+            for z in zeilen[:40]:
+                if name in z.lower() and FIRMEN_SUFFIX.search(z):
+                    firma = _firma_aus_zeile(z, z.lower().find(name))
+                    if firma:
+                        return firma
             return name.title()
-    for z in zeilen[:25]:
-        if FIRMEN_SUFFIX.search(z) and len(z) <= 80 and not RE_BETRAG.search(z):
-            return z
-    for z in zeilen[:5]:
-        if 2 < len(z) <= 60 and not RE_BETRAG.search(z) and not parse_datum(z) and not DATUM_KEYWORDS.search(z) \
-                and not re.search(r"rechnung|invoice|seite|page", z, re.I):
+    # 3) Firmenzeile mit Suffix oben im Dokument
+    for z in zeilen[:30]:
+        if FIRMEN_SUFFIX.search(z) and not RE_BETRAG.search(z) and not KEIN_LIEFERANT.search(z[:20]):
+            firma = _firma_aus_zeile(z)
+            if firma:
+                return firma
+    # 4) Zeile mit der USt-IdNr des Ausstellers (Fußzeile)
+    for z in zeilen:
+        if RE_USTID.search(z) and FIRMEN_SUFFIX.search(z):
+            firma = _firma_aus_zeile(z)
+            if firma:
+                return firma
+    # 5) erste unverdächtige Zeile
+    for z in zeilen[:6]:
+        if 2 < len(z) <= 60 and not RE_BETRAG.search(z) and not parse_datum(z) and not KEIN_LIEFERANT.search(z):
             return z
     return ""
 
@@ -251,8 +365,18 @@ def extrahiere_felder(text: str, cfg: dict) -> dict:
     fremd = [i for i in ids if not i.startswith("DE")]
     ust_idnr = fremd[0] if fremd else (ids[0] if ids else "")
     satz, ust_betrag = finde_ust(text)
-    brutto = finde_betrag_mit_keyword(text, BRUTTO_KEYS)
-    netto = finde_betrag_mit_keyword(text, NETTO_KEYS)
+    brutto = finde_betrag_mit_keyword(text, BRUTTO_KEYS, BRUTTO_STARK)
+    netto = finde_betrag_mit_keyword(text, NETTO_KEYS, NETTO_STARK)
+    tabelle = tabelle_zuordnen(text)
+    if tabelle:
+        # Steuertabelle ist die verlässlichste Quelle für Netto und Steuer
+        netto = tabelle.get("netto", netto)
+        ust_betrag = tabelle.get("steuer", ust_betrag)
+        stark_vorhanden = any(BRUTTO_STARK.search(z) and betraege_in_zeile(z) for z in text.splitlines())
+        if brutto is None or (tabelle.get("brutto") is not None and not stark_vorhanden):
+            brutto = tabelle.get("brutto", brutto)
+    if brutto is not None and netto is not None and ust_betrag is not None and abs(netto + ust_betrag - brutto) < 0.05 and satz is None:
+        satz = float(round(ust_betrag / netto * 100)) if netto else 0.0
     if brutto is None or abs(brutto) > BETRAG_MAX_PLAUSIBEL:
         alle = [v for z in text.splitlines() for v in betraege_in_zeile(z) if abs(v) <= BETRAG_MAX_PLAUSIBEL]
         brutto = max(alle, key=abs) if alle else None
@@ -272,7 +396,7 @@ def extrahiere_felder(text: str, cfg: dict) -> dict:
         "ust_idnr": ust_idnr,
         "alle_ust_idnr": ids,
         "rechnungsnummer": finde_rechnungsnummer(text),
-        "lieferant": finde_lieferant(text, cfg.get("reverse_charge_lieferanten", [])),
+        "lieferant": finde_lieferant(text, cfg.get("reverse_charge_lieferanten", []), cfg.get("bekannte_lieferanten", [])),
         "reverse_charge_hinweis": rc_hinweis,
         "waehrung_eur": bool(RE_WAEHRUNG.search(text)),
     }

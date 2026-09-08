@@ -136,3 +136,26 @@ def test_adobe_deutsche_rechnung_mit_ust(cfg):
     assert f["rechnungsnummer"] == "IEN2025000321887"
     assert f["lieferant"].startswith("Adobe Systems Software Ireland Ltd")
     assert f["reverse_charge_hinweis"] is False
+
+
+def test_congstar_rechnung(cfg):
+    from tests.fixtures.rechnungen import CONGSTAR
+    f = extrahiere_felder(CONGSTAR, cfg)
+    assert f["datum"] == date(2025, 3, 18)
+    assert f["betrag_brutto"] == 20.0 and f["betrag_netto"] == 16.81 and f["ust_betrag"] == 3.19
+    assert f["ust_satz"] == 19.0
+    assert f["rechnungsnummer"] == "7580000000"
+    assert f["ust_idnr"] == "DE122265872"
+    assert "congstar" in f["lieferant"].lower() or "Telekom Deutschland GmbH" in f["lieferant"]
+    assert f["reverse_charge_hinweis"] is False
+
+
+def test_amazon_rechnung(cfg):
+    from tests.fixtures.rechnungen import AMAZON
+    f = extrahiere_felder(AMAZON, cfg)
+    assert f["datum"] == date(2025, 12, 29)
+    assert f["betrag_brutto"] == 144.49 and f["betrag_netto"] == 121.42 and f["ust_betrag"] == 23.07
+    assert f["ust_satz"] == 19.0
+    assert f["lieferant"].startswith("Amazon EU S.à r.l.")
+    assert f["ust_idnr"] == "LU20260743"
+    assert f["rechnungsnummer"] == "LU571I5B0AEUI"
