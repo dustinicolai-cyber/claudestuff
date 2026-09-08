@@ -852,15 +852,17 @@ def abgleich_view(zeilen: list[dict], regeln: list[IgnorRegel], jahr: int, filte
     <div class="kpi"><div class="l">Ignoriert</div><div class="w">{zaehl["ignoriert"]}</div></div>
     <div class="kpi {"rot" if doppel else ""}"><div class="l">Evtl. doppelt</div><div class="w">{doppel}</div></div>
   </div>
-  <div class="row zwischen"><div class="tabs reiter abgleich-tabs">{tabs}</div></div>
   <form class="auswahl-form" hx-post="/api/abgleich/aktion" hx-target="#main">
     <input type="hidden" name="jahr" value="{jahr}">
+    <div class="klebe-leiste">
+    <div class="row zwischen"><div class="tabs reiter abgleich-tabs">{tabs}</div><label class="check klein"><input type="checkbox" class="alle"> alle auswählen</label></div>
     <div class="auswahl-leiste" hidden><span class="anzahl"></span>
       <button type="submit" name="aktion" value="anlegen" class="btn-primary klein">Buchungen anlegen</button>
       <button type="submit" name="aktion" value="ignorieren" class="btn-secondary klein">Ignorieren</button>
       <button type="submit" name="aktion" value="regel" class="btn-ghost klein" hx-confirm="Für jede ausgewählte Bewegung eine Ignorier-Regel auf das Gegenkonto anlegen?">Immer ignorieren</button>
       <button type="submit" name="aktion" value="loesen" class="btn-ghost klein">Zuordnung lösen</button></div>
-    <div class="scroll"><table class="tabelle kompakt"><thead><tr><th><input type="checkbox" class="alle" title="Alle auswählen"></th><th>Datum</th><th class="num">Betrag</th><th>Art</th><th>Gegenkonto / Zweck</th><th>Abgleich</th><th>Aktion</th></tr></thead>
+    </div>
+    <div class="scroll"><table class="tabelle kompakt abgleich-tabelle"><thead><tr><th></th><th>Datum</th><th class="num">Betrag</th><th>Art</th><th>Gegenkonto / Zweck</th><th>Abgleich</th><th class="aktion-kopf">Aktion</th></tr></thead>
     <tbody>{rows or '<tr><td colspan=7 class="muted">Nichts in dieser Liste.</td></tr>'}</tbody></table></div>
   </form>
   <details class="karte" {"open" if regeln else ""}><summary><strong>Ignorier-Regeln</strong> <span class="muted">({len(regeln)}) – Bewegungen, die nie betrieblich sind</span></summary>

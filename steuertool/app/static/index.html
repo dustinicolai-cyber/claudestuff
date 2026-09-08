@@ -211,7 +211,16 @@ details.frage[open] summary .btn-ghost{text-decoration:underline}
 .badge.plus-b{background:var(--gruen-hell);color:var(--gruen);border-color:transparent} .badge.minus-b{background:var(--card2);color:var(--muted)}
 .abgleich .tabs.reiter{width:auto;margin:.4rem 0} .abgleich .tabs.reiter button{flex:none;padding:.4rem .9rem}
 .abgleich tr.doppelt td{background:var(--rot-hell)}
-.abgleich td:nth-child(6){min-width:13em} .abgleich .aktionen-zelle{white-space:normal}
+.abgleich-tabelle td:nth-child(5){max-width:30em} .abgleich-tabelle td:nth-child(6){min-width:12em}
+.abgleich-tabelle .aktionen-zelle,.abgleich-tabelle .aktion-kopf{white-space:nowrap;width:1%}
+.abgleich-tabelle .aktionen-zelle{display:flex;gap:.35rem;align-items:center;flex-wrap:nowrap}
+.abgleich-tabelle .aktionen-zelle form{display:inline}
+.klebe-leiste{position:sticky;top:0;z-index:4;background:var(--bg);padding:.3rem 0 .4rem;margin-bottom:.3rem}
+.klebe-leiste .row{margin:.2rem 0}
+/* Nach oben */
+#nach-oben{position:fixed;right:1.4rem;bottom:1.4rem;z-index:20;width:44px;height:44px;border-radius:50%;padding:0;display:grid;place-items:center;background:var(--card);color:var(--fg);border:1px solid var(--line);box-shadow:var(--schatten);opacity:0;pointer-events:none;transition:opacity .2s}
+#nach-oben.sichtbar{opacity:1;pointer-events:auto} #nach-oben:hover{border-color:var(--orange);color:var(--orange);filter:none}
+#nach-oben svg{margin:0;width:20px;height:20px}
 .regeln-liste{list-style:none;padding:0;margin:.4rem 0} .regeln-liste li{padding:.2rem 0}
 .beleg-upload .button{cursor:pointer}
 kbd{font:inherit;font-size:.8em;border:1px solid var(--line);border-bottom-width:2px;border-radius:5px;padding:0 .4em;background:var(--card2)}
@@ -268,6 +277,7 @@ footer{color:var(--muted);font-size:.78em;padding:1.4rem 0 0}
   </div>
 </header>
 <main id="main" hx-history="false"><p class="muted">Lade…</p></main>
+<button id="nach-oben" type="button" title="Nach oben" aria-label="Nach oben"><svg viewBox="0 0 24 24"><path d="M12 19V5m-7 7l7-7 7 7"/></svg></button>
 <script>
 (function(){
   const nav = document.getElementById('nav'), titel = document.getElementById('titel');
@@ -310,6 +320,9 @@ footer{color:var(--muted);font-size:.78em;padding:1.4rem 0 0}
     const map = {'1':'import','2':'pruefen','3':'abgleich','4':'quartale','5':'auswertung','6':'offen','7':'jahresabschluss','8':'export'};
     if (map[e.key]) { const b = nav.querySelector('[data-ansicht="'+map[e.key]+'"]'); if (b) b.click(); }
   });
+  const nachOben = document.getElementById('nach-oben');
+  window.addEventListener('scroll', () => nachOben.classList.toggle('sichtbar', window.scrollY > 400), {passive: true});
+  nachOben.addEventListener('click', () => window.scrollTo({top: 0, behavior: 'smooth'}));
   const tg = document.getElementById('theme-toggle');
   function aktuellesTheme(){ return document.documentElement.dataset.theme === 'light' ? 'light' : 'dark'; }
   function themeAnzeigen(){ tg.innerHTML = aktuellesTheme() === 'dark' ? '☀️ <span class="txt">Hell</span>' : '🌙 <span class="txt">Dark</span>'; }
