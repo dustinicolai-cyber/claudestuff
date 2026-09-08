@@ -24,7 +24,7 @@
 /* Semantische Aliase auf die vorhandenen Tokens */
 :root{--text:var(--fg);--text-muted:var(--muted);--border:var(--line);--surface-2:var(--card2);--accent:var(--orange);--warn:var(--gelb)}
 *{box-sizing:border-box}
-html,body{height:100%}
+html{height:100%}
 body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.5 "Outfit","Avenir Next","Plus Jakarta Sans","Segoe UI Variable",-apple-system,BlinkMacSystemFont,"Helvetica Neue",Helvetica,Arial,sans-serif;display:grid;grid-template-columns:250px minmax(0,1fr);grid-template-rows:auto 1fr;grid-template-areas:"side top" "side main";min-height:100vh}
 @media (max-width:900px){body{grid-template-columns:72px minmax(0,1fr)}.side .txt,.side .logo-txt,.side .user-txt{display:none}.side nav button{justify-content:center;padding:.7rem 0}}
 /* Sidebar */
@@ -216,7 +216,7 @@ details.frage[open] summary .btn-ghost{text-decoration:underline}
 .abgleich .tabs.reiter{width:auto;margin:.4rem 0} .abgleich .tabs.reiter button{flex:none;padding:.4rem .9rem}
 .abgleich tr.doppelt td{background:var(--rot-hell)}
 .abgleich-tabelle{table-layout:fixed;min-width:860px}
-.abgleich-tabelle col.c-wahl{width:38px} .abgleich-tabelle col.c-datum{width:92px} .abgleich-tabelle col.c-betrag{width:104px} .abgleich-tabelle col.c-status{width:138px} .abgleich-tabelle col.c-aktion{width:484px}
+.abgleich-tabelle col.c-wahl{width:38px} .abgleich-tabelle col.c-datum{width:92px} .abgleich-tabelle col.c-betrag{width:104px} .abgleich-tabelle col.c-status{width:138px} .abgleich-tabelle col.c-aktion{width:496px}
 @media (max-width:1400px){.abgleich-tabelle col.c-aktion{width:230px}}
 .abgleich-tabelle td.zweck{overflow-wrap:anywhere} .abgleich-tabelle td .badge{margin-top:.15rem}
 .abgleich-tabelle td:nth-child(3) .badge{font-weight:600}
