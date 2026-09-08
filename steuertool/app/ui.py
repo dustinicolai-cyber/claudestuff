@@ -852,32 +852,38 @@ def abgleich_view(zeilen: list[dict], regeln: list[IgnorRegel], jahr: int, filte
         k, st = z["k"], z["status"]
         if st == "zugeordnet":
             b = z["buchung"]
-            return (f'<span class="badge ok">zugeordnet</span> <a href="#" hx-get="/ui/pruefen/{b.id}" hx-target="#main">{h(b.lieferant or "Buchung")} · {d(b.datum)}</a> '
-                    f'<button class="klein btn-ghost" hx-post="/api/abgleich/aktion" hx-vals=\'{{"aktion":"loesen","ids":"{k.id}","jahr":"{jahr}"}}\' hx-target="#main">lösen</button>') if b else '<span class="badge ok">zugeordnet</span>'
+            return (f'<span class="badge ok">zugeordnet</span><div class="klein"><a href="#" hx-get="/ui/pruefen/{b.id}" hx-target="#main">{h(b.lieferant or "Buchung")} · {d(b.datum)}</a></div>'
+                    if b else '<span class="badge ok">zugeordnet</span>')
         if st == "ignoriert":
-            return f'<span class="badge">ignoriert</span> <button class="klein btn-ghost" hx-post="/api/abgleich/aktion" hx-vals=\'{{"aktion":"freigeben","ids":"{k.id}","jahr":"{jahr}"}}\' hx-target="#main">freigeben</button>'
+            return '<span class="badge">ignoriert</span>'
         if st == "rueckfrage":
-            opts = "".join(f'<option value="{b.id}">{d(b.datum)} · {h(b.lieferant)} · {eur_fmt(b.betrag_brutto)}{" · bestätigt" if b.status == "bestaetigt" else ""}</option>' for b in z["kandidaten"])
-            return (f'<span class="badge mid">Rückfrage</span> <span class="muted klein">Betrag passt zu {len(z["kandidaten"])} Rechnung(en), Datum weicht ab:</span>'
-                    f'<form class="inline" hx-post="/api/abgleich/{k.id}/zuordnen" hx-target="#main"><input type="hidden" name="jahr" value="{jahr}"><select name="buchung_id">{opts}</select><button class="klein btn-secondary">zuordnen</button></form>')
+            return f'<span class="badge mid">Rückfrage</span><div class="muted klein">Betrag passt zu {len(z["kandidaten"])} Rechnung(en), Datum weicht ab</div>'
         vs = vorschlag.get(k.id, "")
-        return (f'<span class="badge low">kein Beleg</span>' + (f'<div class="muted klein">Regel: {h(vs)}</div>' if vs else ''))
+        return '<span class="badge low">kein Beleg</span>' + (f'<div class="muted klein">Regel: {h(vs)}</div>' if vs else '')
 
     def aktionen(z: dict) -> str:
         k, st = z["k"], z["status"]
-        if st != "kein_beleg":
-            return ""
+        vals = lambda aktion: f'hx-vals=\'{{"aktion":"{aktion}","ids":"{k.id}","jahr":"{jahr}"}}\' hx-post="/api/abgleich/aktion" hx-target="#main"'
+        if st == "zugeordnet":
+            b = z["buchung"]
+            oeffnen = f'<a href="#" class="klein btn-secondary button" hx-get="/ui/pruefen/{b.id}" hx-target="#main">Beleg öffnen</a> ' if b else ""
+            return oeffnen + f'<button class="klein btn-ghost" {vals("loesen")} title="Zuordnung zur Rechnung wieder aufheben">Zuordnung lösen</button>'
+        if st == "ignoriert":
+            return f'<button class="klein btn-ghost" {vals("freigeben")} title="Wieder in die offene Liste aufnehmen">freigeben</button>'
+        if st == "rueckfrage":
+            opts = "".join(f'<option value="{b.id}">{d(b.datum)} · {h(b.lieferant)} · {eur_fmt(b.betrag_brutto)}{" · bestätigt" if b.status == "bestaetigt" else ""}</option>' for b in z["kandidaten"])
+            return (f'<form class="inline" hx-post="/api/abgleich/{k.id}/zuordnen" hx-target="#main"><input type="hidden" name="jahr" value="{jahr}"><select name="buchung_id">{opts}</select> <button class="klein btn-secondary">zuordnen</button></form> '
+                    f'<button class="klein btn-ghost" {vals("ignorieren")}>ignorieren</button>')
         return (f'<form class="inline beleg-upload" hx-post="/api/abgleich/{k.id}/beleg" hx-encoding="multipart/form-data" hx-target="#main" hx-trigger="change"><input type="hidden" name="jahr" value="{jahr}">'
                 f'<label class="klein btn-secondary button" title="Rechnung zu dieser Buchung hochladen">Beleg hochladen<input type="file" name="datei" accept=".pdf,.xml,.png,.jpg,.jpeg" hidden></label></form> '
-                f'<button class="klein btn-secondary" hx-post="/api/abgleich/aktion" hx-vals=\'{{"aktion":"anlegen","ids":"{k.id}","jahr":"{jahr}"}}\' hx-target="#main" title="Buchungsvorschlag ohne Beleg anlegen">ohne Beleg buchen</button> '
-                f'<button class="klein btn-ghost" hx-post="/api/abgleich/aktion" hx-vals=\'{{"aktion":"ignorieren","ids":"{k.id}","jahr":"{jahr}"}}\' hx-target="#main">ignorieren</button> '
-                f'<button class="klein btn-ghost" hx-post="/api/abgleich/aktion" hx-vals=\'{{"aktion":"regel","ids":"{k.id}","jahr":"{jahr}"}}\' hx-target="#main" title="Regel: „{h(k.gegenkonto or k.verwendungszweck[:40])}“ künftig immer ignorieren">immer ignorieren</button>')
+                f'<button class="klein btn-secondary" {vals("anlegen")} title="Buchungsvorschlag ohne Beleg anlegen">ohne Beleg buchen</button> '
+                f'<button class="klein btn-ghost" {vals("ignorieren")}>ignorieren</button> '
+                f'<button class="klein btn-ghost" {vals("regel")} title="Regel: „{h(k.gegenkonto or k.verwendungszweck[:40])}“ künftig immer ignorieren">immer ignorieren</button>')
 
     rows = "".join(
         f'<tr class="{"doppelt" if z["doppelt"] else ""}" data-datum="{z["k"].datum.isoformat()}" data-betrag="{z["k"].betrag:.2f}"><td><input type="checkbox" name="ids" value="{z["k"].id}"></td>'
-        f'<td>{d(z["k"].datum)}</td><td class="num">{eur_fmt(z["k"].betrag)}</td>'
-        f'<td><span class="badge {"plus-b" if z["k"].betrag > 0 else "minus-b"}">{"Einnahme" if z["k"].betrag > 0 else "Ausgabe"}</span></td>'
-        f'<td>{h(z["k"].gegenkonto)}<div class="muted klein">{h(z["k"].verwendungszweck[:110])}</div>'
+        f'<td>{d(z["k"].datum)}</td><td class="num">{eur_fmt(z["k"].betrag)}<div><span class="badge {"plus-b" if z["k"].betrag > 0 else "minus-b"}">{"Einnahme" if z["k"].betrag > 0 else "Ausgabe"}</span></div></td>'
+        f'<td class="zweck">{h(z["k"].gegenkonto)}<div class="muted klein">{h(z["k"].verwendungszweck[:140])}</div>'
         + (f'<div class="klein"><span class="badge low">evtl. doppelt</span> <span class="muted">gleicher Betrag und Empfänger am {d(z["doppelt"].datum)} – prüfen, ob beide echt sind</span></div>' if z["doppelt"] else "")
         + f'</td><td>{status_zelle(z)}</td><td class="aktionen-zelle"><div class="aktionen-inline">{aktionen(z)}</div></td></tr>'
         for z in zeilen)
@@ -913,8 +919,8 @@ def abgleich_view(zeilen: list[dict], regeln: list[IgnorRegel], jahr: int, filte
       <button type="submit" name="aktion" value="regel" class="btn-ghost klein" hx-confirm="Für jede ausgewählte Bewegung eine Ignorier-Regel auf das Gegenkonto anlegen?">Immer ignorieren</button>
       <button type="submit" name="aktion" value="loesen" class="btn-ghost klein">Zuordnung lösen</button></div>
     </div>
-    <div class="scroll"><table class="tabelle kompakt abgleich-tabelle"><thead><tr><th></th><th class="sortierbar" data-sort="datum" title="nach Datum sortieren">Datum <span class="pfeil"></span></th><th class="num sortierbar" data-sort="betrag" title="nach Betrag sortieren">Betrag <span class="pfeil"></span></th><th>Art</th><th>Gegenkonto / Zweck</th><th>Abgleich</th><th class="aktion-kopf">Aktion</th></tr></thead>
-    <tbody>{rows or '<tr><td colspan=7 class="muted">Nichts in dieser Liste.</td></tr>'}</tbody></table></div>
+    <div class="scroll"><table class="tabelle kompakt abgleich-tabelle"><colgroup><col class="c-wahl"><col class="c-datum"><col class="c-betrag"><col class="c-zweck"><col class="c-status"><col class="c-aktion"></colgroup><thead><tr><th></th><th class="sortierbar" data-sort="datum" title="nach Datum sortieren">Datum <span class="pfeil"></span></th><th class="num sortierbar" data-sort="betrag" title="nach Betrag sortieren">Betrag <span class="pfeil"></span></th><th>Gegenkonto / Zweck</th><th>Abgleich</th><th class="aktion-kopf">Aktion</th></tr></thead>
+    <tbody>{rows or '<tr><td colspan=6 class="muted">Nichts in dieser Liste.</td></tr>'}</tbody></table></div>
   </form>
   <details class="karte" {"open" if regeln else ""}><summary><strong>Ignorier-Regeln</strong> <span class="muted">({len(regeln)}) – Bewegungen, die nie betrieblich sind</span></summary>
     <ul class="klein regeln-liste">{regeln_html or '<li class="muted">Noch keine Regeln. „immer ignorieren“ an einer Zeile legt eine an.</li>'}</ul>
