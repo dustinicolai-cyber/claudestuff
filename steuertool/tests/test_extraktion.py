@@ -95,3 +95,44 @@ Total (EUR)                    71.38
     assert extrahiere_felder(text2, cfg)["betrag_brutto"] == 59.49
     text3 = "Rechnungsnummer 114.103.475\nirgendwas ohne Betrag\n"
     assert extrahiere_felder(text3, cfg)["betrag_brutto"] is None
+
+
+ADOBE_DE_TEXT = """Adobe Systems Software Ireland Ltd ORIGINAL Rechnungsinformationen
+4-6 Riverwalk Rechnungsnummer IEN2025000321887
+Citywest Business Campus Rechnungsdatum 02-JAN-2025
+Dublin 24 Zahlungsfrist Paypal
+Ireland Kundenauftragsnumm AE02647100001CDE
+USt-IdNr.: DE813296628 Bestellnummer 7168780931
+Kundennummer 562114456
+Währung EUR
+Rechnungsanschrift
+Dustin Nicolai
+GERMANY
+Rechnung
+Positionen
+Laufzeit: 02-JAN-2025 bis 01-FEB-2025
+PRODUKTNUMMER PRODUKTBESCHREIBUNG MENGE EINHEIT EINZELPREIS SUMME NETTO UST-SATZ UST SUMME BRUTTO
+65206874 Creative Cloud (alle Applikationen) 1 EA 77.49 77.49 19.00% 14.72 92.21
+GESAMT
+SUMME NETTO (EUR) 77.49
+UST (STEUERSATZ SIEHE OBEN) 14.72
+USt
+GESAMTBETRAG (EUR) 92.21
+Anmerkungen:
+http://www.adobe.com/support/service/
+VAT
+Ansprechpartner
+https://helpx.adobe.com/contact.html
+Vielen Dank für Ihre Bestellung! Seite 1 von 1
+"""
+
+
+def test_adobe_deutsche_rechnung_mit_ust(cfg):
+    f = extrahiere_felder(ADOBE_DE_TEXT, cfg)
+    assert f["datum"] == date(2025, 1, 2)
+    assert f["betrag_brutto"] == 92.21 and f["betrag_netto"] == 77.49
+    assert f["ust_satz"] == 19.0 and f["ust_betrag"] == 14.72
+    assert f["ust_idnr"] == "DE813296628" and "ANSPRECHPARTNER" not in f["alle_ust_idnr"]
+    assert f["rechnungsnummer"] == "IEN2025000321887"
+    assert f["lieferant"].startswith("Adobe Systems Software Ireland Ltd")
+    assert f["reverse_charge_hinweis"] is False

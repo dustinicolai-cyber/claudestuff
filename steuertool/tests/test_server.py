@@ -30,7 +30,7 @@ def test_import_pruefen_bestaetigen_gwg_wird_afa():
         assert "neu" in r.text and "PDF-Text" in r.text
         assert c.get("/api/status").json()["vorschlaege"] == 1
         pr = c.get("/ui/pruefen")
-        assert "Adobe" in pr.text and "§13b" in pr.text and "buchung-form" in pr.text
+        assert "Adobe" in pr.text and "§13b" in pr.text and "buchung-form" in pr.text and "Ausgaben" in pr.text
 
         with Session(engine()) as s:
             b = s.exec(select(Buchung)).first()
@@ -41,7 +41,7 @@ def test_import_pruefen_bestaetigen_gwg_wird_afa():
         r = c.post(f"/api/buchung/{bid}/bestaetigen", data={
             "datum": "2025-02-05", "richtung": "ausgabe", "lieferant": "Adobe Systems Software Ireland Ltd", "beschreibung": "CC",
             "betrag_netto": "59.49", "ust_satz": "0", "ust_betrag": "0", "betrag_brutto": "59.49", "kategorie_id": str(software.id), "reverse_charge": "1"})
-        assert r.status_code == 200 and "Keine offenen Vorschläge" in r.text
+        assert r.status_code == 200 and "Keine offenen Ausgaben" in r.text
         with Session(engine()) as s:
             b = s.get(Buchung, bid)
             assert b.status == "bestaetigt" and b.eur_zeile == 50 and b.konfidenz == 1.0
@@ -152,3 +152,18 @@ def test_neu_erkennen_aktualisiert_vorschlag():
             assert b.betrag_brutto == 99.78 and "Meier" in b.lieferant
         r = c.post("/api/buchungen/neu-erkennen", data={"ids": [str(bid)]})
         assert "1 von 1" in r.text
+
+
+def test_import_einnahme_und_reiter():
+    with client() as c:
+        r = c.post("/api/import", files={"datei": ("re.pdf", erzeuge.zugferd_pdf(), "application/pdf")}, data={"ki": "0", "richtung": "einnahme"})
+        assert "Einnahme" in r.text
+        with Session(engine()) as s:
+            b = s.exec(select(Buchung)).first()
+            kat = s.get(Kategorie, b.kategorie_id)
+            assert b.richtung == "einnahme" and kat.schluessel == "einnahmen" and b.reverse_charge is False
+            assert b.lieferant == "Designstudio Test"   # Käufer aus der E-Rechnung
+        assert "Keine offenen Ausgaben" in c.get("/ui/pruefen?richtung=ausgabe").text
+        r = c.get("/ui/pruefen?richtung=einnahme")
+        assert "buchung-form" in r.text and "Designstudio Test" in r.text
+        assert "buchung-form" in c.get("/ui/pruefen").text   # ohne Reiter: springt zum Reiter mit Vorschlägen

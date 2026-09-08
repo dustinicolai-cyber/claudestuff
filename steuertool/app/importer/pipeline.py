@@ -101,7 +101,7 @@ def extrahiere(daten: bytes, name: str, cfg: dict, ki_erlaubt: bool = True) -> t
 
 
 def importiere_datei(s: Session, daten: bytes, original_name: str, herkunft: str = "upload",
-                     ki_erlaubt: bool = True) -> ImportErgebnis:
+                     ki_erlaubt: bool = True, richtung: str = "ausgabe") -> ImportErgebnis:
     cfg = config.regeln()
     h = sha256(daten)
     vorhanden = s.exec(select(Beleg).where(Beleg.sha256 == h)).first()
@@ -121,7 +121,7 @@ def importiere_datei(s: Session, daten: bytes, original_name: str, herkunft: str
     s.refresh(beleg)
 
     if stufe == "keine":
-        b = Buchung(beleg_id=beleg.id, datum=datum, status="vorschlag", konfidenz=0.0,
+        b = Buchung(beleg_id=beleg.id, datum=datum, status="vorschlag", konfidenz=0.0, richtung=richtung,
                     extraktion_stufe="manuell", klassifizierung_weg="-",
                     extraktion_json=json.dumps({"hinweis": "keine Stufe hat gegriffen", "text": text[:2000]}, default=_json_default),
                     hinweise_json=json.dumps(["Keine automatische Erkennung möglich – bitte Felder von Hand ausfüllen."]))
@@ -142,8 +142,12 @@ def importiere_datei(s: Session, daten: bytes, original_name: str, herkunft: str
     if rc and satz == 0 and netto == 0 and brutto:
         netto = brutto
 
-    richtung = "ausgabe"
     felder["richtung"] = richtung
+    if richtung == "einnahme":
+        # Ausgangsrechnung: kein §13b, der „Lieferant“ ist der Kunde – bei E-Rechnung bekannt
+        rc, rc_gruende = False, []
+        if felder.get("kaeufer"):
+            lieferant = felder["kaeufer"]
     kategorie, weg, k_konf = klassifizierung.klassifiziere(s, {**felder, "lieferant": lieferant}, cfg, text) \
         if ki_erlaubt or True else (None, "-", 0.0)
 
@@ -172,5 +176,6 @@ def importiere_datei(s: Session, daten: bytes, original_name: str, herkunft: str
                           meldung=f"Stufe {stufe}, Kategorie {kategorie.name if kategorie else '–'} ({weg})", felder=felder)
 
 
-def importiere_pfad(s: Session, pfad: Path, herkunft: str = "ordner", ki_erlaubt: bool = True) -> ImportErgebnis:
-    return importiere_datei(s, pfad.read_bytes(), pfad.name, herkunft, ki_erlaubt)
+def importiere_pfad(s: Session, pfad: Path, herkunft: str = "ordner", ki_erlaubt: bool = True,
+                    richtung: str = "ausgabe") -> ImportErgebnis:
+    return importiere_datei(s, pfad.read_bytes(), pfad.name, herkunft, ki_erlaubt, richtung)

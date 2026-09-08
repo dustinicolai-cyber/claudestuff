@@ -18,6 +18,7 @@ RE_DATUM_ISO = re.compile(r"\b(\d{4})-(\d{2})-(\d{2})\b")
 RE_DATUM_US = re.compile(r"\b(\d{1,2})/(\d{1,2})/(\d{4})\b")
 RE_DATUM_WORT = re.compile(r"\b(\d{1,2})\.?\s+([A-Za-zäöüÄÖÜ]{3,9})\.?\s+(\d{4})\b")
 RE_DATUM_WORT_EN = re.compile(r"\b([A-Za-z]{3,9})\.?\s+(\d{1,2}),?\s+(\d{4})\b")
+RE_DATUM_MON = re.compile(r"\b(\d{1,2})[-\s]([A-Za-z]{3})[-\s](\d{4})\b")   # 02-JAN-2025
 DATUM_KEYWORDS = re.compile(r"rechnungsdatum|belegdatum|invoice date|date of issue|datum|date|ausgestellt|issued", re.I)
 
 # Betrag: 1.234,56 | 1234,56 | 1,234.56 | 1234.56 | 12,- – immer mit Nachkommastellen oder „,-“.
@@ -33,12 +34,13 @@ BRUTTO_KEYS = re.compile(r"gesamtbetrag|rechnungsbetrag|zu zahlen|zahlbetrag|end
                          r"amount paid|charged|summe\b", re.I)
 NETTO_KEYS = re.compile(r"nettobetrag|summe netto|netto\b|zwischensumme|subtotal|net amount|net total|sub-total", re.I)
 UST_KEYS = re.compile(r"umsatzsteuer|mehrwertsteuer|mwst|ust\b|u\.st|vat\b|tax\b|steuer\b", re.I)
-RE_PROZENT = re.compile(r"(\d{1,2}(?:[,.]\d)?)\s?%")
+RE_PROZENT = re.compile(r"(\d{1,2}(?:[,.]\d{1,2})?)\s?%")
 
 RE_USTID = re.compile(r"\b(DE\s?\d{9}|ATU\s?\d{8}|NL\s?\d{9}\s?B\s?\d{2}|IE\s?\d{7}[A-Z]{1,2}|FR\s?[A-Z0-9]{2}\s?\d{9}|"
                       r"GB\s?\d{9}|LU\s?\d{8}|BE\s?0?\d{9}|ES\s?[A-Z0-9]\d{7}[A-Z0-9]|IT\s?\d{11}|PL\s?\d{10}|"
                       r"SE\s?\d{12}|DK\s?\d{8}|FI\s?\d{8}|CZ\s?\d{8,10}|EU\s?\d{9}|CHE[-\s]?\d{3}\.?\d{3}\.?\d{3})\b")
-RE_USTID_KONTEXT = re.compile(r"(?:ust[-.\s]?id(?:nr)?\.?|umsatzsteuer[-\s]?id(?:entifikationsnummer)?|vat\s*(?:id|no|number|reg(?:istration)?)?\.?|uid)\s*[:.]?\s*([A-Z]{2,3}[\s-]?[A-Z0-9]{7,14})\b", re.I)
+RE_USTID_KONTEXT = re.compile(r"(?i:ust[-.\s]?id(?:nr)?\.?|umsatzsteuer[-\s]?id(?:entifikationsnummer)?|vat[ \t]*(?:id|no|number|reg(?:istration)?)?\.?|uid)[ \t]*[:.]?[ \t]*"
+                              r"((?=[A-Z0-9 -]*\d{2})[A-Z]{2,3}[ -]?[A-Z0-9]{7,14})\b")
 
 RE_RECHNUNGSNR = re.compile(r"(?:rechnungs?[-\s]?(?:nummer|nr\.?|no\.?)|invoice\s*(?:no\.?|number|#|id)|beleg[-\s]?nr\.?|"
                             r"receipt\s*(?:no\.?|number|#)|order\s*(?:no\.?|number|#)|bestell[-\s]?nr\.?)\s*[:#]?\s*([A-Z0-9][A-Z0-9\-/_.]{2,30})", re.I)
@@ -91,6 +93,13 @@ def parse_datum(text: str) -> date | None:
             return date(j, mo, t)
         except ValueError:
             continue
+    for m in RE_DATUM_MON.finditer(text):
+        mo = MONATE.get(m[2].lower())
+        if mo:
+            try:
+                return date(int(m[3]), mo, int(m[1]))
+            except ValueError:
+                continue
     for m in RE_DATUM_WORT.finditer(text):
         mo = MONATE.get(m[2].lower().rstrip("."))
         if mo:
@@ -135,22 +144,45 @@ def betraege_in_zeile(z: str) -> list[float]:
 
 
 def finde_betrag_mit_keyword(text: str, keys: re.Pattern) -> float | None:
+    """Betrag aus Zeilen mit Schlüsselwort. Gleiche Zeile schlägt Folgezeile; die letzte
+    Treffer-Zeile gewinnt, weil Summen unten stehen (Tabellenköpfe oben tragen keine Zahl)."""
     zeilen = text.splitlines()
-    treffer: list[float] = []
+    gleiche: list[float] = []
+    folge: list[float] = []
     for i, z in enumerate(zeilen):
-        if keys.search(z):
-            b = betraege_in_zeile(z)
-            if not b and i + 1 < len(zeilen):
-                b = betraege_in_zeile(zeilen[i + 1])
-            if b:
-                treffer.append(b[-1])
-    if not treffer:
-        return None
-    return max(treffer, key=abs)
+        if not keys.search(z):
+            continue
+        b = betraege_in_zeile(z)
+        if b:
+            gleiche.append(b[-1])
+        elif i + 1 < len(zeilen):
+            b2 = betraege_in_zeile(zeilen[i + 1])
+            if len(b2) == 1:
+                folge.append(b2[0])
+    if gleiche:
+        return gleiche[-1]
+    return folge[-1] if folge else None
+
+
+SAETZE_GUELTIG = (0.0, 5.0, 7.0, 16.0, 19.0, 20.0, 21.0, 23.0)
 
 
 def finde_ust(text: str) -> tuple[float | None, float | None]:
-    """(Satz in %, Betrag) aus Zeilen mit USt-Schlüsselwort."""
+    """(Satz in %, Betrag) aus Zeilen mit USt-Schlüsselwort; Satz notfalls aus dem ganzen Text."""
+    satz, betrag = _finde_ust_zeilen(text)
+    if satz is None:
+        for m in RE_PROZENT.finditer(text):
+            try:
+                v = float(m[1].replace(",", "."))
+            except ValueError:
+                continue
+            if v in SAETZE_GUELTIG and v > 0:
+                satz = v
+                break
+    return satz, betrag
+
+
+def _finde_ust_zeilen(text: str) -> tuple[float | None, float | None]:
     satz = betrag = None
     for z in text.splitlines():
         if not UST_KEYS.search(z):
@@ -159,15 +191,15 @@ def finde_ust(text: str) -> tuple[float | None, float | None]:
         if p:
             try:
                 s = float(p[1].replace(",", "."))
-                if s in (0.0, 5.0, 7.0, 16.0, 19.0, 20.0, 21.0, 23.0):
+                if s in SAETZE_GUELTIG:
                     satz = s if satz is None else satz
             except ValueError:
                 pass
         # Betrag = letzte Zahl in der Zeile, die kein Prozentsatz ist
         z_ohne_prozent = RE_PROZENT.sub(" ", z)
         b = betraege_in_zeile(z_ohne_prozent)
-        if b and betrag is None:
-            betrag = b[-1]
+        if len(b) == 1:            # eine Zahl in einer USt-Zeile = der USt-Betrag; Positionszeilen haben mehrere
+            betrag = b[0]
     return satz, betrag
 
 
@@ -191,10 +223,16 @@ def finde_rechnungsnummer(text: str) -> str:
 
 def finde_lieferant(text: str, bekannte: list[str]) -> str:
     unten = text.lower()
+    zeilen = [z.strip() for z in text.splitlines() if z.strip()]
     for name in bekannte:
         if name in unten:
+            for z in zeilen[:30]:
+                if name in z.lower() and FIRMEN_SUFFIX.search(z) and len(z) <= 80:
+                    # Firmenzeile kann mit anderen Spalten verschmolzen sein: bis zum Suffix schneiden
+                    start = z.lower().find(name)
+                    treffer = [m for m in FIRMEN_SUFFIX.finditer(z) if m.end() - start <= 70]
+                    return z[start:treffer[-1].end()].strip()
             return name.title()
-    zeilen = [z.strip() for z in text.splitlines() if z.strip()]
     for z in zeilen[:25]:
         if FIRMEN_SUFFIX.search(z) and len(z) <= 80 and not RE_BETRAG.search(z):
             return z

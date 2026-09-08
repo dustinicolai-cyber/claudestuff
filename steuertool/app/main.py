@@ -184,18 +184,20 @@ def ui_import() -> HTMLResponse:
 
 
 @app.post("/api/import", response_class=HTMLResponse)
-async def api_import(datei: UploadFile = File(...), ki: str = Form("1"), s: Session = Depends(get_session)) -> HTMLResponse:
+async def api_import(datei: UploadFile = File(...), ki: str = Form("1"), richtung: str = Form("ausgabe"),
+                     s: Session = Depends(get_session)) -> HTMLResponse:
     KI_AN["wert"] = ki == "1"
+    richtung = "einnahme" if richtung == "einnahme" else "ausgabe"
     daten = await datei.read()
     try:
-        erg = pipeline.importiere_datei(s, daten, datei.filename or "beleg", herkunft="upload", ki_erlaubt=KI_AN["wert"])
+        erg = pipeline.importiere_datei(s, daten, datei.filename or "beleg", herkunft="upload", ki_erlaubt=KI_AN["wert"], richtung=richtung)
     except Exception as ex:  # Fehler pro Datei anzeigen, nicht den Import abbrechen
         erg = pipeline.ImportErgebnis(status="fehler", meldung=str(ex))
-    return _html(ui.import_zeile(datei.filename or "beleg", erg))
+    return _html(ui.import_zeile(datei.filename or "beleg", erg, richtung))
 
 
 @app.post("/api/import/ordner", response_class=HTMLResponse)
-def api_import_ordner(pfad: str = Form(...), ki: str = Form("1"), s: Session = Depends(get_session)) -> HTMLResponse:
+def api_import_ordner(pfad: str = Form(...), ki: str = Form("1"), richtung: str = Form("ausgabe"), s: Session = Depends(get_session)) -> HTMLResponse:
     p = Path(pfad).expanduser()
     if not p.is_dir():
         return _html(ui.meldung_box(f"Kein Ordner: {p}", "fehler-box"))
@@ -203,11 +205,11 @@ def api_import_ordner(pfad: str = Form(...), ki: str = Form("1"), s: Session = D
     for f in sorted(p.iterdir()):
         if f.is_file() and f.suffix.lower() in {".pdf", ".xml"} | pipeline.BILD_ENDUNGEN:
             try:
-                erg = pipeline.importiere_pfad(s, f, herkunft="ordner", ki_erlaubt=ki == "1")
+                erg = pipeline.importiere_pfad(s, f, herkunft="ordner", ki_erlaubt=ki == "1", richtung=richtung)
             except Exception as ex:
                 erg = pipeline.ImportErgebnis(status="fehler", meldung=str(ex))
-            zeilen.append(ui.import_zeile(f.name, erg))
-    return _html(f'<table class="tabelle"><thead><tr><th>Datei</th><th>Status</th><th>Stufe</th><th>Konfidenz</th><th>Meldung</th></tr></thead><tbody>{"".join(zeilen) or "<tr><td colspan=5 class=muted>Keine passenden Dateien.</td></tr>"}</tbody></table>')
+            zeilen.append(ui.import_zeile(f.name, erg, richtung))
+    return _html(f'<table class="tabelle"><thead><tr><th>Datei</th><th>Art</th><th>Status</th><th>Stufe</th><th>Konfidenz</th><th>Meldung</th></tr></thead><tbody>{"".join(zeilen) or "<tr><td colspan=6 class=muted>Keine passenden Dateien.</td></tr>"}</tbody></table>')
 
 
 @app.post("/api/konto/import", response_class=HTMLResponse)
@@ -224,13 +226,22 @@ async def api_konto_import(datei: UploadFile = File(...), s: Session = Depends(g
 
 # ------------------------------------------------------------- Prüfen
 
+def _reiter(richtung: Optional[str], offene: list[Buchung]) -> str:
+    if richtung in ("einnahme", "ausgabe"):
+        return richtung
+    return "einnahme" if offene and all(x.richtung == "einnahme" for x in offene) else "ausgabe"
+
+
 @app.get("/ui/pruefen", response_class=HTMLResponse)
-def ui_pruefen(ueberspringen: Optional[int] = None, s: Session = Depends(get_session)) -> HTMLResponse:
+def ui_pruefen(ueberspringen: Optional[int] = None, richtung: Optional[str] = None, s: Session = Depends(get_session)) -> HTMLResponse:
     offene = _offene(s)
-    if not offene:
-        return _html(ui.pruefen_leer())
-    b = next((x for x in offene if x.id != ueberspringen), offene[0])
-    return _pruefen_detail(s, b)
+    reiter = _reiter(richtung, offene)
+    im_reiter = [x for x in offene if x.richtung == reiter]
+    if not im_reiter:
+        zaehler = {"einnahme": sum(1 for x in offene if x.richtung == "einnahme"), "ausgabe": sum(1 for x in offene if x.richtung == "ausgabe")}
+        return _html(ui.pruefen_leer(reiter, zaehler))
+    b = next((x for x in im_reiter if x.id != ueberspringen), im_reiter[0])
+    return _pruefen_detail(s, b, reiter)
 
 
 @app.get("/ui/pruefen/{buchung_id}", response_class=HTMLResponse)
@@ -238,19 +249,22 @@ def ui_pruefen_id(buchung_id: int, s: Session = Depends(get_session)) -> HTMLRes
     b = s.get(Buchung, buchung_id)
     if not b:
         raise HTTPException(404)
-    return _pruefen_detail(s, b)
+    return _pruefen_detail(s, b, b.richtung)
 
 
-def _pruefen_detail(s: Session, b: Buchung) -> HTMLResponse:
+def _pruefen_detail(s: Session, b: Buchung, reiter: Optional[str] = None) -> HTMLResponse:
     beleg = s.get(Beleg, b.beleg_id) if b.beleg_id else None
     try:
         extraktion = json.loads(b.extraktion_json or "{}")
     except json.JSONDecodeError:
         extraktion = {}
     offene = _offene(s)
-    if b.status != "vorschlag":
-        offene = [b] + offene
-    return _html(ui.pruefen_view(b, beleg, _kat_liste(s), offene, _bewertung(s, b), extraktion, config.regeln()))
+    reiter = reiter or b.richtung
+    zaehler = {"einnahme": sum(1 for x in offene if x.richtung == "einnahme"), "ausgabe": sum(1 for x in offene if x.richtung == "ausgabe")}
+    liste = [x for x in offene if x.richtung == reiter]
+    if b.status != "vorschlag" or b.id not in {x.id for x in liste}:
+        liste = [b] + liste
+    return _html(ui.pruefen_view(b, beleg, _kat_liste(s), liste, _bewertung(s, b), extraktion, config.regeln(), reiter, zaehler))
 
 
 @app.get("/ui/manuell", response_class=HTMLResponse)
@@ -269,9 +283,10 @@ async def api_bestaetigen(buchung_id: int, request: Request, s: Session = Depend
     _buchung_aus_form(b, form)
     if not b.kategorie_id:
         return _pruefen_detail(s, b)
+    reiter = b.richtung
     _bestaetigen(s, b, vorher_kat, vorher_weg)
     matching.matche(s)
-    return ui_pruefen(None, s)
+    return ui_pruefen(None, reiter, s)
 
 
 @app.post("/api/buchung/neu", response_class=HTMLResponse)
@@ -326,9 +341,11 @@ def _buchung_loeschen(s: Session, b: Buchung) -> None:
 def api_buchung_loeschen(buchung_id: int, s: Session = Depends(get_session)) -> HTMLResponse:
     b = s.get(Buchung, buchung_id)
     if b:
+        reiter = b.richtung
         _buchung_loeschen(s, b)
         s.commit()
-    return ui_pruefen(None, s)
+        return ui_pruefen(None, reiter, s)
+    return ui_pruefen(None, None, s)
 
 
 def _neu_erkennen(s: Session, b: Buchung) -> bool:
@@ -390,7 +407,7 @@ async def api_buchungen_neu_erkennen(request: Request, s: Session = Depends(get_
         if b and _neu_erkennen(s, b):
             n += 1
     s.commit()
-    return _html(ui.meldung_box(f"{n} von {len(ids)} Vorschlägen neu erkannt.") + ui_pruefen(None, s).body.decode())
+    return _html(ui.meldung_box(f"{n} von {len(ids)} Vorschlägen neu erkannt.") + ui_pruefen(None, None, s).body.decode())
 
 
 @app.post("/api/buchungen/loeschen", response_class=HTMLResponse)
@@ -405,7 +422,7 @@ async def api_buchungen_loeschen(request: Request, s: Session = Depends(get_sess
             _buchung_loeschen(s, b)
             n += 1
     s.commit()
-    antwort = ui_pruefen(None, s)
+    antwort = ui_pruefen(None, None, s)
     return _html(ui.meldung_box(f"{n} Buchungen gelöscht. Belegdateien liegen in Belege/Papierkorb.") + antwort.body.decode())
 
 

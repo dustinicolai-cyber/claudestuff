@@ -11,6 +11,15 @@ from .export import eur_fmt
 from .models import Anlagegut, Beleg, Buchung, Kategorie, Kontobewegung, MailFund, Regel
 from .steuerlogik import Bewertung, Zelle, afa_fuer_jahr
 
+ICON = {
+    "check": '<svg viewBox="0 0 24 24"><path d="M5 12l5 5L20 7"/></svg>',
+    "pfeil": '<svg viewBox="0 0 24 24"><path d="M5 12h14m-6-6l6 6-6 6"/></svg>',
+    "reload": '<svg viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.3-5.7M20 4v5h-5"/></svg>',
+    "x": '<svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg>',
+    "plus": '<svg viewBox="0 0 24 24"><path d="M12 5v14m-7-7h14"/></svg>',
+    "minus": '<svg viewBox="0 0 24 24"><path d="M5 12h14"/></svg>',
+}
+
 STUFEN = {"zugferd": "E-Rechnung (XML)", "pdf": "PDF-Text", "ocr": "Vision-OCR", "manuell": "manuell", "keine": "keine", "kontoauszug": "Kontoauszug"}
 
 
@@ -48,19 +57,28 @@ def import_view(ollama_status: dict, ki_an: bool) -> str:
 <section>
   <h2>Import</h2>
   <p class="muted">Reihenfolge: E-Rechnung (ZUGFeRD/XRechnung) → PDF-Text → Vision-OCR → Klassifizierung. Die erste Stufe, die greift, gewinnt. Nichts wird ohne Bestätigung verbucht.</p>
-  <div id="dropzone" class="dropzone" tabindex="0">
-    <strong>Belege hierher ziehen</strong> oder <label class="link">auswählen<input id="dateien" type="file" multiple accept=".pdf,.xml,.png,.jpg,.jpeg,.tif,.tiff,.webp,.heic" hidden></label>
-    <div class="muted">PDF, XRechnung-XML, Fotos/Scans</div>
+  <div class="dropzonen">
+    <div class="dropzone minus-zone" data-richtung="ausgabe" tabindex="0">
+      <div class="dz-icon">{ICON["minus"]}</div>
+      <strong>Ausgaben</strong><div class="muted">Eingangsrechnungen, Quittungen, Abos</div>
+      <label class="link">Dateien auswählen<input type="file" multiple data-richtung="ausgabe" accept=".pdf,.xml,.png,.jpg,.jpeg,.tif,.tiff,.webp,.heic" hidden></label>
+    </div>
+    <div class="dropzone plus-zone" data-richtung="einnahme" tabindex="0">
+      <div class="dz-icon">{ICON["plus"]}</div>
+      <strong>Einnahmen</strong><div class="muted">Eigene Ausgangsrechnungen, Gutschriften</div>
+      <label class="link">Dateien auswählen<input type="file" multiple data-richtung="einnahme" accept=".pdf,.xml,.png,.jpg,.jpeg,.tif,.tiff,.webp,.heic" hidden></label>
+    </div>
   </div>
   <div class="row">
     <label class="check"><input type="checkbox" id="ki" {"checked" if ki_an else ""}> KI-Stufen (Ollama) verwenden</label>
     <span>{ki}</span>
   </div>
-  <table class="tabelle" id="import-tabelle"><thead><tr><th>Datei</th><th>Status</th><th>Stufe</th><th>Konfidenz</th><th>Meldung</th></tr></thead><tbody></tbody></table>
+  <table class="tabelle" id="import-tabelle"><thead><tr><th>Datei</th><th>Art</th><th>Status</th><th>Stufe</th><th>Konfidenz</th><th>Meldung</th></tr></thead><tbody></tbody></table>
 
   <h3>Ordner importieren</h3>
   <form hx-post="/api/import/ordner" hx-target="#ordner-ergebnis" hx-include="#ki" class="row">
-    <input name="pfad" placeholder="/Users/…/Downloads/Belege" size="50" required>
+    <input name="pfad" placeholder="/Users/…/Downloads/Belege" size="44" required>
+    <select name="richtung"><option value="ausgabe">als Ausgaben</option><option value="einnahme">als Einnahmen</option></select>
     <button>Alle Dateien im Ordner importieren</button>
   </form>
   <div id="ordner-ergebnis"></div>
@@ -74,50 +92,63 @@ def import_view(ollama_status: dict, ki_an: bool) -> str:
 </section>
 <script>
 (function(){{
-  const dz = document.getElementById('dropzone'), inp = document.getElementById('dateien');
   const tbody = document.querySelector('#import-tabelle tbody');
-  async function senden(f){{
+  async function senden(f, richtung){{
     const tr = document.createElement('tr');
-    tr.innerHTML = '<td>'+f.name.replace(/</g,'&lt;')+'</td><td colspan=4><span class="spinner"></span> wird verarbeitet…</td>';
+    tr.innerHTML = '<td>'+f.name.replace(/</g,'&lt;')+'</td><td>'+(richtung === 'einnahme' ? 'Einnahme' : 'Ausgabe')+'</td><td colspan=4><span class="spinner"></span> wird verarbeitet…</td>';
     tbody.prepend(tr);
-    const fd = new FormData(); fd.append('datei', f); fd.append('ki', document.getElementById('ki').checked ? '1' : '0');
-    try {{
-      const r = await fetch('/api/import', {{method:'POST', body: fd}});
-      tr.outerHTML = await r.text();
-    }} catch(e) {{ tr.children[1].textContent = 'Fehler: ' + e; }}
+    const fd = new FormData(); fd.append('datei', f); fd.append('richtung', richtung); fd.append('ki', document.getElementById('ki').checked ? '1' : '0');
+    try {{ const r = await fetch('/api/import', {{method:'POST', body: fd}}); tr.outerHTML = await r.text(); }}
+    catch(e) {{ tr.children[2].textContent = 'Fehler: ' + e; }}
     document.dispatchEvent(new CustomEvent('zaehler-aktualisieren'));
   }}
-  function alle(files){{ for (const f of files) senden(f); }}
-  dz.addEventListener('dragover', e => {{ e.preventDefault(); dz.classList.add('aktiv'); }});
-  dz.addEventListener('dragleave', () => dz.classList.remove('aktiv'));
-  dz.addEventListener('drop', e => {{ e.preventDefault(); dz.classList.remove('aktiv'); alle(e.dataTransfer.files); }});
-  inp.addEventListener('change', () => {{ alle(inp.files); inp.value=''; }});
+  document.querySelectorAll('.dropzone').forEach(dz => {{
+    const richtung = dz.dataset.richtung, inp = dz.querySelector('input[type=file]');
+    dz.addEventListener('dragover', e => {{ e.preventDefault(); dz.classList.add('aktiv'); }});
+    dz.addEventListener('dragleave', () => dz.classList.remove('aktiv'));
+    dz.addEventListener('drop', e => {{ e.preventDefault(); dz.classList.remove('aktiv'); for (const f of e.dataTransfer.files) senden(f, richtung); }});
+    inp.addEventListener('change', () => {{ for (const f of inp.files) senden(f, richtung); inp.value = ''; }});
+  }});
 }})();
 </script>"""
 
 
-def import_zeile(name: str, erg) -> str:
+def import_zeile(name: str, erg, richtung: str = "ausgabe") -> str:
     cls = {"neu": "ok", "duplikat": "mid", "fehler": "low"}.get(erg.status, "")
     link = f' <a href="#" hx-get="/ui/pruefen/{erg.buchung_id}" hx-target="#main" hx-push-url="false">prüfen →</a>' if erg.buchung_id else ""
-    return (f'<tr><td>{h(name)}</td><td><span class="badge {cls}">{h(erg.status)}</span></td>'
+    art = '<span class="plus">Einnahme</span>' if richtung == "einnahme" else '<span class="minus">Ausgabe</span>'
+    return (f'<tr><td>{h(name)}</td><td>{art}</td><td><span class="badge {cls}">{h(erg.status)}</span></td>'
             f'<td>{stufe_badge(erg.stufe)}</td><td>{konf_badge(erg.konfidenz)}</td><td>{h(erg.meldung)}{link}</td></tr>')
 
 
 # ------------------------------------------------------------- Prüfen
 
-def pruefen_leer() -> str:
-    return """<section><h2>Prüfen</h2><p class="ok-box">Keine offenen Vorschläge. Alles bestätigt.</p>
+def _reiter_html(reiter: str, zaehler: dict) -> str:
+    def t(r: str, name: str, cls: str) -> str:
+        n = zaehler.get(r, 0)
+        return (f'<button type="button" class="{"aktiv" if reiter == r else ""} {cls}" hx-get="/ui/pruefen?richtung={r}" hx-target="#main">'
+                f'{name} <span class="z">{n}</span></button>')
+    return f'<div class="tabs reiter">{t("ausgabe", "Ausgaben", "minus-tab")}{t("einnahme", "Einnahmen", "plus-tab")}</div>'
+
+
+def pruefen_leer(reiter: str = "ausgabe", zaehler: dict | None = None) -> str:
+    zaehler = zaehler or {}
+    andere = "einnahme" if reiter == "ausgabe" else "ausgabe"
+    hinweis = (f'<p class="muted">Im Reiter {"Einnahmen" if andere == "einnahme" else "Ausgaben"} warten noch {zaehler.get(andere, 0)} Vorschläge.</p>'
+               if zaehler.get(andere) else '<p class="muted">Alles bestätigt.</p>')
+    return f"""<section><div class="row zwischen"><h2>Prüfen</h2>{_reiter_html(reiter, zaehler)}</div>
+    <p class="ok-box"><span>Keine offenen {"Einnahmen" if reiter == "einnahme" else "Ausgaben"}-Vorschläge.</span></p>{hinweis}
     <p><a href="#" hx-get="/ui/manuell" hx-target="#main">Buchung von Hand erfassen</a></p></section>"""
 
 
 def pruefen_view(b: Buchung, beleg: Beleg | None, kategorien: list[Kategorie], offene: list[Buchung],
-                 bw: Bewertung | None, extraktion: dict, cfg: dict) -> str:
+                 bw: Bewertung | None, extraktion: dict, cfg: dict, reiter: str = "ausgabe", zaehler: dict | None = None) -> str:
+    zaehler = zaehler or {}
     liste = "".join(
         f'<li class="{"aktiv" if x.id == b.id else ""}"><input type="checkbox" name="ids" value="{x.id}" aria-label="auswählen">'
         f'<a href="#" hx-get="/ui/pruefen/{x.id}" hx-target="#main">'
         f'{konf_badge(x.konfidenz)} {h(d(x.datum))} · {h(x.lieferant or "?")} · {eur_fmt(x.betrag_brutto)}</a></li>'
         for x in offene[:200])
-    vorschau = ""
     if beleg:
         if beleg.mime == "application/pdf" or beleg.dateipfad.lower().endswith(".pdf"):
             vorschau = f'<iframe class="vorschau" src="/beleg/{beleg.id}/datei#toolbar=0"></iframe>'
@@ -130,13 +161,14 @@ def pruefen_view(b: Buchung, beleg: Beleg | None, kategorien: list[Kategorie], o
     return f"""
 <section class="pruefen">
   <aside>
-    <h2>Prüfen <span class="muted">({len(offene)})</span></h2>
-    <p class="muted">Niedrigste Konfidenz zuerst. <kbd>⏎</kbd> bestätigen &amp; weiter · <kbd>Esc</kbd> überspringen</p>
+    <div class="row zwischen"><h2>Prüfen</h2></div>
+    {_reiter_html(reiter, zaehler)}
+    <p class="muted klein">Niedrigste Konfidenz zuerst. <kbd>⏎</kbd> bestätigen &amp; weiter · <kbd>Esc</kbd> überspringen</p>
     <form id="pruef-liste" hx-post="/api/buchungen/loeschen" hx-target="#main" hx-confirm="Ausgewählte Buchungen löschen? Die Belegdateien wandern in Belege/Papierkorb.">
       <div class="row zwischen listen-leiste">
         <label class="check klein"><input type="checkbox" id="alle-waehlen"> alle</label>
-        <span><button type="button" class="klein sekundaer auswahl-aktion" disabled hx-post="/api/buchungen/neu-erkennen" hx-include="#pruef-liste" hx-target="#main" title="Extraktion mit den aktuellen Regeln wiederholen">Neu erkennen</button>
-        <button type="submit" class="klein gefahr auswahl-aktion" id="auswahl-loeschen" disabled>Löschen (0)</button></span>
+        <span><button type="button" class="klein outline-orange auswahl-aktion" disabled hx-post="/api/buchungen/neu-erkennen" hx-include="#pruef-liste" hx-target="#main" title="Extraktion mit den aktuellen Regeln wiederholen">{ICON["reload"]}Neu erkennen</button>
+        <button type="submit" class="klein outline-rot auswahl-aktion" id="auswahl-loeschen" disabled>{ICON["x"]}Löschen (0)</button></span>
       </div>
       <ul class="liste">{liste}</ul>
     </form>
@@ -144,10 +176,9 @@ def pruefen_view(b: Buchung, beleg: Beleg | None, kategorien: list[Kategorie], o
     (function(){{
       const f = document.getElementById('pruef-liste'), alle = document.getElementById('alle-waehlen'), knopf = document.getElementById('auswahl-loeschen');
       const boxen = () => [...f.querySelectorAll('input[name=ids]')];
-      function zaehlen(){{ const n = boxen().filter(b => b.checked).length; f.querySelectorAll('.auswahl-aktion').forEach(k => k.disabled = !n); knopf.textContent = 'Löschen (' + n + ')'; }}
+      function zaehlen(){{ const n = boxen().filter(b => b.checked).length; f.querySelectorAll('.auswahl-aktion').forEach(k => k.disabled = !n); knopf.lastChild.textContent = 'Löschen (' + n + ')'; }}
       alle.addEventListener('change', () => {{ boxen().forEach(b => b.checked = alle.checked); zaehlen(); }});
       f.addEventListener('change', e => {{ if (e.target.name === 'ids') zaehlen(); }});
-      // Shift-Klick: Bereich markieren
       let letzte = null;
       f.addEventListener('click', e => {{ if (e.target.name !== 'ids') return; const b = boxen(); const i = b.indexOf(e.target);
         if (e.shiftKey && letzte !== null) {{ const [a, z] = [Math.min(i, letzte), Math.max(i, letzte)]; for (let k = a; k <= z; k++) b[k].checked = e.target.checked; zaehlen(); }} letzte = i; }});
@@ -171,13 +202,22 @@ def buchung_formular(b: Buchung, kategorien: list[Kategorie], cfg: dict, action:
     m = json.loads(b.meta_json or "{}")
     opts = "".join(f'<option value="{k.id}" data-sonderfall="{h(k.sonderfall or "")}" data-richtung="{k.richtung}" {"selected" if k.id == b.kategorie_id else ""}>'
                    f'{h(k.name)}{f" (Zeile {k.eur_zeile})" if k.eur_zeile else ""}</option>' for k in kategorien)
-    knopf = "Bestätigen &amp; weiter ⏎" if naechste else "Speichern"
-    skip = f'<button type="button" class="sekundaer" hx-get="/ui/pruefen?ueberspringen={b.id}" hx-target="#main">Überspringen (Esc)</button>' if naechste and b.id else ""
-    loeschen = f'<button type="button" class="gefahr" hx-post="/api/buchung/{b.id}/loeschen" hx-confirm="Buchung wirklich löschen? Die Belegdatei wandert nach Belege/Papierkorb." hx-target="#main">Löschen</button>' if b.id else ""
-    neu_erkennen = f'<button type="button" class="sekundaer" hx-post="/api/buchung/{b.id}/neu-erkennen" hx-target="#main" title="Felder aus der Belegdatei neu ziehen">Neu erkennen</button>' if b.id and b.beleg_id and b.status == "vorschlag" else ""
+    knopf = "Bestätigen &amp; weiter" if naechste else "Speichern"
+    skip = f'<button type="button" class="outline-gelb" hx-get="/ui/pruefen?ueberspringen={b.id}&richtung={b.richtung}" hx-target="#main">{ICON["pfeil"]}Überspringen <kbd>Esc</kbd></button>' if naechste and b.id else ""
+    neu_erkennen = f'<button type="button" class="outline-orange" hx-post="/api/buchung/{b.id}/neu-erkennen" hx-target="#main" title="Felder aus der Belegdatei neu ziehen">{ICON["reload"]}Neu erkennen</button>' if b.id and b.beleg_id and b.status == "vorschlag" else ""
+    loeschen = f'<button type="button" class="outline-rot" hx-post="/api/buchung/{b.id}/loeschen" hx-confirm="Buchung wirklich löschen? Die Belegdatei wandert nach Belege/Papierkorb." hx-target="#main">{ICON["x"]}Löschen</button>' if b.id else ""
+    if titel is None:
+        titel = (b.lieferant or "Unbekannter Beleg") if b.id else "Neue Buchung"
+    untertitel = f'{h(d(b.datum))} · <span class="{"plus" if b.richtung == "einnahme" else "minus"}">{eur_fmt(b.betrag_brutto)}</span>' + (f' · {h(b.beschreibung[:60])}' if b.beschreibung else "") if b.id else ""
     return f"""
 <form id="buchung-form" hx-post="{action}" hx-target="#main" class="formular" autocomplete="off">
-  <h3>{h(titel or "Buchung")} {konf_badge(b.konfidenz) if b.id else ""} {'<span class="badge rc">§13b</span>' if b.reverse_charge else ''}</h3>
+  <div class="formular-kopf">
+    <div class="kopf-titel">
+      <h2>{h(titel)} {konf_badge(b.konfidenz) if b.id else ""} {'<span class="badge rc">§13b</span>' if b.reverse_charge else ''}</h2>
+      <div class="muted klein">{untertitel}</div>
+    </div>
+    <div class="row aktionen"><button type="submit" class="gruen">{ICON["check"]}{knopf} <kbd>⏎</kbd></button> {skip} {neu_erkennen} {loeschen}</div>
+  </div>
   <div class="grid2">
     <label>Datum <input type="date" name="datum" value="{b.datum.isoformat()}" required autofocus></label>
     <label>Richtung <select name="richtung"><option value="ausgabe" {"selected" if b.richtung == "ausgabe" else ""}>Ausgabe</option><option value="einnahme" {"selected" if b.richtung == "einnahme" else ""}>Einnahme</option></select></label>
@@ -207,7 +247,6 @@ def buchung_formular(b: Buchung, kategorien: list[Kategorie], cfg: dict, action:
     <label>Nutzungsdauer (Jahre) <input type="number" step="1" name="meta_nutzungsdauer_jahre" value="{h(str(m.get("nutzungsdauer_jahre", cfg["afa_nutzungsdauer_standard_jahre"])))}"></label>
     <span class="muted">GWG-Grenze {cfg["gwg_grenze_netto"]:.0f} € netto – darüber automatisch AfA</span></fieldset>
   {hinweise_html(b, bw)}
-  <div class="row aktionen"><button type="submit">{knopf}</button> {skip} {neu_erkennen} {loeschen}</div>
 </form>
 <script>
 (function(){{
@@ -224,7 +263,7 @@ def buchung_formular(b: Buchung, kategorien: list[Kategorie], cfg: dict, action:
   kat.addEventListener('change', sonderfall); sonderfall();
   f.addEventListener('keydown', e => {{
     if (e.key === 'Enter' && e.target.tagName !== 'TEXTAREA' && !e.isComposing) {{ e.preventDefault(); f.requestSubmit(); }}
-    if (e.key === 'Escape') {{ const s = f.querySelector('button.sekundaer'); if (s) s.click(); }}
+    if (e.key === 'Escape') {{ const s = f.querySelector('button.outline-gelb'); if (s) s.click(); }}
   }});
 }})();
 </script>"""

@@ -26,7 +26,7 @@ html,body{height:100%}
 body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.5 "Outfit","Avenir Next","Plus Jakarta Sans","Segoe UI Variable",-apple-system,BlinkMacSystemFont,"Helvetica Neue",Helvetica,Arial,sans-serif;display:grid;grid-template-columns:250px 1fr;grid-template-rows:auto 1fr;grid-template-areas:"side top" "side main";min-height:100vh}
 @media (max-width:900px){body{grid-template-columns:72px 1fr}.side .txt,.side .logo-txt,.side .user-txt{display:none}.side nav button{justify-content:center;padding:.7rem 0}}
 /* Sidebar */
-.side{grid-area:side;background:var(--bg2);border-right:1px solid var(--line);display:flex;flex-direction:column;padding:1.2rem .9rem;gap:1.2rem;position:sticky;top:0;height:100vh}
+.side{grid-area:side;align-self:start;background:var(--bg2);border-right:1px solid var(--line);display:flex;flex-direction:column;padding:1.2rem .9rem;gap:1.2rem;position:sticky;top:0;height:100vh}
 .logo{padding:.3rem .2rem .2rem}
 .logo .wortmarke{width:100%;height:auto;display:block;color:var(--fg)} .logo .wm{fill:currentColor}
 .logo .mark{width:44px;height:44px;border-radius:12px;background:var(--orange);display:grid;place-items:center;color:#fff;font-weight:800;font-size:1.2rem;box-shadow:0 6px 18px rgba(255,106,31,.35);flex:none}
@@ -88,8 +88,30 @@ a{color:var(--orange)}
 .badge.low{background:var(--rot-hell);color:var(--rot);border-color:transparent}
 .badge.rc{background:var(--orange-hell);color:var(--orange);border-color:transparent}
 .badge.stufe{background:var(--blau-hell);color:var(--blau);border-color:transparent}
-.dropzone{border:2px dashed var(--line);border-radius:16px;padding:2.4rem;text-align:center;background:var(--card);margin:.8rem 0;transition:border-color .15s,background .15s}
-.dropzone.aktiv,.dropzone:hover{border-color:var(--orange);background:var(--orange-hell)}
+.dropzonen{display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin:.8rem 0}
+@media (max-width:900px){.dropzonen{grid-template-columns:1fr}}
+.dropzone{border:2px dashed var(--line);border-radius:16px;padding:2rem 1.5rem;text-align:center;background:var(--card);transition:border-color .15s,background .15s,box-shadow .15s}
+.dropzone strong{font-size:1.15rem;display:block;margin:.2rem 0}
+.dropzone .dz-icon{width:44px;height:44px;border-radius:12px;margin:0 auto .6rem;display:grid;place-items:center;color:#fff}
+.dropzone .dz-icon svg{width:24px;height:24px;stroke:currentColor;fill:none;stroke-width:2.2;stroke-linecap:round}
+.dropzone.minus-zone .dz-icon{background:var(--rot)} .dropzone.plus-zone .dz-icon{background:var(--gruen)}
+.dropzone.minus-zone.aktiv,.dropzone.minus-zone:hover{border-color:var(--rot);background:var(--rot-hell)}
+.dropzone.plus-zone.aktiv,.dropzone.plus-zone:hover{border-color:var(--gruen);background:var(--gruen-hell)}
+/* Aktions-Buttons: Icon immer davor, Hover immer Vollfarbe mit weißer Schrift */
+button svg,.button svg{width:1.05em;height:1.05em;vertical-align:-.15em;margin-right:.4em;stroke:currentColor;fill:none;stroke-width:2.4;stroke-linecap:round;stroke-linejoin:round}
+button kbd{margin-left:.3em;border-color:rgba(255,255,255,.35);background:rgba(255,255,255,.15);color:inherit}
+button.gruen{background:var(--gruen);color:#fff;box-shadow:0 6px 16px rgba(34,197,94,.25)} button.gruen:hover{box-shadow:0 0 0 3px var(--gruen-hell),0 8px 26px rgba(34,197,94,.55)}
+button.outline-gelb,button.outline-orange,button.outline-rot{background:transparent;box-shadow:none;font-weight:600;border:1.5px solid}
+button.outline-gelb{color:var(--gelb);border-color:var(--gelb)} button.outline-gelb:hover{background:var(--gelb);color:#fff;box-shadow:0 6px 18px rgba(250,204,21,.35)}
+button.outline-orange{color:var(--orange);border-color:var(--orange)} button.outline-orange:hover{background:var(--orange);color:#fff;box-shadow:0 6px 18px rgba(255,106,31,.4)}
+button.outline-rot{color:var(--rot);border-color:var(--rot)} button.outline-rot:hover{background:var(--rot);color:#fff;box-shadow:0 6px 18px rgba(239,68,68,.4)}
+button.outline-gelb kbd,button.outline-orange kbd,button.outline-rot kbd{border-color:currentColor;background:transparent}
+button:disabled:hover{background:transparent;color:inherit;box-shadow:none}
+/* Reiter Einnahmen | Ausgaben */
+.tabs.reiter{margin:.2rem 0 .6rem;width:100%} .tabs.reiter button{flex:1;display:flex;justify-content:center;align-items:center;gap:.4rem}
+.tabs.reiter button .z{min-width:1.5em;padding:.05em .45em;border-radius:9px;font-size:.75em;background:var(--card);color:var(--muted)}
+.tabs.reiter button.aktiv .z{background:rgba(255,255,255,.25);color:#fff}
+.tabs.reiter button.minus-tab.aktiv{background:var(--rot);box-shadow:0 4px 12px rgba(239,68,68,.35)} .tabs.reiter button.plus-tab.aktiv{background:var(--gruen);box-shadow:0 4px 12px rgba(34,197,94,.35)}
 .karte{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:1.1rem 1.3rem;margin:.9rem 0;box-shadow:var(--schatten)}
 .karten{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:.9rem}
 /* Alerts: Erfolg grün ✓, Warnung gelb !, Fehler rot ! – Icon immer dabei, nie Farbe allein */
@@ -113,6 +135,12 @@ a{color:var(--orange)}
 .pruefen{display:grid;grid-template-columns:270px 1fr 1fr;gap:1.1rem;align-items:start}
 @media (max-width:1200px){.pruefen{grid-template-columns:1fr}.vorschau{min-height:50vh}}
 .pruefen aside{position:sticky;top:1rem;max-height:calc(100vh - 2rem);overflow:auto}
+.pruefen .vorschau-spalte{position:sticky;top:1rem}
+.pruefen .vorschau{height:calc(100vh - 7.5rem)}
+.formular-kopf{position:sticky;top:0;z-index:4;background:var(--card);margin:-1.2rem -1.3rem 1rem;padding:1rem 1.3rem .8rem;border-bottom:1px solid var(--line);border-radius:16px 16px 0 0}
+.formular-kopf h2{margin:0;font-size:1.25rem;display:flex;align-items:center;gap:.5rem;flex-wrap:wrap}
+.formular-kopf .aktionen{margin:.7rem 0 0;gap:.5rem}
+.formular-kopf .aktionen button{padding:.5rem .85rem}
 .liste{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:.35rem}
 .liste li{display:flex;align-items:center;gap:.45rem} .liste li input[type=checkbox]{flex:none;width:16px;height:16px;margin:0}
 .liste li a{display:block;flex:1;min-width:0;padding:.55rem .7rem;border-radius:12px;color:var(--fg);text-decoration:none;font-size:.86em;border:1px solid var(--line);background:var(--card)}
