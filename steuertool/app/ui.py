@@ -319,7 +319,7 @@ def buchung_formular(b: Buchung, kategorien: list[Kategorie], cfg: dict, action:
         <input name="beschreibung" value="{h(b.beschreibung)}" placeholder="Beschreibung" hidden>
       </div>"""
     return f"""
-<form id="buchung-form" hx-post="{action}" hx-target="#main" class="formular" autocomplete="off">
+<form id="buchung-form" hx-post="{action}" hx-target="#main" class="formular" autocomplete="off" data-weg="{h(b.klassifizierung_weg or "")}">
   <div class="formular-kopf">
     <div class="kopf-titel">
       <h2>{h(titel)} {'<span class="badge ok">bestätigt</span>' if korrektur else (konf_badge(b.konfidenz) if b.id else "")} {'<span class="badge rc">§13b</span>' if b.reverse_charge else ''}</h2>
@@ -342,7 +342,8 @@ def buchung_formular(b: Buchung, kategorien: list[Kategorie], cfg: dict, action:
     <label>Währung der Rechnung <select name="waehrung" id="f_waehrung"><option value="EUR" {"selected" if b.waehrung == "EUR" else ""}>EUR €</option><option value="USD" {"selected" if b.waehrung == "USD" else ""}>USD $</option></select></label>
     <label class="fremd" {"hidden" if b.waehrung == "EUR" else ""}>Rechnungsbetrag in $ <input type="number" step="0.01" name="betrag_fremd" id="f_fremd" value="{b.betrag_fremd:.2f}"></label>
     <div class="breit fremd muted klein" {"hidden" if b.waehrung == "EUR" else ""} id="f_kurs">Brutto in € ist der tatsächlich abgebuchte Betrag (Kontoauszug). Netto/USt werden daraus gerechnet.</div>
-    <label class="breit">Kategorie <select name="kategorie_id" id="f_kat" required><option value="">– bitte wählen –</option>{opts}</select></label>
+    <label class="breit">Kategorie <span class="muted klein" id="f_kat_hinweis"></span> <select name="kategorie_id" id="f_kat" required><option value="">– bitte wählen –</option>{opts}</select>
+      <span class="muted klein">Feste Zuordnungen Name → Kategorie: <a href="#" hx-get="/ui/zuordnungen" hx-target="#main">verwalten</a></span></label>
     <label class="breit check"><input type="checkbox" name="reverse_charge" value="1" {"checked" if b.reverse_charge else ""}> §13b Reverse-Charge (Steuerschuld liegt bei mir, UStVA Kz 46/47)</label>
   </div>
   <fieldset class="sonderfall" data-fuer="bewirtung"><legend>Bewirtung (Pflichtangaben)</legend>
@@ -374,6 +375,16 @@ def buchung_formular(b: Buchung, kategorien: list[Kategorie], cfg: dict, action:
     f.querySelectorAll('.sonderfall').forEach(fs => fs.hidden = !fs.dataset.fuer.split(' ').includes(sf));
   }}
   kat.addEventListener('change', sonderfall); sonderfall();
+  // Name gewählt → feste Zuordnung holen und Kategorie vorbelegen (nur wenn noch keine sichere Kategorie gesetzt ist)
+  const lief = f.querySelector('input[name=lieferant]'), katHinweis = f.querySelector('#f_kat_hinweis');
+  let katVonHand = false; kat.addEventListener('change', () => katVonHand = true);
+  if (lief) lief.addEventListener('change', async () => {{
+    const name = lief.value.trim(); if (!name) return;
+    const weg = f.dataset.weg || ''; const unsicher = !kat.value || weg === '' || weg === '-' || weg.startsWith('fallback') || weg.startsWith('ki:') || weg === 'manuell';
+    if (katVonHand || !unsicher) return;
+    try {{ const r = await fetch('/api/zuordnung/fuer?lieferant=' + encodeURIComponent(name)); const z = await r.json();
+      if (z.kategorie_id && [...kat.options].some(o => o.value == z.kategorie_id)) {{ kat.value = z.kategorie_id; sonderfall(); if (katHinweis) katHinweis.textContent = 'aus Zuordnung „' + z.muster + '“'; }} }} catch (e) {{}}
+  }});
   const waehrung = f.querySelector('#f_waehrung'), fremd = f.querySelector('#f_fremd'), kurs = f.querySelector('#f_kurs');
   function waehrungAnzeigen(){{
     const usd = waehrung.value === 'USD';
@@ -743,6 +754,57 @@ def einstellungen_view(ollama_status: dict, mail: dict, hat_pw: bool, regeln: li
       <input name="muster" placeholder="z. B. adobe oder ^df\\.eu" required> <select name="kategorie_id">{kat_opts}</select>
       <label class="check"><input type="checkbox" name="ist_regex" value="1"> Regex</label> <button class="klein">Regel anlegen</button>
     </form></div>
+</section>"""
+
+
+def zuordnung_zeile(e: dict, kategorien: list[Kategorie], gespeichert: bool = False) -> str:
+    """Eine Zeile Name → Kategorie; Änderung im Dropdown speichert sofort (legt eine Regel an oder löst sie)."""
+    kat_id = e["kategorie"].id if e.get("kategorie") else None
+    opts = "".join(f'<option value="{k.id}" {"selected" if k.id == kat_id else ""}>{h(k.name)}</option>'
+                   for k in kategorien if k.richtung == e["richtung"])
+    quelle = ('<span class="badge ok" title="Regel greift bei allen Namen, die dieses Muster enthalten">Regel: ' + h(e["regel"].muster) + '</span>') if e.get("regel") \
+        else ('<span class="muted klein">zuletzt: ' + h(e["zuletzt"].name) + '</span>' if e.get("zuletzt") else '<span class="muted klein">–</span>')
+    zuletzt_knopf = (f'<button type="button" class="klein btn-ghost" title="Zuletzt genutzte Kategorie als feste Zuordnung übernehmen" '
+                     f'onclick="const s=this.closest(\'tr\').querySelector(\'select\'); s.value=\'{e["zuletzt"].id}\'; s.dispatchEvent(new Event(\'change\',{{bubbles:true}}))">übernehmen</button>'
+                     if e.get("zuletzt") and not e.get("regel") else "")
+    offen = f' <span class="muted klein">({e["offen"]} offen)</span>' if e.get("offen") else ""
+    return (f'<tr class="zo {"gespeichert" if gespeichert else ""}" data-name="{h(e["name"].lower())}" hx-post="/api/zuordnung" hx-trigger="change" hx-include="closest tr" hx-target="this" hx-swap="outerHTML" hx-disinherit="*">'
+            f'<td><input type="hidden" name="lieferant" value="{h(e["name"])}"><b>{h(e["name"])}</b></td>'
+            f'<td><span class="badge {"plus-b" if e["richtung"] == "einnahme" else "minus-b"}">{"Einnahme" if e["richtung"] == "einnahme" else "Ausgabe"}</span></td>'
+            f'<td class="num">{e["anzahl"]}{offen}</td>'
+            f'<td><select name="kategorie_id" aria-label="Kategorie für {h(e["name"])}"><option value="">– keine feste Zuordnung –</option>{opts}</select></td>'
+            f'<td>{quelle} {zuletzt_knopf}</td></tr>')
+
+
+def zuordnungen_view(eintraege: list[dict], kategorien: list[Kategorie]) -> str:
+    rows = "".join(zuordnung_zeile(e, kategorien) for e in eintraege)
+    mit = sum(1 for e in eintraege if e.get("regel"))
+    return f"""
+<section class="zuordnungen" id="zuordnungen">
+  <p class="muted erkl">Jeder Name bekommt hier einmal seine Kategorie – danach landen neue Belege und Kontobewegungen dieser Firma automatisch richtig, vor jeder KI.
+  Beim ersten Bestätigen eines Belegs merkt sich Steuerfuchs die Zuordnung von selbst; hier siehst und änderst du sie.</p>
+  <div class="row zwischen">
+    <h3 style="margin:0">Namen → Kategorie <span class="muted klein">{mit} von {len(eintraege)} fest zugeordnet</span></h3>
+    <span class="row" style="margin:0;gap:.8rem"><input type="search" class="listen-suche" placeholder="Name suchen …" aria-label="Name suchen"><span class="muted klein listen-zaehler"></span>
+      <button class="btn-secondary klein" hx-post="/api/zuordnungen/anwenden" hx-target="#main" title="Alle offenen Vorschläge unter Prüfen mit diesen Zuordnungen umkategorisieren">auf offene Vorschläge anwenden</button></span>
+  </div>
+  <div class="scroll"><table class="tabelle kompakt zo-tabelle"><colgroup><col class="c-name"><col class="c-art"><col class="c-anzahl"><col class="c-kat"><col class="c-quelle"></colgroup>
+    <thead><tr><th>Lieferant / Kunde</th><th>Art</th><th class="num">Buchungen</th><th>Kategorie (fest)</th><th>Herkunft</th></tr></thead>
+    <tbody>{rows or '<tr><td colspan=5 class="muted">Noch keine Buchungen – Namen erscheinen hier nach dem ersten Import.</td></tr>'}</tbody></table></div>
+  <form hx-post="/api/zuordnung" hx-target="#zuordnungen tbody" hx-swap="afterbegin" class="row inline neu-zuordnung">
+    <input name="lieferant" placeholder="Neuen Namen vorab zuordnen, z. B. Adobe" required>
+    <select name="kategorie_id" required><option value="">Kategorie …</option>{''.join(f'<option value="{k.id}">{h(k.name)}</option>' for k in kategorien if k.richtung == "ausgabe")}</select>
+    <button class="klein btn-secondary">zuordnen</button>
+    <span class="muted klein">Greift, sobald der Name in Lieferant oder Verwendungszweck vorkommt.</span>
+  </form>
+  <script>
+  (function(){{
+    const box = document.getElementById('zuordnungen'), suche = box.querySelector('.listen-suche'), zaehler = box.querySelector('.listen-zaehler');
+    suche.addEventListener('input', () => {{ const q = suche.value.trim().toLowerCase(); let n = 0, g = 0;
+      box.querySelectorAll('tbody tr.zo').forEach(tr => {{ g++; const ok = !q || tr.dataset.name.includes(q) || tr.querySelector('select').selectedOptions[0]?.text.toLowerCase().includes(q); tr.hidden = !ok; if (ok) n++; }});
+      zaehler.textContent = q ? n + ' von ' + g : ''; }});
+  }})();
+  </script>
 </section>"""
 
 

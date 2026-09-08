@@ -428,3 +428,38 @@ def test_finanzamt_aus_kontoauszug_und_rueckbuchung():
         z = {e["zeile"]: e["betrag"] for e in c.get("/export/eur.json?jahr=2025").json()["zeilen"] if e["zeile"]}
         assert 48 not in z
         c.post("/api/einstellungen/ust-basis", data={"basis": "zahlung"})
+
+
+def test_zuordnungen_name_zu_kategorie():
+    """Name → Kategorie: erstes Bestätigen lernt, Seite zeigt es, Dropdown ändert die Regel, Formular-API liefert sie."""
+    with client() as c:
+        c.post("/api/import", files={"datei": ("adobe.pdf", erzeuge.text_pdf(erzeuge.ADOBE_TEXT), "application/pdf")}, data={"ki": "0"})
+        with Session(engine()) as s:
+            b = s.exec(select(Buchung)).first()
+            software = s.exec(select(Kategorie).where(Kategorie.schluessel == "software")).first()
+            werbung = s.exec(select(Kategorie).where(Kategorie.schluessel == "werbekosten")).first()
+        # ohne Korrektur bestätigen → Zuordnung wird trotzdem gelernt
+        c.post(f"/api/buchung/{b.id}/bestaetigen", data={"datum": "2025-02-05", "richtung": "ausgabe", "lieferant": b.lieferant, "betrag_netto": "59.49", "ust_satz": "0",
+                                                        "ust_betrag": "0", "betrag_brutto": "59.49", "kategorie_id": str(software.id), "waehrung": "EUR", "betrag_fremd": "0"})
+        z = c.get("/api/zuordnung/fuer", params={"lieferant": "Adobe Systems Software Ireland Ltd"}).json()
+        assert z.get("kategorie_id") == software.id and z["muster"] == "adobe systems"
+        t = c.get("/ui/zuordnungen").text
+        assert "Regel: adobe systems" in t and 'hx-post="/api/zuordnung"' in t and "1 von 1 fest zugeordnet" in t
+        # per Dropdown umhängen → neue Kategorie greift
+        r = c.post("/api/zuordnung", data={"lieferant": b.lieferant, "kategorie_id": str(werbung.id)})
+        assert 'class="zo gespeichert"' in r.text and f'<option value="{werbung.id}" selected' in r.text
+        assert c.get("/api/zuordnung/fuer", params={"lieferant": "Adobe Systems"}).json()["kategorie_id"] == werbung.id
+        # lösen
+        r = c.post("/api/zuordnung", data={"lieferant": b.lieferant, "kategorie_id": ""})
+        assert "keine feste Zuordnung" in r.text and c.get("/api/zuordnung/fuer", params={"lieferant": "Adobe Systems"}).json() == {}
+        # Name vorab zuordnen, dann offener Vorschlag wird nachgezogen
+        c.post("/api/zuordnung", data={"lieferant": "Figma", "kategorie_id": str(software.id)})
+        c.post("/api/buchung/neu", data={"datum": "2025-03-01", "richtung": "ausgabe", "lieferant": "Sonstwer", "betrag_brutto": "10", "ust_satz": "19", "kategorie_id": str(werbung.id), "waehrung": "EUR"})
+        with Session(engine()) as s:
+            s.add(Buchung(datum=date(2025, 3, 2), richtung="ausgabe", lieferant="Figma, Inc", betrag_brutto=17.85, betrag_netto=17.85, status="vorschlag", kategorie_id=werbung.id, klassifizierung_weg="fallback"))
+            s.commit()
+        r = c.post("/api/zuordnungen/anwenden")
+        assert "1 offene Vorschläge umkategorisiert" in r.text
+        with Session(engine()) as s:
+            f = s.exec(select(Buchung).where(Buchung.lieferant == "Figma, Inc")).first()
+            assert f.kategorie_id == software.id and f.klassifizierung_weg.startswith("regel:")

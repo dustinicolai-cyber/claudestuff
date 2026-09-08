@@ -80,6 +80,11 @@ Kontoauszüge (CSV deutscher Banken oder CAMT.053) unter Import einlesen; Matchi
   KI (Ollama, bekommt Kategorienliste samt Beispielen), sonst „Sonstige Betriebsausgaben“ mit niedriger
   Konfidenz. Neue Standard-Kategorien und -Beispiele werden beim Start in die eigene Datei gemischt;
   eigene Änderungen bleiben erhalten.
+- **Zuordnungen (Name → Kategorie)**: eigene Seite in der Seitenleiste. Jeder bekannte Lieferant/Kunde
+  steht dort mit seiner festen Kategorie; das Dropdown ändert sie sofort. Beim ersten Bestätigen eines
+  Belegs wird die Zuordnung automatisch gelernt, im Formular wird die Kategorie beim Wählen des Namens
+  vorbelegt, „auf offene Vorschläge anwenden“ zieht Wartendes nach. Technisch sind das die Regeln, die
+  vor jeder KI geprüft werden.
 - **Rückbuchungen**: Zahlung und Storno (gleicher Betrag, umgekehrtes Vorzeichen, gleicher Partner,
   ±14 Tage) werden im Abgleich als Paar markiert und lassen sich mit einem Klick beide ignorieren.
 - **Bewirtung** 70 %, Warnung bei fehlendem Anlass/Teilnehmern.

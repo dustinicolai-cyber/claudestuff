@@ -242,6 +242,10 @@ details.frage[open] summary .btn-ghost{text-decoration:underline}
 .bz td.num input{text-align:right;font-variant-numeric:tabular-nums}
 .bz.gespeichert td{animation:gespeichert 1.4s ease-out} @keyframes gespeichert{0%{background:var(--gruen-hell)}100%{background:transparent}}
 .bz .badge{white-space:nowrap}
+.zo-tabelle{table-layout:fixed;min-width:820px} .zo-tabelle col.c-art{width:96px} .zo-tabelle col.c-anzahl{width:110px} .zo-tabelle col.c-kat{width:300px} .zo-tabelle col.c-quelle{width:260px}
+.zo-tabelle td{vertical-align:middle} .zo select{width:100%;min-width:0;padding:.35rem .5rem;font-size:.9em;background:transparent;border:1px solid transparent;border-radius:8px;color:var(--fg)}
+.zo select:hover{border-color:var(--line);background:var(--card2)} .zo select:focus{border-color:var(--orange);background:var(--card2);box-shadow:none;outline:none}
+.zo.gespeichert td{animation:gespeichert 1.4s ease-out} .zo-tabelle td b{font-weight:600} .zuordnungen .listen-suche{width:14rem} .neu-zuordnung{margin-top:1rem} .neu-zuordnung input{min-width:16rem}
 .kombi{position:relative;display:flex;align-items:center;width:100%} .kombi input{flex:1;min-width:0;padding-right:2rem}
 .kombi-knopf,button.kombi-knopf{position:absolute;right:.3rem;top:50%;transform:translateY(-50%);background:transparent;border:0;box-shadow:none;color:var(--muted);cursor:pointer;padding:.15rem .4rem;font-size:.85em;line-height:1;filter:none}
 .kombi-knopf:hover,button.kombi-knopf:hover{color:var(--orange);background:transparent;filter:none;transform:translateY(-50%)}
@@ -305,6 +309,7 @@ footer{color:var(--muted);font-size:.78em;padding:1.4rem 0 0}
     <button data-ansicht="jahresabschluss" data-titel="Jahresabschluss" hx-get="/ui/jahresabschluss" hx-target="#main"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="16" rx="3"/><path d="M3 10h18M8 3v4m8-4v4"/></svg><span class="txt">Jahresabschluss</span><span class="z text" id="z-abschluss"></span></button>
     <button data-ansicht="export" data-titel="Export für Elster" hx-get="/ui/export" hx-target="#main"><svg viewBox="0 0 24 24"><path d="M12 4v12m0 0l-4-4m4 4l4-4M4 20h16"/></svg><span class="txt">Export</span></button>
     <button data-ansicht="manuell" data-titel="Buchung erfassen" hx-get="/ui/manuell" hx-target="#main"><svg viewBox="0 0 24 24"><path d="M12 5v14m-7-7h14"/></svg><span class="txt">Buchung erfassen</span></button>
+    <button data-ansicht="zuordnungen" data-titel="Zuordnungen: Name → Kategorie" hx-get="/ui/zuordnungen" hx-target="#main"><svg viewBox="0 0 24 24"><path d="M20 12l-8 8-9-9V4h7l10 8z"/><circle cx="7.5" cy="7.5" r="1.2"/></svg><span class="txt">Zuordnungen</span></button>
     <button data-ansicht="einstellungen" data-titel="Einstellungen" hx-get="/ui/einstellungen" hx-target="#main"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 00.3 1.8l.1.1a2 2 0 01-2.8 2.8l-.1-.1a1.7 1.7 0 00-1.8-.3 1.7 1.7 0 00-1 1.5V21a2 2 0 01-4 0v-.1a1.7 1.7 0 00-1.1-1.5 1.7 1.7 0 00-1.8.3l-.1.1a2 2 0 01-2.8-2.8l.1-.1a1.7 1.7 0 00.3-1.8 1.7 1.7 0 00-1.5-1H3a2 2 0 010-4h.1a1.7 1.7 0 001.5-1.1 1.7 1.7 0 00-.3-1.8l-.1-.1a2 2 0 012.8-2.8l.1.1a1.7 1.7 0 001.8.3H9a1.7 1.7 0 001-1.5V3a2 2 0 014 0v.1a1.7 1.7 0 001 1.5 1.7 1.7 0 001.8-.3l.1-.1a2 2 0 012.8 2.8l-.1.1a1.7 1.7 0 00-.3 1.8V9a1.7 1.7 0 001.5 1H21a2 2 0 010 4h-.1a1.7 1.7 0 00-1.5 1z"/></svg><span class="txt">Einstellungen</span></button>
   </nav>
   <div class="unten">
@@ -396,7 +401,7 @@ footer{color:var(--muted);font-size:.78em;padding:1.4rem 0 0}
     ul.innerHTML = treffer.length ? treffer.map(n => '<span role="option">' + esc(n) + '</span>').join('') : '<span class="leer">' + (namen(inp).length ? 'keine Treffer' : 'noch keine Namen gespeichert') + '</span>';
     ul.hidden = false; k.classList.add('offen');
   }
-  function waehlen(k, opt){ const inp = k.querySelector('input'); inp.value = opt.textContent; schliessen(k); inp.dispatchEvent(new Event('input', {bubbles:true})); inp.dispatchEvent(new Event('change', {bubbles:true})); inp.focus(); }
+  function waehlen(k, opt){ const inp = k.querySelector('input'); inp.value = opt.textContent; schliessen(k); inp.dispatchEvent(new Event('change', {bubbles:true})); inp.focus(); }
   document.addEventListener('click', e => {
     const knopf = e.target.closest('.kombi-knopf');
     if (knopf) { const k = knopf.closest('.kombi'); const war = k.classList.contains('offen'); document.querySelectorAll('.kombi.offen').forEach(schliessen); if (!war) { oeffnen(k, ''); k.querySelector('input').focus(); } return; }

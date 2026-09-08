@@ -156,10 +156,11 @@ def _bestaetigen(s: Session, b: Buchung, vorher_kat: Optional[int], vorher_weg: 
     b.status = "bestaetigt"
     b.bestaetigt_am = datetime.now()
     b.konfidenz = 1.0
-    # Regel lernen: bei Korrektur immer, bei KI-/Fallback-Vorschlag auch beim Bestätigen
-    if b.lieferant and b.kategorie_id and k and k.schluessel not in ("anlagevermoegen",):
+    # Regel lernen: bei Korrektur immer, sonst beim ersten Bestätigen eines Namens (Name → Kategorie), damit
+    # dieselbe Firma künftig ohne Zutun richtig landet. Einnahmen ohne besondere Kategorie brauchen keine Regel.
+    if b.lieferant and b.kategorie_id and k and k.schluessel not in ("anlagevermoegen", "einnahmen"):
         korrigiert = vorher_kat != b.kategorie_id
-        if korrigiert or vorher_weg.startswith(("ki:", "fallback")):
+        if korrigiert or vorher_weg.startswith(("ki:", "fallback")) or not regelwerk.passende_regel(s, b.lieferant, b.beschreibung):
             r = regelwerk.regel_aus_korrektur(s, b.lieferant, b.kategorie_id)
             if r and not korrigiert:
                 r.erstellt_aus_korrektur = False
@@ -315,6 +316,80 @@ def _pruefen_detail(s: Session, b: Buchung, reiter: Optional[str] = None, jahr: 
     jahr = jahr or _standardjahr(s)
     return _html(ui.pruefen_view(b, beleg, _kat_liste(s), liste, _bewertung(s, b), extraktion, config.regeln(), reiter, zaehler,
                                  _bestaetigte(s, jahr), _mit_konto(s), jahr, _lieferanten(s)))
+
+
+def _zuordnungen(s: Session) -> list[dict]:
+    """Alle bekannten Namen (Lieferanten/Kunden) mit Anzahl, Richtung, zuletzt genutzter Kategorie und greifender Regel."""
+    kats = _kats(s)
+    namen: dict[str, dict] = {}
+    for b in sorted(s.exec(select(Buchung)).all(), key=lambda x: (x.datum, x.id or 0)):
+        n = (b.lieferant or "").strip()
+        if not n or b.storniert:
+            continue
+        e = namen.setdefault(n.lower(), {"name": n, "anzahl": 0, "einnahmen": 0, "ausgaben": 0, "zuletzt": None, "offen": 0})
+        e["anzahl"] += 1
+        e["einnahmen" if b.richtung == "einnahme" else "ausgaben"] += 1
+        if b.status == "vorschlag":
+            e["offen"] += 1
+        if b.kategorie_id in kats and b.status == "bestaetigt":
+            e["zuletzt"] = kats[b.kategorie_id]
+    out = []
+    for e in namen.values():
+        e["richtung"] = "einnahme" if e["einnahmen"] > e["ausgaben"] else "ausgabe"
+        r = regelwerk.passende_regel(s, e["name"])
+        e["regel"] = r
+        e["kategorie"] = kats.get(r.kategorie_id) if r and r.kategorie_id in kats else None
+        out.append(e)
+    out.sort(key=lambda e: e["name"].lower())
+    return out
+
+
+@app.get("/ui/zuordnungen", response_class=HTMLResponse)
+def ui_zuordnungen(s: Session = Depends(get_session)) -> HTMLResponse:
+    return _html(ui.zuordnungen_view(_zuordnungen(s), _kat_liste(s)))
+
+
+@app.post("/api/zuordnung", response_class=HTMLResponse)
+def api_zuordnung(lieferant: str = Form(...), kategorie_id: str = Form(""), s: Session = Depends(get_session)) -> HTMLResponse:
+    """Name → Kategorie festlegen (Regel anlegen/ändern) oder lösen (leer). Antwort: die aktualisierte Zeile."""
+    name = lieferant.strip()
+    if kategorie_id.isdigit():
+        regelwerk.regel_aus_korrektur(s, name, int(kategorie_id))
+    else:
+        r = regelwerk.passende_regel(s, name)
+        if r and not r.ist_regex:
+            s.delete(r)
+            s.commit()
+    eintrag = next((e for e in _zuordnungen(s) if e["name"].lower() == name.lower()), None)
+    if not eintrag:
+        kats = _kats(s)
+        r = regelwerk.passende_regel(s, name)
+        eintrag = {"name": name, "anzahl": 0, "einnahmen": 0, "ausgaben": 1, "richtung": "ausgabe", "zuletzt": None, "offen": 0,
+                   "regel": r, "kategorie": kats.get(r.kategorie_id) if r else None}
+    return _html(ui.zuordnung_zeile(eintrag, _kat_liste(s), gespeichert=True))
+
+
+@app.get("/api/zuordnung/fuer")
+def api_zuordnung_fuer(lieferant: str = "", s: Session = Depends(get_session)) -> dict:
+    """Für das Formular: Welche Kategorie ist mit diesem Namen verknüpft?"""
+    r = regelwerk.passende_regel(s, lieferant)
+    if not r:
+        return {}
+    k = s.get(Kategorie, r.kategorie_id)
+    return {"kategorie_id": r.kategorie_id, "name": k.name if k else "", "muster": r.muster} if k else {}
+
+
+@app.post("/api/zuordnungen/anwenden", response_class=HTMLResponse)
+def api_zuordnungen_anwenden(s: Session = Depends(get_session)) -> HTMLResponse:
+    """Alle offenen Vorschläge mit den Zuordnungen nachziehen."""
+    n = 0
+    for b in _offene(s):
+        r = regelwerk.passende_regel(s, b.lieferant, b.beschreibung)
+        if r and r.kategorie_id != b.kategorie_id:
+            b.kategorie_id, b.klassifizierung_weg, b.konfidenz = r.kategorie_id, f"regel:{r.id}", max(b.konfidenz or 0, 0.9)
+            s.add(b); n += 1
+    s.commit()
+    return _html(ui.meldung_box(f"{n} offene Vorschläge umkategorisiert.") + ui.zuordnungen_view(_zuordnungen(s), _kat_liste(s)))
 
 
 @app.get("/ui/manuell", response_class=HTMLResponse)
