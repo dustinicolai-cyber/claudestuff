@@ -159,40 +159,83 @@ def _reiter_html(reiter: str, zaehler: dict) -> str:
     return f'<div class="tabs reiter">{t("ausgabe", "Ausgaben", "minus-tab")}{t("einnahme", "Einnahmen", "plus-tab")}</div>'
 
 
-def bestaetigte_liste(buchungen: list[Buchung], aktuelle_id: int | None = None, limit: int = 300) -> str:
-    """Eingecheckte Buchungen zum Nachkorrigieren – öffnet dieselbe Maske wie beim Prüfen."""
-    eintraege = "".join(
-        f'<li class="{"aktiv" if x.id == aktuelle_id else ""}"><a href="#" hx-get="/ui/pruefen/{x.id}" hx-target="#main" title="Beleg korrigieren">'
-        f'<span class="txt">{h(d(x.datum))} · {h(x.lieferant or "?")} · {eur_fmt(x.betrag_brutto)}</span>{ICON["stift"]}</a></li>'
-        for x in buchungen[:limit])
-    mehr = f'<p class="mehr">{len(buchungen) - limit} weitere über die Suche oben.</p>' if len(buchungen) > limit else ""
-    return f"""<details class="bestaetigt-liste" id="bestaetigt-liste"><summary>Bestätigte Buchungen <span class="z">{len(buchungen)}</span></summary>
-      <p class="muted klein">Zum Korrigieren anklicken – Kunde, Betrag oder Kategorie ändern und „Korrektur speichern“.</p>
-      <input type="search" class="listen-suche" placeholder="Bestätigte durchsuchen …" aria-label="Bestätigte durchsuchen">
-      <ul class="liste">{eintraege or '<li class="muted klein">Noch nichts bestätigt.</li>'}</ul>{mehr}
-      <script>
-      (function(){{
-        const box = document.getElementById('bestaetigt-liste'), such = box.querySelector('.listen-suche');
-        such.addEventListener('input', () => {{ const q = such.value.trim().toLowerCase(); box.querySelectorAll('.liste li').forEach(li => li.hidden = q && !li.textContent.toLowerCase().includes(q)); }});
-        try {{ if (sessionStorage.getItem('bestaetigt-offen') === '1') box.open = true; box.addEventListener('toggle', () => sessionStorage.setItem('bestaetigt-offen', box.open ? '1' : '0')); }} catch (e) {{}}
-      }})();
-      </script></details>"""
+def lieferanten_datalist(namen: list[str]) -> str:
+    """Alphabetische Vorschlagsliste für das Feld Lieferant/Kunde (ein Mal pro Seite)."""
+    optionen = "".join(f'<option value="{h(n)}">' for n in namen)
+    return f'<datalist id="lieferanten">{optionen}</datalist>'
 
 
-def pruefen_leer(reiter: str = "ausgabe", zaehler: dict | None = None, bestaetigte: list[Buchung] | None = None) -> str:
+def bestaetigt_zeile(b: Buchung, kategorien: list[Kategorie], mit_konto: set, gespeichert: bool = False) -> str:
+    """Eine Zeile der Tabelle bestätigter Buchungen – die wichtigsten Felder direkt editierbar, Änderung speichert sofort."""
+    opts = "".join(f'<option value="{k.id}" {"selected" if k.id == b.kategorie_id else ""}>{h(k.name)}</option>'
+                   for k in kategorien if k.richtung == b.richtung)
+    konto = '<span class="badge ok" title="Kontobewegung zugeordnet">Konto ✓</span>' if b.id in mit_konto else '<span class="muted klein">–</span>'
+    return (f'<tr id="bz-{b.id}" class="bz {"gespeichert" if gespeichert else ""}" data-datum="{b.datum.isoformat()}" data-betrag="{b.betrag_brutto:.2f}" data-lieferant="{h((b.lieferant or "").lower())}" '
+            f'hx-post="/api/buchung/{b.id}/schnell" hx-trigger="change" hx-include="closest tr" hx-target="this" hx-swap="outerHTML">'
+            f'<td><input type="date" name="datum" value="{b.datum.isoformat()}" aria-label="Datum"></td>'
+            f'<td><span class="badge {"plus-b" if b.richtung == "einnahme" else "minus-b"}">{"Einnahme" if b.richtung == "einnahme" else "Ausgabe"}</span></td>'
+            f'<td><input name="lieferant" list="lieferanten" value="{h(b.lieferant)}" placeholder="Lieferant / Kunde" aria-label="Lieferant / Kunde"></td>'
+            f'<td><input name="beschreibung" value="{h(b.beschreibung)}" placeholder="–" aria-label="Beschreibung"></td>'
+            f'<td><select name="kategorie_id" aria-label="Kategorie">{opts}</select></td>'
+            f'<td class="num"><input type="number" step="0.01" name="betrag_brutto" value="{b.betrag_brutto:.2f}" aria-label="Brutto in Euro"></td>'
+            f'<td>{konto}</td>'
+            f'<td class="aktionen-zelle"><a href="#" class="btn-ghost" hx-get="/ui/pruefen/{b.id}" hx-target="#main" title="Alle Felder mit Belegvorschau bearbeiten">{ICON["stift"]}Bearbeiten</a></td></tr>')
+
+
+def bestaetigte_tabelle(buchungen: list[Buchung], kategorien: list[Kategorie], mit_konto: set, jahr: int | None, lieferanten: list[str], datalist: bool = True) -> str:
+    """Volle Breite: alle eingecheckten Buchungen des Jahres, Kernfelder direkt in der Zeile änderbar, Stift für die komplette Maske."""
+    rows = "".join(bestaetigt_zeile(b, kategorien, mit_konto) for b in buchungen)
+    return f"""
+<section class="bestaetigt-tabelle" id="bestaetigt-tabelle">
+  <div class="row zwischen"><h3>Bestätigte Buchungen <span class="z">{len(buchungen)}</span>{f' <span class="muted klein">{jahr}</span>' if jahr else ''}</h3>
+    <span class="row" style="margin:0;gap:.8rem"><input type="search" class="listen-suche" placeholder="in der Liste suchen …" aria-label="Bestätigte durchsuchen"><span class="muted klein listen-zaehler"></span></span></div>
+  <p class="muted klein">Datum, Kunde, Beschreibung, Kategorie und Brutto direkt in der Zeile ändern – wird beim Verlassen des Felds gespeichert. Der Stift öffnet die komplette Maske mit Belegvorschau.</p>
+  {lieferanten_datalist(lieferanten) if datalist else ''}
+  <div class="scroll"><table class="tabelle kompakt bz-tabelle"><colgroup><col class="c-datum"><col class="c-art"><col class="c-lief"><col class="c-besch"><col class="c-kat"><col class="c-brutto"><col class="c-konto"><col class="c-aktion"></colgroup>
+    <thead><tr><th class="sortierbar" data-sort="datum" title="nach Datum sortieren">Datum <span class="pfeil"></span></th><th>Art</th><th class="sortierbar" data-sort="lieferant" title="alphabetisch sortieren">Lieferant / Kunde <span class="pfeil"></span></th><th>Beschreibung</th><th>Kategorie</th><th class="num sortierbar" data-sort="betrag" title="nach Betrag sortieren">Brutto € <span class="pfeil"></span></th><th>Konto</th><th></th></tr></thead>
+    <tbody>{rows or '<tr><td colspan=8 class="muted">Noch nichts bestätigt.</td></tr>'}</tbody></table></div>
+  <script>
+  (function(){{
+    const box = document.getElementById('bestaetigt-tabelle'), tbody = box.querySelector('tbody'), suche = box.querySelector('.listen-suche'), zaehler = box.querySelector('.listen-zaehler');
+    const zeilen = () => [...tbody.querySelectorAll('tr.bz')];
+    const speicher = {{ lesen(){{ try {{ return JSON.parse(sessionStorage.getItem('bestaetigt-zustand') || '{{}}'); }} catch (e) {{ return {{}}; }} }},
+                       schreiben(z){{ try {{ sessionStorage.setItem('bestaetigt-zustand', JSON.stringify(z)); }} catch (e) {{}} }} }};
+    const zustand = speicher.lesen();
+    function filtern(){{ const q = (suche.value || '').trim().toLowerCase(); let n = 0;
+      zeilen().forEach(tr => {{ const t = [...tr.querySelectorAll('input,select')].map(e => e.tagName === 'SELECT' ? e.options[e.selectedIndex]?.text : e.value).join(' ').toLowerCase();
+        const ok = !q || t.includes(q); tr.hidden = !ok; if (ok) n++; }});
+      zaehler.textContent = q ? n + ' von ' + zeilen().length : ''; }}
+    suche.addEventListener('input', () => {{ filtern(); zustand.suche = suche.value; speicher.schreiben(zustand); }});
+    let sortKey = null, sortDir = -1;
+    const vgl = (a, b, key) => {{ const va = a.dataset[key], vb = b.dataset[key]; return key === 'betrag' ? (+va - +vb) : (va < vb ? -1 : va > vb ? 1 : 0); }};
+    function sortieren(key, dir){{ sortKey = key; sortDir = dir; const rows = zeilen(); rows.sort((a, b) => vgl(a, b, key) * dir || -vgl(a, b, 'datum')); rows.forEach(r => tbody.appendChild(r));
+      box.querySelectorAll('th.sortierbar').forEach(t => {{ const an = t.dataset.sort === key; t.classList.toggle('aktiv', an); t.querySelector('.pfeil').textContent = an ? (dir > 0 ? '▲' : '▼') : ''; }}); }}
+    box.querySelectorAll('th.sortierbar').forEach(th => th.addEventListener('click', () => {{ const key = th.dataset.sort; sortieren(key, sortKey === key ? -sortDir : (key === 'datum' ? -1 : 1)); zustand.sort = key; zustand.dir = sortDir; speicher.schreiben(zustand); }}));
+    if (zustand.suche) {{ suche.value = zustand.suche; filtern(); }}
+    if (zustand.sort) sortieren(zustand.sort, zustand.dir || 1);
+    // Enter im Feld = speichern (change) statt Formular-Submit
+    box.addEventListener('keydown', e => {{ if (e.key === 'Enter' && e.target.matches('input')) {{ e.preventDefault(); e.target.blur(); }} }});
+  }})();
+  </script>
+</section>"""
+
+
+def pruefen_leer(reiter: str = "ausgabe", zaehler: dict | None = None, bestaetigte: list[Buchung] | None = None,
+                 kategorien: list[Kategorie] | None = None, mit_konto: set | None = None, jahr: int | None = None, lieferanten: list[str] | None = None) -> str:
     zaehler = zaehler or {}
     andere = "einnahme" if reiter == "ausgabe" else "ausgabe"
     hinweis = (f'<p class="muted">Im Reiter {"Einnahmen" if andere == "einnahme" else "Ausgaben"} warten noch {zaehler.get(andere, 0)} Vorschläge.</p>'
                if zaehler.get(andere) else '<p class="muted">Alles bestätigt.</p>')
-    return f"""<section><div class="row zwischen"><h2>Prüfen</h2>{_reiter_html(reiter, zaehler)}</div>
+    return f"""<section class="pruefen-leer"><div class="row zwischen"><h2>Prüfen</h2>{_reiter_html(reiter, zaehler)}</div>
     <p class="ok-box"><span>Keine offenen {"Einnahmen" if reiter == "einnahme" else "Ausgaben"}-Vorschläge.</span></p>{hinweis}
-    <p><a href="#" hx-get="/ui/manuell" hx-target="#main">Buchung von Hand erfassen</a></p>
-    <div class="karte" style="max-width:520px">{bestaetigte_liste(bestaetigte or [])}</div></section>"""
+    <p><a href="#" hx-get="/ui/manuell" hx-target="#main">Buchung von Hand erfassen</a></p></section>
+{bestaetigte_tabelle(bestaetigte or [], kategorien or [], mit_konto or set(), jahr, lieferanten or [])}"""
 
 
 def pruefen_view(b: Buchung, beleg: Beleg | None, kategorien: list[Kategorie], offene: list[Buchung],
                  bw: Bewertung | None, extraktion: dict, cfg: dict, reiter: str = "ausgabe", zaehler: dict | None = None,
-                 bestaetigte: list[Buchung] | None = None) -> str:
+                 bestaetigte: list[Buchung] | None = None, mit_konto: set | None = None, jahr: int | None = None,
+                 lieferanten: list[str] | None = None) -> str:
     zaehler = zaehler or {}
     korrektur = b.status == "bestaetigt"
     liste = "".join(
@@ -223,7 +266,6 @@ def pruefen_view(b: Buchung, beleg: Beleg | None, kategorien: list[Kategorie], o
       </div>
       <ul class="liste">{liste}</ul>
     </form>
-    {bestaetigte_liste(bestaetigte or [], b.id)}
     <script>
     (function(){{
       const f = document.getElementById('pruef-liste'), alle = document.getElementById('alle-waehlen'), knopf = document.getElementById('auswahl-loeschen');
@@ -244,13 +286,14 @@ def pruefen_view(b: Buchung, beleg: Beleg | None, kategorien: list[Kategorie], o
     <details><summary class="muted klein">Rohfelder der Extraktion</summary><pre class="klein">{h(json.dumps(extraktion, indent=1, ensure_ascii=False, default=str))}</pre></details>
   </div>
   <div class="formular-spalte">
-    {buchung_formular(b, kategorien, cfg, action=f"/api/buchung/{b.id}/bestaetigen", bw=bw, naechste=not korrektur)}
+    {buchung_formular(b, kategorien, cfg, action=f"/api/buchung/{b.id}/bestaetigen", bw=bw, naechste=not korrektur, lieferanten=lieferanten)}
   </div>
-</section>"""
+</section>
+{bestaetigte_tabelle(bestaetigte or [], kategorien, mit_konto or set(), jahr, lieferanten or [], datalist=False)}"""
 
 
 def buchung_formular(b: Buchung, kategorien: list[Kategorie], cfg: dict, action: str, bw: Bewertung | None = None,
-                     naechste: bool = False, titel: str | None = None) -> str:
+                     naechste: bool = False, titel: str | None = None, lieferanten: list[str] | None = None) -> str:
     m = json.loads(b.meta_json or "{}")
     opts = "".join(f'<option value="{k.id}" data-sonderfall="{h(k.sonderfall or "")}" data-richtung="{k.richtung}" {"selected" if k.id == b.kategorie_id else ""}>'
                    f'{h(k.name)}{f" (Zeile {k.eur_zeile})" if k.eur_zeile else ""}</option>' for k in kategorien)
@@ -281,7 +324,8 @@ def buchung_formular(b: Buchung, kategorien: list[Kategorie], cfg: dict, action:
   <div class="grid2">
     <label>Datum <input type="date" name="datum" value="{b.datum.isoformat()}" required autofocus></label>
     <label>Richtung <select name="richtung"><option value="ausgabe" {"selected" if b.richtung == "ausgabe" else ""}>Ausgabe</option><option value="einnahme" {"selected" if b.richtung == "einnahme" else ""}>Einnahme</option></select></label>
-    <label class="breit">Lieferant / Kunde <input name="lieferant" value="{h(b.lieferant)}"></label>
+    <label class="breit">Lieferant / Kunde <input name="lieferant" list="lieferanten" value="{h(b.lieferant)}" placeholder="tippen oder aus der Liste wählen"></label>
+    {lieferanten_datalist(lieferanten) if lieferanten is not None else ''}
     <label>Rechnungsnr. <input name="rechnungsnummer" value="{h(b.rechnungsnummer)}"></label>
     <label>USt-IdNr. Lieferant <input name="ust_idnr" value="{h(b.ust_idnr)}" placeholder="z. B. IE6364992H"></label>
     <label>Netto <input type="number" step="0.01" name="betrag_netto" id="f_netto" value="{b.betrag_netto:.2f}"></label>
@@ -348,9 +392,9 @@ def buchung_formular(b: Buchung, kategorien: list[Kategorie], cfg: dict, action:
 </script>"""
 
 
-def manuell_view(b: Buchung, kategorien: list[Kategorie], cfg: dict) -> str:
+def manuell_view(b: Buchung, kategorien: list[Kategorie], cfg: dict, lieferanten: list[str] | None = None) -> str:
     return f'<section><p class="muted erkl">Von Hand erfasste Buchungen gelten als bestätigt – du bist die Quelle.</p>' \
-           f'{buchung_formular(b, kategorien, cfg, action="/api/buchung/neu", titel="Neue Buchung")}</section>'
+           f'{buchung_formular(b, kategorien, cfg, action="/api/buchung/neu", titel="Neue Buchung", lieferanten=lieferanten or [])}</section>'
 
 
 # ------------------------------------------------------------ Quartale

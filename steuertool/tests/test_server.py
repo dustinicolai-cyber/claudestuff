@@ -368,3 +368,24 @@ def test_bestaetigte_korrigieren():
         with Session(engine()) as s:
             b = s.get(Buchung, b.id)
             assert b.status == "bestaetigt" and b.betrag_brutto == 60.0 and b.lieferant == "Adobe Systems (korrigiert)"
+
+
+def test_schnell_korrektur_in_tabelle():
+    """Inline-Änderung in der Tabelle bestätigter Buchungen: Zeile kommt aktualisiert zurück, Beträge werden nachgerechnet."""
+    with client() as c:
+        c.post("/api/import", files={"datei": ("adobe.pdf", erzeuge.text_pdf(erzeuge.ADOBE_TEXT), "application/pdf")}, data={"ki": "0"})
+        with Session(engine()) as s:
+            b = s.exec(select(Buchung)).first()
+            kat = s.exec(select(Kategorie).where(Kategorie.schluessel == "software")).first()
+        c.post(f"/api/buchung/{b.id}/bestaetigen", data={"datum": "2025-02-05", "richtung": "ausgabe", "lieferant": "Adobe", "betrag_netto": "50", "ust_satz": "19",
+                                                        "ust_betrag": "9.5", "betrag_brutto": "59.5", "kategorie_id": str(kat.id), "waehrung": "EUR", "betrag_fremd": "0"})
+        t = c.get("/ui/pruefen?jahr=2025").text
+        assert 'class="tabelle kompakt bz-tabelle"' in t and f'hx-post="/api/buchung/{b.id}/schnell"' in t and 'list="lieferanten"' in t and '<datalist id="lieferanten">' in t
+        r = c.post(f"/api/buchung/{b.id}/schnell", data={"datum": "2025-02-07", "lieferant": "Adobe Inc.", "beschreibung": "Creative Cloud", "kategorie_id": str(kat.id), "betrag_brutto": "119.00"})
+        assert r.status_code == 200 and 'class="bz gespeichert"' in r.text and 'value="Adobe Inc."' in r.text
+        with Session(engine()) as s:
+            b = s.get(Buchung, b.id)
+            assert b.betrag_brutto == 119.0 and b.betrag_netto == 100.0 and b.ust_betrag == 19.0 and b.beschreibung == "Creative Cloud" and b.datum.isoformat() == "2025-02-07"
+            assert b.status == "bestaetigt"
+        # Vorschlagsliste enthält den neuen Namen alphabetisch
+        assert 'option value="Adobe Inc."' in c.get("/ui/manuell").text

@@ -60,9 +60,24 @@ def _offene(s: Session) -> list[Buchung]:
     return s.exec(select(Buchung).where(Buchung.status == "vorschlag").order_by(Buchung.konfidenz, Buchung.datum)).all()
 
 
-def _bestaetigte(s: Session) -> list[Buchung]:
+def _lieferanten(s: Session) -> list[str]:
+    """Alle bisher verwendeten Lieferanten/Kunden, alphabetisch, ohne Dubletten (Groß/Klein egal)."""
+    gesehen: dict[str, str] = {}
+    for b in s.exec(select(Buchung)).all():
+        n = (b.lieferant or "").strip()
+        if n and n.lower() not in gesehen:
+            gesehen[n.lower()] = n
+    return sorted(gesehen.values(), key=str.lower)
+
+
+def _mit_konto(s: Session) -> set:
+    return {x.buchung_id for x in s.exec(select(Kontobewegung).where(Kontobewegung.buchung_id != None)).all()}  # noqa: E711
+
+
+def _bestaetigte(s: Session, jahr: Optional[int] = None) -> list[Buchung]:
     """Eingecheckte, nicht stornierte Buchungen – neueste zuerst – zum Nachkorrigieren."""
-    return [b for b in s.exec(select(Buchung).where(Buchung.status == "bestaetigt").order_by(Buchung.datum.desc(), Buchung.id.desc())).all() if not b.storniert]
+    return [b for b in s.exec(select(Buchung).where(Buchung.status == "bestaetigt").order_by(Buchung.datum.desc(), Buchung.id.desc())).all()
+            if not b.storniert and (not jahr or b.datum.year == jahr)]
 
 
 def _html(inhalt: str) -> HTMLResponse:
@@ -265,26 +280,27 @@ def _reiter(richtung: Optional[str], offene: list[Buchung]) -> str:
 
 
 @app.get("/ui/pruefen", response_class=HTMLResponse)
-def ui_pruefen(ueberspringen: Optional[int] = None, richtung: Optional[str] = None, s: Session = Depends(get_session)) -> HTMLResponse:
+def ui_pruefen(ueberspringen: Optional[int] = None, richtung: Optional[str] = None, jahr: Optional[int] = None, s: Session = Depends(get_session)) -> HTMLResponse:
     offene = _offene(s)
     reiter = _reiter(richtung, offene)
     im_reiter = [x for x in offene if x.richtung == reiter]
+    jahr = jahr or _standardjahr(s)
     if not im_reiter:
         zaehler = {"einnahme": sum(1 for x in offene if x.richtung == "einnahme"), "ausgabe": sum(1 for x in offene if x.richtung == "ausgabe")}
-        return _html(ui.pruefen_leer(reiter, zaehler, _bestaetigte(s)))
+        return _html(ui.pruefen_leer(reiter, zaehler, _bestaetigte(s, jahr), _kat_liste(s), _mit_konto(s), jahr, _lieferanten(s)))
     b = next((x for x in im_reiter if x.id != ueberspringen), im_reiter[0])
-    return _pruefen_detail(s, b, reiter)
+    return _pruefen_detail(s, b, reiter, jahr)
 
 
 @app.get("/ui/pruefen/{buchung_id}", response_class=HTMLResponse)
-def ui_pruefen_id(buchung_id: int, s: Session = Depends(get_session)) -> HTMLResponse:
+def ui_pruefen_id(buchung_id: int, jahr: Optional[int] = None, s: Session = Depends(get_session)) -> HTMLResponse:
     b = s.get(Buchung, buchung_id)
     if not b:
         raise HTTPException(404)
-    return _pruefen_detail(s, b, b.richtung)
+    return _pruefen_detail(s, b, b.richtung, jahr)
 
 
-def _pruefen_detail(s: Session, b: Buchung, reiter: Optional[str] = None) -> HTMLResponse:
+def _pruefen_detail(s: Session, b: Buchung, reiter: Optional[str] = None, jahr: Optional[int] = None) -> HTMLResponse:
     beleg = s.get(Beleg, b.beleg_id) if b.beleg_id else None
     try:
         extraktion = json.loads(b.extraktion_json or "{}")
@@ -296,13 +312,15 @@ def _pruefen_detail(s: Session, b: Buchung, reiter: Optional[str] = None) -> HTM
     liste = [x for x in offene if x.richtung == reiter]
     if b.status == "vorschlag" and b.id not in {x.id for x in liste}:
         liste = [b] + liste
-    return _html(ui.pruefen_view(b, beleg, _kat_liste(s), liste, _bewertung(s, b), extraktion, config.regeln(), reiter, zaehler, _bestaetigte(s)))
+    jahr = jahr or _standardjahr(s)
+    return _html(ui.pruefen_view(b, beleg, _kat_liste(s), liste, _bewertung(s, b), extraktion, config.regeln(), reiter, zaehler,
+                                 _bestaetigte(s, jahr), _mit_konto(s), jahr, _lieferanten(s)))
 
 
 @app.get("/ui/manuell", response_class=HTMLResponse)
 def ui_manuell(s: Session = Depends(get_session)) -> HTMLResponse:
     b = Buchung(datum=date.today(), ust_satz=config.regeln()["regelsteuersatz"])
-    return _html(ui.manuell_view(b, _kat_liste(s), config.regeln()))
+    return _html(ui.manuell_view(b, _kat_liste(s), config.regeln(), _lieferanten(s)))
 
 
 @app.post("/api/buchung/{buchung_id}/bestaetigen", response_class=HTMLResponse)
@@ -322,8 +340,40 @@ async def api_bestaetigen(buchung_id: int, request: Request, s: Session = Depend
     if korrektur:
         _protokoll(s, "korrektur", f"Buchung #{b.id} nachträglich korrigiert: {b.lieferant} {export.eur_fmt(b.betrag_brutto)}", b.id)
         s.commit()
-        return _html(ui.meldung_box(f"Korrektur gespeichert: {b.lieferant} · {export.eur_fmt(b.betrag_brutto)} · {ui.d(b.datum)}.") + ui_pruefen(None, reiter, s).body.decode())
-    return ui_pruefen(None, reiter, s)
+        return _html(ui.meldung_box(f"Korrektur gespeichert: {b.lieferant} · {export.eur_fmt(b.betrag_brutto)} · {ui.d(b.datum)}.") + ui_pruefen(None, reiter, None, s).body.decode())
+    return ui_pruefen(None, reiter, None, s)
+
+
+@app.post("/api/buchung/{buchung_id}/schnell", response_class=HTMLResponse)
+async def api_buchung_schnell(buchung_id: int, request: Request, s: Session = Depends(get_session)) -> HTMLResponse:
+    """Inline-Korrektur aus der Tabelle bestätigter Buchungen: Datum, Lieferant, Beschreibung, Kategorie, Brutto."""
+    b = s.get(Buchung, buchung_id)
+    if not b:
+        raise HTTPException(404)
+    form = await request.form()
+    vorher_kat, vorher_weg = b.kategorie_id, b.klassifizierung_weg or ""
+    if form.get("datum"):
+        try:
+            b.datum = date.fromisoformat(str(form["datum"]))
+        except ValueError:
+            pass
+    if "lieferant" in form:
+        b.lieferant = str(form["lieferant"]).strip()
+    if "beschreibung" in form:
+        b.beschreibung = str(form["beschreibung"]).strip()
+    if str(form.get("kategorie_id", "")).isdigit():
+        b.kategorie_id = int(form["kategorie_id"])
+    brutto = _f(form.get("betrag_brutto"))
+    if brutto and abs(brutto - b.betrag_brutto) > 0.004:
+        netto, satz, ust, brutto = steuerlogik.betraege_vervollstaendigen(None, b.ust_satz, None, brutto)
+        b.betrag_netto, b.ust_betrag, b.betrag_brutto = round(netto, 2), round(ust, 2), round(brutto, 2)
+    if b.status == "bestaetigt":
+        _bestaetigen(s, b, vorher_kat, vorher_weg)
+    s.add(b)
+    _protokoll(s, "korrektur", f"Buchung #{b.id} in der Tabelle geändert: {b.lieferant} {export.eur_fmt(b.betrag_brutto)}", b.id)
+    s.commit()
+    s.refresh(b)
+    return _html(ui.bestaetigt_zeile(b, _kat_liste(s), _mit_konto(s), gespeichert=True))
 
 
 @app.post("/api/buchung/neu", response_class=HTMLResponse)
@@ -342,7 +392,7 @@ async def api_buchung_neu(request: Request, s: Session = Depends(get_session)) -
     if zurueck.startswith("jahresabschluss:"):
         return ui_jahresabschluss(int(zurueck.split(":")[1]), s)
     return _html(ui.meldung_box(f"Buchung #{b.id} erfasst: {b.lieferant} {export.eur_fmt(b.betrag_brutto)}.") +
-                 ui.manuell_view(Buchung(datum=b.datum, ust_satz=b.ust_satz, richtung=b.richtung), _kat_liste(s), config.regeln()))
+                 ui.manuell_view(Buchung(datum=b.datum, ust_satz=b.ust_satz, richtung=b.richtung), _kat_liste(s), config.regeln(), _lieferanten(s)))
 
 
 def _buchung_loeschen(s: Session, b: Buchung) -> None:
@@ -381,8 +431,8 @@ def api_buchung_loeschen(buchung_id: int, s: Session = Depends(get_session)) -> 
         reiter = b.richtung
         _buchung_loeschen(s, b)
         s.commit()
-        return ui_pruefen(None, reiter, s)
-    return ui_pruefen(None, None, s)
+        return ui_pruefen(None, reiter, None, s)
+    return ui_pruefen(None, None, None, s)
 
 
 def _neu_erkennen(s: Session, b: Buchung) -> bool:
@@ -444,7 +494,7 @@ async def api_buchungen_neu_erkennen(request: Request, s: Session = Depends(get_
         if b and _neu_erkennen(s, b):
             n += 1
     s.commit()
-    return _html(ui.meldung_box(f"{n} von {len(ids)} Vorschlägen neu erkannt.") + ui_pruefen(None, None, s).body.decode())
+    return _html(ui.meldung_box(f"{n} von {len(ids)} Vorschlägen neu erkannt.") + ui_pruefen(None, None, None, s).body.decode())
 
 
 @app.post("/api/buchungen/loeschen", response_class=HTMLResponse)
@@ -459,7 +509,7 @@ async def api_buchungen_loeschen(request: Request, s: Session = Depends(get_sess
             _buchung_loeschen(s, b)
             n += 1
     s.commit()
-    antwort = ui_pruefen(None, None, s)
+    antwort = ui_pruefen(None, None, None, s)
     return _html(ui.meldung_box(f"{n} Buchungen gelöscht. Belegdateien liegen in Belege/Papierkorb.") + antwort.body.decode())
 
 
