@@ -8,7 +8,7 @@ from datetime import date
 from html import escape as h
 
 from .export import eur_fmt
-from .models import Anlagegut, Beleg, Buchung, Kategorie, Kontobewegung, MailFund, Regel
+from .models import Anlagegut, Beleg, Buchung, IgnorRegel, Kategorie, Kontobewegung, MailFund, Regel
 from .steuerlogik import Bewertung, Zelle, afa_fuer_jahr
 
 ICON = {
@@ -18,6 +18,7 @@ ICON = {
     "x": '<svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg>',
     "plus": '<svg viewBox="0 0 24 24"><path d="M12 5v14m-7-7h14"/></svg>',
     "minus": '<svg viewBox="0 0 24 24"><path d="M5 12h14"/></svg>',
+    "stift": '<svg viewBox="0 0 24 24"><path d="M4 20h4l10.5-10.5a2 2 0 0 0 0-2.8l-1.2-1.2a2 2 0 0 0-2.8 0L4 16v4z"/><path d="M13 7l4 4"/></svg>',
 }
 
 STUFEN = {"zugferd": "E-Rechnung (XML)", "pdf": "PDF-Text", "ocr": "Vision-OCR", "manuell": "manuell", "keine": "keine", "kontoauszug": "Kontoauszug"}
@@ -93,10 +94,10 @@ def import_view(ollama_status: dict, ki_an: bool) -> str:
 
   <hr class="trenner">
   <h3>Kontoauszug importieren</h3>
-  <p class="muted erkl">Anderer Datentyp, andere Wirkung: Kontobewegungen werden mit Buchungen abgeglichen, nicht als Belege gespeichert.</p>
+  <p class="muted erkl">Anderer Datentyp, andere Wirkung: Kontobewegungen werden mit Rechnungen abgeglichen, nicht als Belege gespeichert. Geht auch als PDF-Auszug der Bank (ING, Sparkasse …). Danach geht es unter „Kontoauszug“ weiter.</p>
   <form hx-post="/api/konto/import" hx-target="#konto-ergebnis" hx-encoding="multipart/form-data" class="row">
-    <input type="file" name="datei" accept=".csv,.xml,.txt" required>
-    <button class="btn-secondary">CSV / CAMT.053 einlesen und matchen</button>
+    <input type="file" name="datei" accept=".pdf,.csv,.xml,.txt" required>
+    <button class="btn-secondary">PDF / CSV / CAMT.053 einlesen und abgleichen</button>
   </form>
   <div id="konto-ergebnis"></div>
 </section>
@@ -227,13 +228,19 @@ def buchung_formular(b: Buchung, kategorien: list[Kategorie], cfg: dict, action:
     loeschen = f'<button type="button" class="outline-rot" hx-post="/api/buchung/{b.id}/loeschen" hx-confirm="Buchung wirklich löschen? Die Belegdatei wandert nach Belege/Papierkorb." hx-target="#main">{ICON["x"]}Löschen</button>' if b.id else ""
     if titel is None:
         titel = (b.lieferant or "Unbekannter Beleg") if b.id else "Neue Buchung"
-    untertitel = f'{h(d(b.datum))} · <span class="{"plus" if b.richtung == "einnahme" else "minus"}">{eur_fmt(b.betrag_brutto)}</span>' + (f' · {h(b.beschreibung[:60])}' if b.beschreibung else "") if b.id else ""
+    untertitel = f'{h(d(b.datum))} · <span class="{"plus" if b.richtung == "einnahme" else "minus"}">{eur_fmt(b.betrag_brutto)}</span>' if b.id else ""
+    beschreibung_kopf = f"""<div class="kopf-beschreibung">
+        <span class="txt {"leer" if not b.beschreibung else ""}">{h(b.beschreibung) if b.beschreibung else "Beschreibung hinzufügen"}</span>
+        <button type="button" class="stift" title="Beschreibung bearbeiten" aria-label="Beschreibung bearbeiten">{ICON["stift"]}</button>
+        <input name="beschreibung" value="{h(b.beschreibung)}" placeholder="Beschreibung" hidden>
+      </div>"""
     return f"""
 <form id="buchung-form" hx-post="{action}" hx-target="#main" class="formular" autocomplete="off">
   <div class="formular-kopf">
     <div class="kopf-titel">
       <h2>{h(titel)} {konf_badge(b.konfidenz) if b.id else ""} {'<span class="badge rc">§13b</span>' if b.reverse_charge else ''}</h2>
       <div class="muted klein">{untertitel}</div>
+      {beschreibung_kopf}
     </div>
     <div class="aktionen aktionen-raster"><button type="submit" class="gruen" title="Bestätigen und weiter (⏎)">{ICON["check"]}{knopf}</button>{skip}{neu_erkennen}{loeschen}</div>
   </div>
@@ -241,7 +248,6 @@ def buchung_formular(b: Buchung, kategorien: list[Kategorie], cfg: dict, action:
     <label>Datum <input type="date" name="datum" value="{b.datum.isoformat()}" required autofocus></label>
     <label>Richtung <select name="richtung"><option value="ausgabe" {"selected" if b.richtung == "ausgabe" else ""}>Ausgabe</option><option value="einnahme" {"selected" if b.richtung == "einnahme" else ""}>Einnahme</option></select></label>
     <label class="breit">Lieferant / Kunde <input name="lieferant" value="{h(b.lieferant)}"></label>
-    <label class="breit">Beschreibung <input name="beschreibung" value="{h(b.beschreibung)}"></label>
     <label>Rechnungsnr. <input name="rechnungsnummer" value="{h(b.rechnungsnummer)}"></label>
     <label>USt-IdNr. Lieferant <input name="ust_idnr" value="{h(b.ust_idnr)}" placeholder="z. B. IE6364992H"></label>
     <label>Netto <input type="number" step="0.01" name="betrag_netto" id="f_netto" value="{b.betrag_netto:.2f}"></label>
@@ -280,6 +286,15 @@ def buchung_formular(b: Buchung, kategorien: list[Kategorie], cfg: dict, action:
     f.querySelectorAll('.sonderfall').forEach(fs => fs.hidden = !fs.dataset.fuer.split(' ').includes(sf));
   }}
   kat.addEventListener('change', sonderfall); sonderfall();
+  const kb = f.querySelector('.kopf-beschreibung');
+  if (kb) {{
+    const txt = kb.querySelector('.txt'), inp = kb.querySelector('input'), stift = kb.querySelector('.stift');
+    function oeffnen(){{ txt.hidden = true; stift.hidden = true; inp.hidden = false; inp.focus(); inp.select(); }}
+    function schliessen(){{ inp.hidden = true; txt.hidden = false; stift.hidden = false; const v = inp.value.trim(); txt.textContent = v || 'Beschreibung hinzufügen'; txt.classList.toggle('leer', !v); }}
+    stift.addEventListener('click', oeffnen); txt.addEventListener('click', oeffnen);
+    inp.addEventListener('blur', schliessen);
+    inp.addEventListener('keydown', e => {{ if (e.key === 'Enter' || e.key === 'Escape') {{ e.preventDefault(); e.stopPropagation(); inp.blur(); }} }});
+  }}
   f.addEventListener('keydown', e => {{
     if (e.key === 'Enter' && e.target.tagName !== 'TEXTAREA' && !e.isComposing) {{ e.preventDefault(); f.requestSubmit(); }}
     if (e.key === 'Escape') {{ const s = f.querySelector('button.outline-gelb'); if (s) s.click(); }}
@@ -763,5 +778,105 @@ def auswertung_view(jahr: int, jahre: list[int]) -> str:
   document.getElementById('chart-formen').addEventListener('click', e => {{ const b = e.target.closest('button'); if (!b) return; form = b.dataset.form; document.querySelectorAll('#chart-formen button').forEach(x => x.classList.toggle('aktiv', x === b)); render(); }});
   document.getElementById('theme-toggle').addEventListener('click', () => setTimeout(render, 30));
   fetch('/api/auswertung?jahr=' + jahr).then(r => r.json()).then(d => {{ daten = d; tabsDaempfen(d); render(); }});
+}})();
+</script>"""
+
+
+# ------------------------------------------------------------ Abgleich
+
+def abgleich_view(zeilen: list[dict], regeln: list[IgnorRegel], jahr: int, filter: str, vorschlag: dict[int, str]) -> str:
+    z_alle = zeilen
+    zaehl = {st: sum(1 for z in z_alle if z["status"] == st) for st in ("zugeordnet", "rueckfrage", "kein_beleg", "ignoriert")}
+    doppel = sum(1 for z in z_alle if z["doppelt"])
+    if filter == "offen":
+        zeilen = [z for z in z_alle if z["status"] in ("rueckfrage", "kein_beleg")]
+    elif filter == "ignoriert":
+        zeilen = [z for z in z_alle if z["status"] == "ignoriert"]
+    elif filter == "zugeordnet":
+        zeilen = [z for z in z_alle if z["status"] == "zugeordnet"]
+    tabs = "".join(
+        f'<button type="button" class="{"aktiv" if filter == f else ""}" hx-get="/ui/abgleich?filter={f}" hx-target="#main">{name} <span class="z">{n}</span></button>'
+        for f, name, n in (("offen", "Offen", zaehl["rueckfrage"] + zaehl["kein_beleg"]), ("zugeordnet", "Zugeordnet", zaehl["zugeordnet"]),
+                           ("ignoriert", "Ignoriert", zaehl["ignoriert"]), ("alle", "Alle", len(z_alle))))
+
+    def status_zelle(z: dict) -> str:
+        k, st = z["k"], z["status"]
+        if st == "zugeordnet":
+            b = z["buchung"]
+            return (f'<span class="badge ok">zugeordnet</span> <a href="#" hx-get="/ui/pruefen/{b.id}" hx-target="#main">{h(b.lieferant or "Buchung")} · {d(b.datum)}</a> '
+                    f'<button class="klein btn-ghost" hx-post="/api/abgleich/aktion" hx-vals=\'{{"aktion":"loesen","ids":"{k.id}","jahr":"{jahr}"}}\' hx-target="#main">lösen</button>') if b else '<span class="badge ok">zugeordnet</span>'
+        if st == "ignoriert":
+            return f'<span class="badge">ignoriert</span> <button class="klein btn-ghost" hx-post="/api/abgleich/aktion" hx-vals=\'{{"aktion":"freigeben","ids":"{k.id}","jahr":"{jahr}"}}\' hx-target="#main">freigeben</button>'
+        if st == "rueckfrage":
+            opts = "".join(f'<option value="{b.id}">{d(b.datum)} · {h(b.lieferant)} · {eur_fmt(b.betrag_brutto)}{" · bestätigt" if b.status == "bestaetigt" else ""}</option>' for b in z["kandidaten"])
+            return (f'<span class="badge mid">Rückfrage</span> <span class="muted klein">Betrag passt zu {len(z["kandidaten"])} Rechnung(en), Datum weicht ab:</span>'
+                    f'<form class="inline" hx-post="/api/abgleich/{k.id}/zuordnen" hx-target="#main"><input type="hidden" name="jahr" value="{jahr}"><select name="buchung_id">{opts}</select><button class="klein btn-secondary">zuordnen</button></form>')
+        vs = vorschlag.get(k.id, "")
+        return (f'<span class="badge low">kein Beleg</span>' + (f' <span class="muted klein">Kategorie laut Regel: {h(vs)}</span>' if vs else ' <span class="muted klein">Beleg importieren – dann matcht es</span>'))
+
+    def aktionen(z: dict) -> str:
+        k, st = z["k"], z["status"]
+        if st != "kein_beleg":
+            return ""
+        return (f'<form class="inline beleg-upload" hx-post="/api/abgleich/{k.id}/beleg" hx-encoding="multipart/form-data" hx-target="#main" hx-trigger="change"><input type="hidden" name="jahr" value="{jahr}">'
+                f'<label class="klein btn-secondary button" title="Rechnung zu dieser Buchung hochladen">Beleg hochladen<input type="file" name="datei" accept=".pdf,.xml,.png,.jpg,.jpeg" hidden></label></form> '
+                f'<button class="klein btn-secondary" hx-post="/api/abgleich/aktion" hx-vals=\'{{"aktion":"anlegen","ids":"{k.id}","jahr":"{jahr}"}}\' hx-target="#main" title="Buchungsvorschlag ohne Beleg anlegen">ohne Beleg buchen</button> '
+                f'<button class="klein btn-ghost" hx-post="/api/abgleich/aktion" hx-vals=\'{{"aktion":"ignorieren","ids":"{k.id}","jahr":"{jahr}"}}\' hx-target="#main">ignorieren</button> '
+                f'<button class="klein btn-ghost" hx-post="/api/abgleich/aktion" hx-vals=\'{{"aktion":"regel","ids":"{k.id}","jahr":"{jahr}"}}\' hx-target="#main" title="Regel: „{h(k.gegenkonto or k.verwendungszweck[:40])}“ künftig immer ignorieren">immer ignorieren</button>')
+
+    rows = "".join(
+        f'<tr class="{"doppelt" if z["doppelt"] else ""}"><td><input type="checkbox" name="ids" value="{z["k"].id}"></td>'
+        f'<td>{d(z["k"].datum)}</td><td class="num">{eur_fmt(z["k"].betrag)}</td>'
+        f'<td><span class="badge {"plus-b" if z["k"].betrag > 0 else "minus-b"}">{"Einnahme" if z["k"].betrag > 0 else "Ausgabe"}</span></td>'
+        f'<td>{h(z["k"].gegenkonto)}<div class="muted klein">{h(z["k"].verwendungszweck[:110])}</div>'
+        + (f'<div class="klein"><span class="badge low">evtl. doppelt</span> <span class="muted">gleiche Bewegung am {d(z["doppelt"].datum)}</span></div>' if z["doppelt"] else "")
+        + f'</td><td>{status_zelle(z)}</td><td class="aktionen-zelle">{aktionen(z)}</td></tr>'
+        for z in zeilen)
+    regeln_html = "".join(f'<li><code>{h(r.muster)}</code> <span class="muted klein">{r.treffer} Treffer</span> '
+                          f'<button class="klein btn-ghost" hx-post="/api/ignorregel/{r.id}/loeschen" hx-vals=\'{{"jahr":"{jahr}"}}\' hx-target="#main">entfernen</button></li>' for r in regeln)
+    return f"""
+<section class="abgleich">
+  <p class="muted erkl">Jede Kontobewegung wird mit den importierten Rechnungen verglichen (Betrag exakt, Datum ±5 Tage). Was nicht sicher ist, wird hier nachgefragt. Privates ignorierst du einmal – oder dauerhaft per Regel.</p>
+  <div class="karte">
+    <form hx-post="/api/konto/import" hx-target="#main" hx-encoding="multipart/form-data" class="row">
+      <strong>Kontoauszug einlesen</strong>
+      <input type="file" name="datei" accept=".pdf,.csv,.xml,.txt" required>
+      <button class="btn-primary">PDF / CSV / CAMT.053 einlesen und abgleichen</button>
+      <span class="muted klein">Bereits bekannte Bewegungen werden übersprungen.</span>
+    </form>
+  </div>
+  <div class="kpis">
+    <div class="kpi"><div class="l">Zugeordnet</div><div class="w">{zaehl["zugeordnet"]}</div></div>
+    <div class="kpi gelb"><div class="l">Rückfragen</div><div class="w">{zaehl["rueckfrage"]}</div></div>
+    <div class="kpi"><div class="l">Ohne Beleg</div><div class="w">{zaehl["kein_beleg"]}</div></div>
+    <div class="kpi"><div class="l">Ignoriert</div><div class="w">{zaehl["ignoriert"]}</div></div>
+    <div class="kpi {"rot" if doppel else ""}"><div class="l">Evtl. doppelt</div><div class="w">{doppel}</div></div>
+  </div>
+  <div class="row zwischen"><div class="tabs reiter abgleich-tabs">{tabs}</div></div>
+  <form class="auswahl-form" hx-post="/api/abgleich/aktion" hx-target="#main">
+    <input type="hidden" name="jahr" value="{jahr}">
+    <div class="auswahl-leiste" hidden><span class="anzahl"></span>
+      <button type="submit" name="aktion" value="anlegen" class="btn-primary klein">Buchungen anlegen</button>
+      <button type="submit" name="aktion" value="ignorieren" class="btn-secondary klein">Ignorieren</button>
+      <button type="submit" name="aktion" value="regel" class="btn-ghost klein" hx-confirm="Für jede ausgewählte Bewegung eine Ignorier-Regel auf das Gegenkonto anlegen?">Immer ignorieren</button>
+      <button type="submit" name="aktion" value="loesen" class="btn-ghost klein">Zuordnung lösen</button></div>
+    <div class="scroll"><table class="tabelle kompakt"><thead><tr><th><input type="checkbox" class="alle" title="Alle auswählen"></th><th>Datum</th><th class="num">Betrag</th><th>Art</th><th>Gegenkonto / Zweck</th><th>Abgleich</th><th>Aktion</th></tr></thead>
+    <tbody>{rows or '<tr><td colspan=7 class="muted">Nichts in dieser Liste.</td></tr>'}</tbody></table></div>
+  </form>
+  <details class="karte" {"open" if regeln else ""}><summary><strong>Ignorier-Regeln</strong> <span class="muted">({len(regeln)}) – Bewegungen, die nie betrieblich sind</span></summary>
+    <ul class="klein regeln-liste">{regeln_html or '<li class="muted">Noch keine Regeln. „immer ignorieren“ an einer Zeile legt eine an.</li>'}</ul>
+    <form class="row inline" hx-post="/api/ignorregel/neu" hx-target="#main"><input type="hidden" name="jahr" value="{jahr}">
+      <input name="muster" placeholder="z. B. netflix oder Miete" required> <button class="klein btn-secondary">Regel anlegen</button></form>
+  </details>
+</section>
+<script>
+(function(){{
+  document.querySelectorAll('.auswahl-form').forEach(f => {{
+    const leiste = f.querySelector('.auswahl-leiste'), alle = f.querySelector('input.alle');
+    const boxen = () => [...f.querySelectorAll('tbody input[type=checkbox]')];
+    function zaehlen(){{ const n = boxen().filter(b => b.checked).length; leiste.hidden = !n; leiste.querySelector('.anzahl').textContent = n + ' ausgewählt ·'; }}
+    if (alle) alle.addEventListener('change', () => {{ boxen().forEach(b => b.checked = alle.checked); zaehlen(); }});
+    f.addEventListener('change', e => {{ if (e.target.type === 'checkbox' && e.target !== alle) zaehlen(); }});
+  }});
 }})();
 </script>"""

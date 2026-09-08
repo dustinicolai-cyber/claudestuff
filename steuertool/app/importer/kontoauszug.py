@@ -8,6 +8,8 @@ import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from datetime import date
 
+import re
+
 from .textfelder import parse_betrag, parse_datum
 
 
@@ -178,7 +180,87 @@ def lese_camt053(daten: bytes) -> list[Bewegung]:
     return out
 
 
+# ---------------------------------------------------------------- PDF-Auszüge
+
+BUCHUNGSTYPEN = (r"Lastschrift|Gutschrift|Ueberweisung|Überweisung|Entgelt|Dauerauftrag|Gehalt|Abbuchung|Zinsen|Retoure|"
+                 r"Storno|Kartenzahlung|Bargeldauszahlung|Bargeld|Einzahlung|Auszahlung|R[üu]cklastschrift|Zahlungseingang|Zahlungsausgang|"
+                 r"SEPA-Lastschrift|SEPA-Überweisung|Kartenumsatz|Basislastschrift|Echtzeit-Überweisung|Sammelüberweisung")
+RE_BUCHUNGSZEILE = re.compile(r"^(\d{2}\.\d{2}\.\d{4})\s+(" + BUCHUNGSTYPEN + r")\s+(.*?)\s+(-?\d{1,3}(?:\.\d{3})*,\d{2})(\d)?\s*$")
+RE_BUCHUNGSZEILE_OHNE_TYP = re.compile(r"^(\d{2}\.\d{2}\.\d{4})\s+(.+?)\s+(-?\d{1,3}(?:\.\d{3})*,\d{2})(\d)?\s*(?:[SH])?\s*$")
+RE_VALUTA_PREFIX = re.compile(r"^\d{2}\.\d{2}\.\d{4}\s+")
+RE_SEITENRAND = re.compile(r"^(Buchung\s+Buchung|Valuta$|Girokonto Nummer|Kontoauszug |Datum \d|Seite \d|IBAN |BIC |Alter Saldo|Neuer Saldo|"
+                           r"Eingeräumte Kontoüberziehung|T_\w+$|ING-DiBa|Steuernummer:|Vorsitzende|Herrn|Frau |Auszugsnummer|Umsatz|Saldo)", re.I)
+RE_PAYPAL_HAENDLER = re.compile(r"(?:PP\.\d+\.PP/\.?|^\d+/\.?|/\.)([A-Za-z][^,/]{2,60}?)\s*,\s*IhrEinkaufbei", re.I)
+
+
+def _paypal_haendler(zweck: str) -> str:
+    m = RE_PAYPAL_HAENDLER.search(zweck.replace(" ", ""))
+    if m:
+        name = m.group(1).strip(" .")
+        # zusammengeklebte Großbuchstaben etwas lesbarer: ADOBESYSTEMS… bleibt, CamelCase trennen
+        return re.sub(r"(?<=[a-z])(?=[A-Z])", " ", name)
+    m = re.search(r"IhrEinkaufbei\s*([A-Za-z][^,]{2,60})", zweck.replace(" ", ""))
+    return re.sub(r"(?<=[a-z])(?=[A-Z])", " ", m.group(1).strip(" .")) if m else ""
+
+
+def lese_pdf_text(text: str) -> list[Bewegung]:
+    """Kontoauszug aus PDF-Text (ING, Sparkasse, Volksbank …): eine Kopfzeile „Datum Typ Name Betrag“,
+    danach Valuta-/Verwendungszweckzeilen bis zur nächsten Kopfzeile. Fußnoten-Ziffern hinter dem Betrag
+    („-2,99¹“ wird zu „-2,991“) werden abgeschnitten."""
+    out: list[Bewegung] = []
+    aktuell: dict | None = None
+
+    def abschliessen():
+        if not aktuell:
+            return
+        zweck_zeilen = [z for z in aktuell["zweck"] if z and not z.lower().startswith(("mandat:", "referenz:"))]
+        zweck = " ".join(zweck_zeilen).strip()
+        gegen = aktuell["name"]
+        if "paypal" in gegen.lower():
+            haendler = _paypal_haendler(" ".join(aktuell["zweck"]))
+            if haendler:
+                gegen = f"PayPal: {haendler}"
+        out.append(Bewegung(datum=aktuell["datum"], betrag=aktuell["betrag"], verwendungszweck=zweck[:300], gegenkonto=gegen[:120]))
+
+    for roh in text.splitlines():
+        z = roh.strip()
+        if not z:
+            continue
+        m = RE_BUCHUNGSZEILE.match(z)
+        if m:
+            abschliessen()
+            d = parse_datum(m.group(1)); betrag = parse_betrag(m.group(4))
+            if d is None or betrag is None:
+                aktuell = None
+                continue
+            typ, name = m.group(2), m.group(3).strip()
+            aktuell = {"datum": d, "betrag": round(betrag, 2), "name": name or typ, "typ": typ, "zweck": []}
+            continue
+        if RE_SEITENRAND.match(z):
+            # Seitenkopf/-fuß: laufende Buchung abschließen, Adresszeilen gehören nicht zum Zweck
+            abschliessen()
+            aktuell = None
+            continue
+        if aktuell is not None:
+            # Valuta-Datum am Zeilenanfang der ersten Zweckzeile entfernen
+            aktuell["zweck"].append(RE_VALUTA_PREFIX.sub("", z) if RE_VALUTA_PREFIX.match(z) else z)
+    abschliessen()
+    if out:
+        return out
+    # Fallback für Auszüge ohne Typ-Spalte: „Datum Text Betrag“
+    for roh in text.splitlines():
+        m = RE_BUCHUNGSZEILE_OHNE_TYP.match(roh.strip())
+        if m:
+            d = parse_datum(m.group(1)); betrag = parse_betrag(m.group(3))
+            if d and betrag is not None:
+                out.append(Bewegung(datum=d, betrag=round(betrag, 2), verwendungszweck=m.group(2)[:300], gegenkonto=m.group(2)[:80]))
+    return out
+
+
 def lese_kontoauszug(daten: bytes, name: str) -> list[Bewegung]:
+    if name.lower().endswith(".pdf") or daten[:5] == b"%PDF-":
+        from .pdftext import pdf_text
+        return lese_pdf_text(pdf_text(daten, max_seiten=40))
     if name.lower().endswith(".xml") or daten.lstrip().startswith(b"<"):
         return lese_camt053(daten)
     return lese_csv(daten)

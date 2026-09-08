@@ -155,3 +155,11 @@ class Protokoll(SQLModel, table=True):
     aktion: str
     details: str = ""
     buchung_id: Optional[int] = None
+
+
+class IgnorRegel(SQLModel, table=True):
+    """Kontobewegungen, die nie betrieblich sind (Miete privat, Netflix …): Muster auf Gegenkonto/Zweck."""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    muster: str
+    erstellt_am: datetime = Field(default_factory=datetime.now)
+    treffer: int = 0

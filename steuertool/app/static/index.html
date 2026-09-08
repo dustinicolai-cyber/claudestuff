@@ -162,8 +162,13 @@ button:disabled:hover{background:transparent;color:inherit;box-shadow:none}
 .pruefen .vorschau{height:calc(100vh - 7.5rem)}
 .formular-kopf{position:sticky;top:0;z-index:4;background:var(--card);margin:-1.2rem -1.3rem 1rem;padding:1rem 1.3rem .8rem;border-bottom:1px solid var(--line);border-radius:16px 16px 0 0}
 .formular-kopf h2{margin:0;font-size:1.25rem;display:flex;align-items:center;gap:.5rem;flex-wrap:wrap}
-.formular-kopf .aktionen-raster{display:grid;grid-template-columns:1fr 1fr;gap:.4rem;margin:.7rem 0 0;max-width:420px}
-.formular-kopf .aktionen-raster button{padding:.4rem .7rem;font-size:.9em;font-weight:600;letter-spacing:0;justify-self:stretch;text-align:center}
+.formular-kopf .aktionen-raster{display:grid;grid-template-columns:repeat(4,1fr);gap:.4rem;margin:.7rem 0 0}
+.formular-kopf .aktionen-raster button{padding:.4rem .5rem;font-size:.86em;font-weight:600;letter-spacing:0;justify-self:stretch;text-align:center;white-space:nowrap}
+.kopf-beschreibung{display:flex;align-items:center;gap:.4rem;margin-top:.35rem;font-size:.95em}
+.kopf-beschreibung .txt{cursor:text} .kopf-beschreibung .txt.leer{color:var(--muted);font-style:italic}
+.kopf-beschreibung .stift{background:transparent;border:0;padding:.15rem;color:var(--muted);box-shadow:none;line-height:0} .kopf-beschreibung .stift:hover{color:var(--orange);filter:none}
+.kopf-beschreibung .stift svg{margin:0;width:1em;height:1em}
+.kopf-beschreibung input{flex:1;padding:.3rem .5rem}
 .formular-kopf .aktionen-raster button.gruen{box-shadow:none}
 .formular-kopf .aktionen-raster button.outline-gelb,.formular-kopf .aktionen-raster button.outline-orange,.formular-kopf .aktionen-raster button.outline-rot{color:var(--fg)}
 .formular-kopf .aktionen-raster button svg{color:#fff}
@@ -202,6 +207,12 @@ details.frage[open] summary .btn-ghost{text-decoration:underline}
 .eur-tabelle tr.summe td{border-top:1px solid var(--border)} .eur-tabelle tr.fett td{font-weight:700}
 .eur-tabelle td:last-child,.eur-tabelle th:last-child{width:11em}
 .leer-hinweis{padding:2rem;text-align:center;color:var(--muted)}
+/* Abgleich */
+.badge.plus-b{background:var(--gruen-hell);color:var(--gruen);border-color:transparent} .badge.minus-b{background:var(--card2);color:var(--muted)}
+.abgleich .tabs.reiter{width:auto;margin:.4rem 0} .abgleich .tabs.reiter button{flex:none;padding:.4rem .9rem}
+.abgleich tr.doppelt td{background:var(--rot-hell)}
+.regeln-liste{list-style:none;padding:0;margin:.4rem 0} .regeln-liste li{padding:.2rem 0}
+.beleg-upload .button{cursor:pointer}
 kbd{font:inherit;font-size:.8em;border:1px solid var(--line);border-bottom-width:2px;border-radius:5px;padding:0 .4em;background:var(--card2)}
 code{font-size:.88em;background:var(--card2);color:var(--orange);padding:.08em .35em;border-radius:5px;word-break:break-all}
 details summary{cursor:pointer;margin:.6rem 0}
@@ -233,6 +244,7 @@ footer{color:var(--muted);font-size:.78em;padding:1.4rem 0 0}
   <nav id="nav">
     <button data-ansicht="import" data-titel="Belege importieren" hx-get="/ui/import" hx-target="#main"><svg viewBox="0 0 24 24"><path d="M12 16V4m0 0l-4 4m4-4l4 4M4 16v3a1 1 0 001 1h14a1 1 0 001-1v-3"/></svg><span class="txt">Import</span></button>
     <button data-ansicht="pruefen" data-titel="Belege prüfen" hx-get="/ui/pruefen" hx-target="#main"><svg viewBox="0 0 24 24"><path d="M9 12l2 2 4-4"/><rect x="3" y="4" width="18" height="16" rx="3"/></svg><span class="txt">Prüfen</span><span class="z" id="z-vorschlaege"></span></button>
+    <button data-ansicht="abgleich" data-titel="Kontoauszug abgleichen" hx-get="/ui/abgleich" hx-target="#main"><svg viewBox="0 0 24 24"><path d="M3 10l9-6 9 6M5 10v9m4-9v9m6-9v9m4-9v9M3 19h18"/></svg><span class="txt">Kontoauszug</span></button>
     <button data-ansicht="quartale" data-titel="Quartalsübersicht" hx-get="/ui/quartale" hx-target="#main"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M3 10h18M9 10v10M15 10v10"/></svg><span class="txt">Quartale</span></button>
     <button data-ansicht="auswertung" data-titel="Auswertung" hx-get="/ui/auswertung" hx-target="#main"><svg viewBox="0 0 24 24"><path d="M4 18l5-6 4 3 7-9"/><circle cx="20" cy="6" r="1.5"/></svg><span class="txt">Auswertung</span></button>
     <button data-ansicht="offen" data-titel="Offene Punkte" hx-get="/ui/offen" hx-target="#main"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 8v4l3 2"/></svg><span class="txt">Offene Punkte</span><span class="z warn" id="z-offen"></span></button>
@@ -294,7 +306,7 @@ footer{color:var(--muted);font-size:.78em;padding:1.4rem 0 0}
   document.addEventListener('zaehler-aktualisieren', zaehler);
   document.addEventListener('keydown', e => {
     if (e.target.matches('input,select,textarea')) return;
-    const map = {'1':'import','2':'pruefen','3':'quartale','4':'auswertung','5':'offen','6':'jahresabschluss','7':'export'};
+    const map = {'1':'import','2':'pruefen','3':'abgleich','4':'quartale','5':'auswertung','6':'offen','7':'jahresabschluss','8':'export'};
     if (map[e.key]) { const b = nav.querySelector('[data-ansicht="'+map[e.key]+'"]'); if (b) b.click(); }
   });
   const tg = document.getElementById('theme-toggle');

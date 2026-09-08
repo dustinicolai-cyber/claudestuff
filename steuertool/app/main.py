@@ -16,7 +16,7 @@ from sqlmodel import Session, select
 from . import config, export, matching, ollama, regeln as regelwerk, steuerlogik, ui
 from .db import get_session, init_db, kategorien_synchronisieren
 from .importer import klassifizierung, kontoauszug, mail, pipeline
-from .models import Anlagegut, Beleg, Buchung, DedupIgnoriert, Fragebogen, Kategorie, Kontobewegung, MailFund, Protokoll, Regel
+from .models import Anlagegut, Beleg, Buchung, DedupIgnoriert, Fragebogen, IgnorRegel, Kategorie, Kontobewegung, MailFund, Protokoll, Regel
 
 @asynccontextmanager
 async def _lebenszyklus(_: FastAPI):
@@ -42,13 +42,13 @@ def _kat_liste(s: Session) -> list[Kategorie]:
 
 
 def _jahre(s: Session) -> list[int]:
-    jahre = {b.datum.year for b in s.exec(select(Buchung)).all()} | {date.today().year}
+    jahre = {b.datum.year for b in s.exec(select(Buchung)).all()} | {k.datum.year for k in s.exec(select(Kontobewegung)).all()} | {date.today().year}
     return sorted(jahre, reverse=True)
 
 
 def _standardjahr(s: Session) -> int:
-    """Jüngstes Jahr mit bestätigten Buchungen – im Frühjahr ist das meist das Vorjahr."""
-    jahre = [b.datum.year for b in s.exec(select(Buchung).where(Buchung.status == "bestaetigt")).all()]
+    """Jüngstes Jahr mit Daten (Buchungen oder Kontobewegungen) – im Frühjahr ist das meist das Vorjahr."""
+    jahre = [b.datum.year for b in s.exec(select(Buchung)).all()] + [k.datum.year for k in s.exec(select(Kontobewegung)).all()]
     return max(jahre) if jahre else date.today().year
 
 
@@ -241,9 +241,12 @@ async def api_konto_import(datei: UploadFile = File(...), s: Session = Depends(g
     if not bewegungen:
         return _html(ui.meldung_box("Keine Buchungen erkannt – Spalten Datum/Betrag nicht gefunden.", "fehler-box"))
     neu, dup = matching.kontobewegungen_speichern(s, bewegungen, datei.filename or "")
+    ign = matching.ignorregeln_anwenden(s)
     treffer = matching.matche(s)
-    return _html(ui.meldung_box(f"{neu} neue Kontobewegungen ({dup} Duplikate übersprungen), {treffer} automatisch zugeordnet. "
-                                f"Offene unter „Offene Punkte“."))
+    meldung = (f"{neu} neue Kontobewegungen eingelesen ({dup} bereits bekannt), {treffer} automatisch einer Rechnung zugeordnet, "
+               f"{ign} per Regel ignoriert.")
+    jahr = max((b.datum.year for b in bewegungen), default=None)
+    return _html(ui.meldung_box(meldung) + ui_abgleich(jahr, "offen", s).body.decode())
 
 
 # ------------------------------------------------------------- Prüfen
@@ -498,6 +501,132 @@ def api_auswertung(jahr: int, s: Session = Depends(get_session)) -> JSONResponse
     })
 
 
+# ------------------------------------------------------------ Abgleich
+
+def _buchung_aus_konto(s: Session, k: Kontobewegung) -> Buchung:
+    """Buchungsvorschlag aus einer Kontobewegung (Beleg fehlt) – Kategorie per Regel, sonst offen."""
+    cfg = config.regeln()
+    richtung = "ausgabe" if k.betrag < 0 else "einnahme"
+    brutto = abs(k.betrag)
+    netto, satz, ust, brutto = steuerlogik.betraege_vervollstaendigen(None, 0.0 if richtung == "einnahme" else cfg["regelsteuersatz"], None, brutto)
+    b = Buchung(datum=k.datum, richtung=richtung, betrag_netto=netto, ust_satz=satz, ust_betrag=ust, betrag_brutto=brutto,
+                lieferant=k.gegenkonto, beschreibung=k.verwendungszweck[:200], status="vorschlag", konfidenz=0.3,
+                extraktion_stufe="kontoauszug", klassifizierung_weg="-",
+                hinweise_json=json.dumps(["Aus Kontobewegung angelegt – Beleg fehlt. USt-Satz ist eine Annahme."], ensure_ascii=False),
+                extraktion_json=json.dumps({"kontobewegung_id": k.id, "verwendungszweck": k.verwendungszweck}, ensure_ascii=False))
+    kat, weg, _ = klassifizierung.klassifiziere(
+        s, {"lieferant": k.gegenkonto, "beschreibung": k.verwendungszweck, "richtung": richtung, "betrag_brutto": brutto}, cfg) \
+        if (KI_AN["wert"] or regelwerk.passende_regel(s, k.gegenkonto, k.verwendungszweck)) else (None, "-", 0)
+    if kat:
+        b.kategorie_id, b.klassifizierung_weg = kat.id, weg
+    s.add(b)
+    s.commit()
+    s.refresh(b)
+    k.buchung_id = b.id
+    s.add(k)
+    s.commit()
+    return b
+
+
+@app.get("/ui/abgleich", response_class=HTMLResponse)
+def ui_abgleich(jahr: Optional[int] = None, filter: str = "offen", s: Session = Depends(get_session)) -> HTMLResponse:
+    jahr = jahr or _standardjahr(s)
+    zeilen = matching.abgleich(s, jahr)
+    regeln_ = s.exec(select(IgnorRegel).order_by(IgnorRegel.muster)).all()
+    kats = _kats(s)
+    vorschlag = {}
+    for z in zeilen:
+        if z["status"] == "kein_beleg":
+            r = regelwerk.passende_regel(s, z["k"].gegenkonto, z["k"].verwendungszweck)
+            vorschlag[z["k"].id] = kats.get(r.kategorie_id).name if r and r.kategorie_id in kats else ""
+    return _html(ui.abgleich_view(zeilen, regeln_, jahr, filter, vorschlag))
+
+
+@app.post("/api/abgleich/aktion", response_class=HTMLResponse)
+async def api_abgleich_aktion(request: Request, s: Session = Depends(get_session)) -> HTMLResponse:
+    """anlegen | ignorieren | regel | loesen | freigeben – für eine Auswahl von Kontobewegungen."""
+    form = await request.form()
+    aktion = form.get("aktion", "")
+    ids = [int(x) for x in form.getlist("ids") if str(x).isdigit()]
+    jahr = int(form["jahr"]) if str(form.get("jahr", "")).isdigit() else None
+    n = 0
+    for kid in ids:
+        k = s.get(Kontobewegung, kid)
+        if not k:
+            continue
+        if aktion == "anlegen" and not k.buchung_id and not k.ignoriert:
+            _buchung_aus_konto(s, k); n += 1
+        elif aktion == "ignorieren":
+            k.ignoriert = True; s.add(k); n += 1
+        elif aktion == "freigeben":
+            k.ignoriert = False; s.add(k); n += 1
+        elif aktion == "loesen":
+            k.buchung_id = None; s.add(k); n += 1
+        elif aktion == "regel":
+            muster = (k.gegenkonto or k.verwendungszweck[:40]).strip().lower()
+            if muster and not s.exec(select(IgnorRegel).where(IgnorRegel.muster == muster)).first():
+                s.add(IgnorRegel(muster=muster))
+            k.ignoriert = True; s.add(k); n += 1
+    s.commit()
+    if aktion == "regel":
+        matching.ignorregeln_anwenden(s)
+    text = {"anlegen": f"{n} Buchungsvorschläge angelegt – jetzt unter „Prüfen“.", "ignorieren": f"{n} ignoriert.",
+            "freigeben": f"{n} wieder freigegeben.", "loesen": f"{n} Zuordnungen gelöst.", "regel": f"{n} ignoriert und als Regel gemerkt."}.get(aktion, "Nichts geändert.")
+    return _html(ui.meldung_box(text) + ui_abgleich(jahr, "offen", s).body.decode())
+
+
+@app.post("/api/abgleich/{konto_id}/zuordnen", response_class=HTMLResponse)
+def api_abgleich_zuordnen(konto_id: int, buchung_id: int = Form(...), jahr: Optional[int] = Form(None), s: Session = Depends(get_session)) -> HTMLResponse:
+    k = s.get(Kontobewegung, konto_id)
+    if k and s.get(Buchung, buchung_id):
+        k.buchung_id = buchung_id
+        s.add(k)
+        s.commit()
+    return ui_abgleich(jahr, "offen", s)
+
+
+@app.post("/api/abgleich/{konto_id}/beleg", response_class=HTMLResponse)
+async def api_abgleich_beleg(konto_id: int, datei: UploadFile = File(...), jahr: Optional[int] = Form(None),
+                             s: Session = Depends(get_session)) -> HTMLResponse:
+    """Rechnung zu einer Kontobewegung hochladen: importieren und direkt zuordnen."""
+    k = s.get(Kontobewegung, konto_id)
+    if not k:
+        raise HTTPException(404)
+    daten = await datei.read()
+    richtung = "einnahme" if k.betrag > 0 else "ausgabe"
+    erg = pipeline.importiere_datei(s, daten, datei.filename or "beleg", herkunft=f"abgleich:{k.id}", ki_erlaubt=KI_AN["wert"], richtung=richtung)
+    hinweis = ""
+    if erg.buchung_id:
+        b = s.get(Buchung, erg.buchung_id)
+        if b and not k.buchung_id:
+            k.buchung_id = b.id
+            s.add(k)
+            if abs(b.betrag_brutto - abs(k.betrag)) > 0.005:
+                hinweis = f" Achtung: Rechnungsbetrag {export.eur_fmt(b.betrag_brutto)} weicht von der Kontobewegung {export.eur_fmt(abs(k.betrag))} ab – bitte unter „Prüfen“ kontrollieren."
+            s.commit()
+    meldung = f"{datei.filename}: {erg.status}, {erg.meldung}.{hinweis}"
+    return _html(ui.meldung_box(meldung, "warn-box" if hinweis or erg.status != "neu" else "ok-box") + ui_abgleich(jahr or k.datum.year, "offen", s).body.decode())
+
+
+@app.post("/api/ignorregel/neu", response_class=HTMLResponse)
+def api_ignorregel_neu(muster: str = Form(...), jahr: Optional[int] = Form(None), s: Session = Depends(get_session)) -> HTMLResponse:
+    m = muster.strip().lower()
+    if m and not s.exec(select(IgnorRegel).where(IgnorRegel.muster == m)).first():
+        s.add(IgnorRegel(muster=m))
+        s.commit()
+    n = matching.ignorregeln_anwenden(s)
+    return _html(ui.meldung_box(f"Regel „{m}“ angelegt, {n} Kontobewegungen ignoriert.") + ui_abgleich(jahr, "offen", s).body.decode())
+
+
+@app.post("/api/ignorregel/{regel_id}/loeschen", response_class=HTMLResponse)
+def api_ignorregel_loeschen(regel_id: int, jahr: Optional[int] = Form(None), s: Session = Depends(get_session)) -> HTMLResponse:
+    r = s.get(IgnorRegel, regel_id)
+    if r:
+        s.delete(r)
+        s.commit()
+    return ui_abgleich(jahr, "offen", s)
+
+
 # -------------------------------------------------------- Offene Punkte
 
 @app.get("/ui/offen", response_class=HTMLResponse)
@@ -622,26 +751,7 @@ def api_konto_buchung(konto_id: int, s: Session = Depends(get_session)) -> HTMLR
     k = s.get(Kontobewegung, konto_id)
     if not k:
         raise HTTPException(404)
-    cfg = config.regeln()
-    richtung = "ausgabe" if k.betrag < 0 else "einnahme"
-    brutto = abs(k.betrag)
-    netto, satz, ust, brutto = steuerlogik.betraege_vervollstaendigen(None, 0.0 if richtung == "einnahme" else cfg["regelsteuersatz"], None, brutto)
-    b = Buchung(datum=k.datum, richtung=richtung, betrag_netto=netto, ust_satz=satz, ust_betrag=ust, betrag_brutto=brutto,
-                lieferant=k.gegenkonto, beschreibung=k.verwendungszweck[:200], status="vorschlag", konfidenz=0.3,
-                extraktion_stufe="kontoauszug", klassifizierung_weg="-",
-                hinweise_json=json.dumps(["Aus Kontobewegung angelegt – Beleg fehlt. USt-Satz ist eine Annahme."], ensure_ascii=False),
-                extraktion_json=json.dumps({"kontobewegung_id": k.id, "verwendungszweck": k.verwendungszweck}, ensure_ascii=False))
-    kat, weg, _ = klassifizierung.klassifiziere(
-        s, {"lieferant": k.gegenkonto, "beschreibung": k.verwendungszweck, "richtung": richtung, "betrag_brutto": brutto}, cfg) \
-        if KI_AN["wert"] else (None, "-", 0)
-    if kat:
-        b.kategorie_id, b.klassifizierung_weg = kat.id, weg
-    s.add(b)
-    s.commit()
-    s.refresh(b)
-    k.buchung_id = b.id
-    s.add(k)
-    s.commit()
+    b = _buchung_aus_konto(s, k)
     return _pruefen_detail(s, b)
 
 

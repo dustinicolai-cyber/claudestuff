@@ -7,7 +7,7 @@ from sqlmodel import Session, select
 
 from . import config
 from .importer.kontoauszug import Bewegung
-from .models import Buchung, DedupIgnoriert, Kontobewegung
+from .models import Buchung, DedupIgnoriert, IgnorRegel, Kontobewegung
 
 
 def kontobewegungen_speichern(s: Session, bewegungen: list[Bewegung], quelle: str) -> tuple[int, int]:
@@ -92,3 +92,52 @@ def offene_punkte(s: Session) -> dict:
             ):
                 doppel.append((a, b))
     return {"ohne_beleg": ohne_beleg, "ohne_konto": ohne_konto, "doppel": doppel}
+
+
+def ignorregeln_anwenden(s: Session, nur_ids: list[int] | None = None) -> int:
+    """Kontobewegungen ohne Buchung gegen die Ignorier-Muster prüfen. Gibt Anzahl neu ignorierter."""
+    regeln = s.exec(select(IgnorRegel)).all()
+    if not regeln:
+        return 0
+    n = 0
+    for k in s.exec(select(Kontobewegung).where(Kontobewegung.buchung_id == None, Kontobewegung.ignoriert == False)).all():  # noqa: E711,E712
+        if nur_ids is not None and k.id not in nur_ids:
+            continue
+        text = f"{k.gegenkonto} {k.verwendungszweck}".lower()
+        for r in regeln:
+            if r.muster.lower() in text:
+                k.ignoriert = True
+                r.treffer += 1
+                s.add(k)
+                s.add(r)
+                n += 1
+                break
+    s.commit()
+    return n
+
+
+def abgleich(s: Session, jahr: int | None = None) -> list[dict]:
+    """Jede Kontobewegung mit Status: zugeordnet | rueckfrage | kein_beleg | ignoriert, plus Dubletten-Hinweis."""
+    alle = s.exec(select(Kontobewegung).order_by(Kontobewegung.datum.desc(), Kontobewegung.id.desc())).all()
+    if jahr:
+        alle = [k for k in alle if k.datum.year == jahr]
+    buchungen = {b.id: b for b in s.exec(select(Buchung)).all()}
+    zeilen = []
+    for k in alle:
+        eintrag = {"k": k, "buchung": buchungen.get(k.buchung_id) if k.buchung_id else None, "kandidaten": [], "doppelt": None}
+        if k.ignoriert:
+            eintrag["status"] = "ignoriert"
+        elif k.buchung_id:
+            eintrag["status"] = "zugeordnet"
+        else:
+            kand = kandidaten_fuer(s, k)
+            eintrag["kandidaten"] = kand
+            eintrag["status"] = "rueckfrage" if kand else "kein_beleg"
+        # evtl. doppelt: gleicher Betrag, gleiches Gegenkonto, ±2 Tage, andere Bewegung
+        for o in alle:
+            if o.id != k.id and abs(o.betrag - k.betrag) < 0.005 and o.gegenkonto.lower() == k.gegenkonto.lower() \
+                    and abs((o.datum - k.datum).days) <= 2 and o.verwendungszweck.strip().lower() == k.verwendungszweck.strip().lower():
+                eintrag["doppelt"] = o
+                break
+        zeilen.append(eintrag)
+    return zeilen

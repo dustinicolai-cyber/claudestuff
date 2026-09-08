@@ -213,3 +213,58 @@ def test_doppel_sind_unterschiedlich():
             ids = [b.id for b in s.exec(select(Buchung)).all()]
         r = c.post("/api/doppel/unterschiedlich", data={"paare": [f"{ids[0]}-{ids[1]}"]})
         assert "1 Paare als geprüft" in r.text and "Keine Auffälligkeiten." in r.text
+
+
+def test_abgleich_rueckfrage_ignorregel_doppelt():
+    with client() as c:
+        # Rechnung mit 59,49 am 05.02. – Kontobewegung am 06.02. matcht automatisch; zweite gleiche Bewegung ist „evtl. doppelt“
+        c.post("/api/import", files={"datei": ("adobe.pdf", erzeuge.text_pdf(erzeuge.ADOBE_TEXT), "application/pdf")}, data={"ki": "0"})
+        csv = erzeuge.CSV_SPARKASSE + "DE00123;07.02.2025;07.02.2025;KARTENZAHLUNG;ADOBE SYSTEMS DUBLIN;Adobe Systems Software Ireland;IE00;XXX;-59,49;EUR;Umsatz gebucht\n"
+        r = c.post("/api/konto/import", files={"datei": ("umsaetze.csv", csv.encode(), "text/csv")})
+        assert "5 neue Kontobewegungen" in r.text and "Kontoauszug einlesen" in r.text
+        a = c.get("/ui/abgleich?jahr=2025&filter=alle").text
+        assert "zugeordnet" in a and "kein Beleg" in a and "evtl. doppelt" in a and "Netflix" in a
+        # Regel: netflix immer ignorieren
+        r = c.post("/api/ignorregel/neu", data={"muster": "netflix", "jahr": "2025"})
+        assert "1 Kontobewegungen ignoriert" in r.text
+        from app.models import Kontobewegung
+        with Session(engine()) as s:
+            k = s.exec(select(Kontobewegung).where(Kontobewegung.gegenkonto == "Netflix International")).first()
+            assert k.ignoriert
+            einnahme = s.exec(select(Kontobewegung).where(Kontobewegung.betrag == 1500.0)).first()
+        # Buchung aus Einnahme anlegen → Vorschlag unter Prüfen (Einnahmen)
+        r = c.post("/api/abgleich/aktion", data={"aktion": "anlegen", "ids": [str(einnahme.id)], "jahr": "2025"})
+        assert "1 Buchungsvorschläge" in r.text
+        with Session(engine()) as s:
+            b = s.exec(select(Buchung).where(Buchung.richtung == "einnahme")).first()
+            assert b and b.status == "vorschlag" and b.betrag_brutto == 1500.0
+        assert c.get("/api/status?jahr=2025").json()["vorschlaege"] == 2
+
+
+def test_beschreibung_stift_im_kopf():
+    with client() as c:
+        c.post("/api/import", files={"datei": ("adobe.pdf", erzeuge.text_pdf(erzeuge.ADOBE_TEXT), "application/pdf")}, data={"ki": "0"})
+        t = c.get("/ui/pruefen").text
+        assert "kopf-beschreibung" in t and 'name="beschreibung"' in t and t.count('name="beschreibung"') == 1
+
+
+def test_abgleich_beleg_hochladen_und_pdf_auszug():
+    from tests.fixtures.rechnungen import ING_AUSZUG
+    from app.export import MiniPdf
+    with client() as c:
+        pdf = MiniPdf(quer=False)
+        for z in ING_AUSZUG.splitlines():
+            pdf.zeile([(40, z, False)], groesse=9, hoehe=12)
+        r = c.post("/api/konto/import", files={"datei": ("Kontoauszug.pdf", pdf.bytes(), "application/pdf")})
+        assert "10 neue Kontobewegungen" in r.text
+        from app.models import Kontobewegung
+        with Session(engine()) as s:
+            k = s.exec(select(Kontobewegung).where(Kontobewegung.betrag == -92.21)).first()
+            assert k is not None
+        # Rechnung (92,21) direkt an die Kontobewegung hängen
+        from tests.test_extraktion import ADOBE_DE_TEXT
+        r = c.post(f"/api/abgleich/{k.id}/beleg", files={"datei": ("adobe.pdf", erzeuge.text_pdf(ADOBE_DE_TEXT), "application/pdf")}, data={"jahr": "2025"})
+        assert r.status_code == 200 and "weicht" not in r.text
+        with Session(engine()) as s:
+            k = s.get(Kontobewegung, k.id); b = s.get(Buchung, k.buchung_id)
+            assert b is not None and b.betrag_brutto == 92.21 and b.richtung == "ausgabe"

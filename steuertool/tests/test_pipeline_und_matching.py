@@ -90,3 +90,20 @@ def test_doppelbuchung_erkannt(session):
         session.add(Buchung(datum=date(2025, 1, 1), lieferant="Hoster", betrag_brutto=12.0, betrag_netto=10.08, rechnungsnummer="H-1"))
     session.commit()
     assert len(matching.offene_punkte(session)["doppel"]) == 1
+
+
+def test_ing_pdf_auszug_text():
+    from tests.fixtures.rechnungen import ING_AUSZUG
+    bew = kontoauszug.lese_pdf_text(ING_AUSZUG)
+    assert len(bew) == 10
+    b = {round(x.betrag, 2): x for x in bew}
+    assert b[-2.99].gegenkonto == "PayPal: Apple Services" and b[-2.99].datum == date(2025, 1, 2)   # Fußnote „1“ abgeschnitten
+    assert b[3570.0].gegenkonto == "FORWARD CONSULTING AGENCY OHG" and "K4K" in b[3570.0].verwendungszweck
+    assert b[-92.21].gegenkonto.startswith("PayPal: ADOBE")
+    assert b[-7.99].gegenkonto == "DOMAINFACTORY GMBH" and "Rg.38324487" in b[-7.99].verwendungszweck
+    assert b[-17.85].gegenkonto == "VISA FIGMA MONTHLY RENEWAL"
+    assert b[1099.6].gegenkonto == "PAYPAL"
+    assert sum(1 for x in bew if x.betrag == -530.41) == 2
+    assert all("Mandat" not in x.verwendungszweck for x in bew)
+    # Seitenrand (Saldo, IBAN, Adresse) ist nicht in Zwecken gelandet
+    assert all("Saldo" not in x.verwendungszweck and "IBAN" not in x.verwendungszweck and "Muster" not in x.verwendungszweck for x in bew)
