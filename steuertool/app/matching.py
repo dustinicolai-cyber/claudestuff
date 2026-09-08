@@ -150,7 +150,7 @@ def abgleich(s: Session, jahr: int | None = None) -> list[dict]:
     buchungen = {b.id: b for b in s.exec(select(Buchung)).all()}
     zeilen = []
     for k in alle:
-        eintrag = {"k": k, "buchung": buchungen.get(k.buchung_id) if k.buchung_id else None, "kandidaten": [], "doppelt": None}
+        eintrag = {"k": k, "buchung": buchungen.get(k.buchung_id) if k.buchung_id else None, "kandidaten": [], "doppelt": None, "gegenbuchung": None}
         if k.ignoriert:
             eintrag["status"] = "ignoriert"
         elif k.buchung_id:
@@ -165,5 +165,12 @@ def abgleich(s: Session, jahr: int | None = None) -> list[dict]:
                     and abs((o.datum - k.datum).days) <= 2:
                 eintrag["doppelt"] = o
                 break
+        # Rückbuchung: gleicher Betrag mit umgekehrtem Vorzeichen, gleicher Partner, ±14 Tage – Zahlung und Storno heben sich auf
+        if not k.ignoriert and not k.buchung_id:
+            for o in alle:
+                if o.id != k.id and not o.ignoriert and not o.buchung_id and abs(o.betrag + k.betrag) < 0.005 \
+                        and o.gegenkonto.lower() == k.gegenkonto.lower() and abs((o.datum - k.datum).days) <= 14:
+                    eintrag["gegenbuchung"] = o
+                    break
         zeilen.append(eintrag)
     return zeilen

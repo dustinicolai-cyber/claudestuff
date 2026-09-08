@@ -399,7 +399,28 @@ def manuell_view(b: Buchung, kategorien: list[Kategorie], cfg: dict, lieferanten
 
 # ------------------------------------------------------------ Quartale
 
-def quartale_view(ue: dict, modus: str, jahre: list[int], offene_vorschlaege: int, anlagen: list[Anlagegut]) -> str:
+def ust_hinweis(ust: dict | None) -> str:
+    """Kasten unter den Kennzahlen: §13b-Steuer entstanden vs. ans Finanzamt gezahlt."""
+    if not ust or not (ust["entstanden"] or ust["gezahlt"] or ust["erstattet"]):
+        return ""
+    basis_txt = ("Zeile 48 = tatsächlich ans Finanzamt gezahlte USt (Abflussprinzip)." if ust["basis"] == "zahlung"
+                 else "Zeile 48 = §13b-Steuer je Rechnung; Zahlungen ans Finanzamt zählen nicht doppelt.")
+    teile = [f"§13b-Steuer aus Rechnungen entstanden: <b>{eur_fmt(ust['entstanden'])}</b>",
+             f"ans Finanzamt gezahlt: <b>{eur_fmt(ust['gezahlt'])}</b>"]
+    if ust["erstattet"]:
+        teile.append(f"erstattet: <b>{eur_fmt(ust['erstattet'])}</b>")
+    cls, extra = "ok-box", ""
+    if ust["basis"] == "zahlung" and ust["entstanden"] and not ust["gezahlt"]:
+        cls = "warn-box"
+        extra = " Noch keine Zahlung an das Finanzamt erfasst – Kontoauszug einlesen, Überweisungen ans Finanzamt werden als „Umsatzsteuer gezahlt“ erkannt, oder unter „Buchung erfassen“ mit dieser Kategorie anlegen."
+    elif abs(ust["offen"]) > 1:
+        cls = "warn-box" if ust["offen"] > 0 else "ok-box"
+        extra = (f" Differenz {eur_fmt(ust['offen'])}: vermutlich noch nicht fällige Voranmeldung (z. B. Q4 wird im Januar gezahlt) oder eine Zahlung ist noch nicht importiert."
+                 if ust["offen"] > 0 else f" Es wurde {eur_fmt(-ust['offen'])} mehr gezahlt als aus den Rechnungen entstanden – Nachzahlung fürs Vorjahr oder eine Rechnung ohne §13b-Haken.")
+    return f'<div class="{cls} ust-hinweis"><span>{" · ".join(teile)}. {basis_txt}{extra} <a href="#" hx-get="/ui/einstellungen" hx-target="#main">Einstellung ändern</a></span></div>'
+
+
+def quartale_view(ue: dict, modus: str, jahre: list[int], offene_vorschlaege: int, anlagen: list[Anlagegut], ust: dict | None = None) -> str:
     def w(z: Zelle) -> float:
         return {"brutto": z.brutto, "netto": z.netto, "ust": z.ust, "abzugsfaehig": z.abzugsfaehig}[modus]
 
@@ -442,6 +463,7 @@ def quartale_view(ue: dict, modus: str, jahre: list[int], offene_vorschlaege: in
     <div class="kpi gelb"><div class="l">Entgangene Vorsteuer (§19)</div><div class="w">{eur_fmt(ev[4])}</div></div>
     <div class="kpi"><div class="ring"><div class="kreis" style="--p:{quote}"><span>{quote:.0f} %</span></div><div><div class="l">Belege bestätigt</div><div class="fett">{bestaetigt} von {bestaetigt + offene_vorschlaege}</div></div></div></div>
   </div>
+  {ust_hinweis(ust)}
   <div class="scroll"><table class="tabelle"><thead><tr><th>Kategorie</th><th>Zeile</th><th>Q1</th><th>Q2</th><th>Q3</th><th>Q4</th><th>Jahr {jahr}</th></tr></thead>
   <tbody>{zeilen or '<tr><td colspan=7 class="muted">Noch keine bestätigten Buchungen in diesem Jahr.</td></tr>'}</tbody><tfoot>{summen}</tfoot></table></div>
 
@@ -662,7 +684,7 @@ def export_view(jahr: int, eur: list[dict], ustva_liste: list[dict], jahre: list
 # --------------------------------------------------------- Einstellungen
 
 def einstellungen_view(ollama_status: dict, mail: dict, hat_pw: bool, regeln: list[Regel], kategorien: dict[int, Kategorie],
-                       pfade: dict, meldung: str = "", meldung_typ: str = "ok-box") -> str:
+                       pfade: dict, meldung: str = "", meldung_typ: str = "ok-box", ust_basis: str = "zahlung") -> str:
     regeln_html = "".join(
         f'<tr><td><code>{h(r.muster)}</code>{" <span class=muted>(regex)</span>" if r.ist_regex else ""}</td><td>{h(kategorien[r.kategorie_id].name) if r.kategorie_id in kategorien else "?"}</td>'
         f'<td>{r.prioritaet}</td><td>{"aus Korrektur" if r.erstellt_aus_korrektur else "manuell"}</td><td>{r.treffer}</td>'
@@ -679,6 +701,13 @@ def einstellungen_view(ollama_status: dict, mail: dict, hat_pw: bool, regeln: li
     <p class="muted">Sichern heißt: diese drei Dinge kopieren. Kein Cloud-Sync durch das Tool.</p>
     <div class="row"><button class="gefahr" hx-post="/api/beenden" hx-target="#main" hx-confirm="Steuerfuchs beenden? Der Server wird gestoppt; alle Daten sind gespeichert.">Steuerfuchs beenden</button></div></div>
 
+  <div class="karte"><h3>Umsatzsteuer ans Finanzamt (EÜR Zeile 48)</h3>
+    <p class="muted klein">Als Kleinunternehmer schuldest du bei §13b-Rechnungen (Adobe, Figma, Google …) die Umsatzsteuer selbst und überweist sie ans Finanzamt. Überweisungen ans Finanzamt werden aus dem Kontoauszug automatisch als „Umsatzsteuer gezahlt“ erkannt, Erstattungen als Betriebseinnahme (Zeile 17), Einkommensteuer/Soli als privat.</p>
+    <form hx-post="/api/einstellungen/ust-basis" hx-target="#main" class="stapel">
+      <label class="check"><input type="radio" name="basis" value="zahlung" {"checked" if ust_basis == "zahlung" else ""}> <span><b>Zahlungen an das Finanzamt</b> (Abflussprinzip, Standard) – Zeile 48 ist die Summe der tatsächlich überwiesenen Umsatzsteuer im Jahr.</span></label>
+      <label class="check"><input type="radio" name="basis" value="rechnung" {"checked" if ust_basis == "rechnung" else ""}> <span><b>§13b-Steuer je Rechnung</b> – Zeile 48 ist die rechnerische Steuer aus den Rechnungen; Überweisungen ans Finanzamt zählen dann nicht doppelt.</span></label>
+      <div><button class="btn-secondary klein">Speichern</button></div>
+    </form></div>
   <div class="karte"><h3>Lokale KI (Ollama)</h3>
     <p>{"<span class='badge ok'>erreichbar</span> Modelle: " + (", ".join(h(m) for m in ollama_status["modelle"]) or "keine") if ollama_status["online"] else "<span class='badge low'>nicht erreichbar</span> – Stufe 3 (OCR) und KI-Klassifizierung sind aus; E-Rechnung, PDF-Text und Regeln funktionieren trotzdem."}</p>
     <p class="muted">Konfiguriert: Vision <code>{h(pfade["vision"])}</code>, Text <code>{h(pfade["text"])}</code>. Ändern in steuerregeln.json → ollama.</p></div>
@@ -941,7 +970,7 @@ def abgleich_view(zeilen: list[dict], regeln: list[IgnorRegel], jahr: int, filte
         if st == "rueckfrage":
             return f'<span class="badge mid">Rückfrage</span><div class="muted klein">Betrag passt zu {len(z["kandidaten"])} Rechnung(en), Datum weicht ab</div>'
         vs = vorschlag.get(k.id, "")
-        return '<span class="badge low">kein Beleg</span>' + (f'<div class="muted klein">Regel: {h(vs)}</div>' if vs else '')
+        return '<span class="badge low">kein Beleg</span>' + (f'<div class="muted klein">Vorschlag: {h(vs)}</div>' if vs else '')
 
     def aktionen(z: dict) -> str:
         k, st = z["k"], z["status"]
@@ -976,6 +1005,8 @@ def abgleich_view(zeilen: list[dict], regeln: list[IgnorRegel], jahr: int, filte
         f'<td>{d(z["k"].datum)}</td><td class="num">{eur_fmt(z["k"].betrag)}<div><span class="badge {"plus-b" if z["k"].betrag > 0 else "minus-b"}">{"Einnahme" if z["k"].betrag > 0 else "Ausgabe"}</span></div></td>'
         f'<td class="zweck">{h(z["k"].gegenkonto)}<div class="muted klein">{h(z["k"].verwendungszweck[:140])}</div>'
         + (f'<div class="klein"><span class="badge low">evtl. doppelt</span> <span class="muted">gleicher Betrag und Empfänger am {d(z["doppelt"].datum)} – prüfen, ob beide echt sind</span></div>' if z["doppelt"] else "")
+        + (f'<div class="klein"><span class="badge mid">Rückbuchung</span> <span class="muted">Gegenbuchung über {eur_fmt(z["gegenbuchung"].betrag)} am {d(z["gegenbuchung"].datum)} – Zahlung und Storno heben sich auf.</span> '
+           f'<button type="button" class="klein btn-ghost" hx-post="/api/abgleich/aktion" hx-vals=\'{{"aktion":"ignorieren","ids":"{z["k"].id},{z["gegenbuchung"].id}","jahr":"{jahr}","filter":"{filter}"}}\' hx-target="#main">{ICON["auge_zu"]}beide ignorieren</button></div>' if z["gegenbuchung"] else "")
         + f'</td><td>{status_zelle(z)}</td><td class="aktionen-zelle"><div class="aktionen-inline">{aktionen(z)}</div></td></tr>'
         for z in zeilen)
     regeln_html = "".join(f'<li><code>{h(r.muster)}</code> <span class="muted klein">{r.treffer} Treffer</span> '

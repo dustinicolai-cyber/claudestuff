@@ -50,11 +50,42 @@ def regeln_path() -> Path:
     return p
 
 
+def _zusammenfuehren(standard, nutzer):
+    """Nutzerdatei gewinnt; was dort fehlt, kommt aus der mitgelieferten Datei (neue Schlüssel, neue Kategorien)."""
+    if isinstance(standard, dict) and isinstance(nutzer, dict):
+        out = dict(standard)
+        for k, v in nutzer.items():
+            out[k] = _zusammenfuehren(standard.get(k), v) if k in standard else v
+        return out
+    if isinstance(standard, list) and isinstance(nutzer, list) and standard and isinstance(standard[0], dict) and "schluessel" in standard[0]:
+        # Kategorien: Nutzer-Einträge überschreiben gleiche Schlüssel, fehlende Standard-Kategorien werden ergänzt
+        vorhanden = {d.get("schluessel") for d in nutzer if isinstance(d, dict)}
+        return list(nutzer) + [d for d in standard if d.get("schluessel") not in vorhanden]
+    return nutzer
+
+
 @lru_cache(maxsize=1)
 def regeln() -> dict:
-    """Die einzige Quelle für Grenzwerte, Kategorien und EÜR-Zeilen."""
+    """Die einzige Quelle für Grenzwerte, Kategorien und EÜR-Zeilen (Nutzerdatei, ergänzt um neue Standardwerte)."""
     with open(regeln_path(), encoding="utf-8") as f:
-        return json.load(f)
+        nutzer = json.load(f)
+    try:
+        with open(DEFAULT_REGELN, encoding="utf-8") as f:
+            standard = json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return nutzer
+    return _zusammenfuehren(standard, nutzer)
+
+
+def regeln_setzen(**werte) -> dict:
+    """Einzelne Einstellungen in der Nutzerdatei ändern (z. B. aus den Einstellungen) und neu laden."""
+    pfad = regeln_path()
+    with open(pfad, encoding="utf-8") as f:
+        daten = json.load(f)
+    daten.update(werte)
+    with open(pfad, "w", encoding="utf-8") as f:
+        json.dump(daten, f, ensure_ascii=False, indent=2)
+    return regeln_neu_laden()
 
 
 def regeln_neu_laden() -> dict:

@@ -1,7 +1,7 @@
 from datetime import date
 
 from app.models import Anlagegut, Buchung
-from app.steuerlogik import (afa_fuer_jahr, betraege_vervollstaendigen, bewerte, erkenne_reverse_charge, eur_zeilen,
+from app.steuerlogik import (afa_fuer_jahr, betraege_vervollstaendigen, bewerte, erkenne_finanzamt, erkenne_reverse_charge, eur_zeilen, ust_abgleich,
                              konfidenz_aus_feldern, quartalsuebersicht, ust_13b, ustva)
 
 
@@ -128,10 +128,34 @@ def test_quartalsuebersicht_und_eur(cfg, kats):
     assert ue["einnahmen"][4].brutto == 1500.0
     assert ue["entgangene_vorsteuer"][4] == round(11.3 + 15.93 + 15.97, 2)
 
+    # Standard (Abflussprinzip): Zeile 48 nur aus Zahlungen ans Finanzamt – hier keine, also keine Zeile 48
     zeilen = {z["zeile"]: z["betrag"] for z in eur_zeilen(buchungen, kd, anlagen, 2025, cfg) if z["zeile"]}
-    assert zeilen[11] == 1500.0 and zeilen[50] == 59.49 + 99.78 and zeilen[52] == 70.0 and zeilen[30] == 400.0 and zeilen[48] == 11.3
+    assert zeilen[11] == 1500.0 and zeilen[50] == 59.49 + 99.78 and zeilen[52] == 70.0 and zeilen[30] == 400.0 and 48 not in zeilen
     gewinn = next(z for z in eur_zeilen(buchungen, kd, anlagen, 2025, cfg) if z["bezeichnung"].startswith("Gewinn"))
+    assert gewinn["betrag"] == round(1500 - 59.49 - 99.78 - 70 - 400, 2)
+    # Alternative „rechnung“: §13b-Steuer je Rechnung bildet Zeile 48
+    cfg_r = {**cfg, "ust_zeile48_basis": "rechnung"}
+    zeilen = {z["zeile"]: z["betrag"] for z in eur_zeilen(buchungen, kd, anlagen, 2025, cfg_r) if z["zeile"]}
+    assert zeilen[48] == 11.3
+    gewinn = next(z for z in eur_zeilen(buchungen, kd, anlagen, 2025, cfg_r) if z["bezeichnung"].startswith("Gewinn"))
     assert gewinn["betrag"] == round(1500 - 59.49 - 99.78 - 70 - 400 - 11.3, 2)
+    # Zahlung ans Finanzamt: zählt im Standard (Zeile 48), im Modus „rechnung“ nicht doppelt
+    zahlung = b(kategorie_id=kats["ust_zahlung"].id, datum=date(2025, 4, 10), betrag_netto=11.3, ust_satz=0, ust_betrag=0, betrag_brutto=11.3)
+    mit = buchungen + [zahlung]
+    assert {z["zeile"]: z["betrag"] for z in eur_zeilen(mit, kd, anlagen, 2025, cfg) if z["zeile"]}[48] == 11.3
+    assert {z["zeile"]: z["betrag"] for z in eur_zeilen(mit, kd, anlagen, 2025, cfg_r) if z["zeile"]}[48] == 11.3
+    ab = ust_abgleich(mit, kd, 2025, cfg)
+    assert ab["entstanden"] == 11.3 and ab["gezahlt"] == 11.3 and ab["offen"] == 0.0 and ab["zeile48"] == 11.3
+
+
+def test_finanzamt_erkennung(cfg):
+    assert erkenne_finanzamt("Finanzamt Gießen", "STEUERNR 039/852 UMS.ST 3.VJ 241.432,56 EUR", "ausgabe", cfg)[0] == "ust_zahlung"
+    assert erkenne_finanzamt("Finanzamt Gießen", "Umsatzsteuer Erstattung 2024", "einnahme", cfg)[0] == "ust_erstattung"
+    assert erkenne_finanzamt("Finanzamt Gießen", "EINKOMMENSTEUER VZ 2025 Q1 SOLI", "ausgabe", cfg)[0] == "einkommensteuer"
+    assert erkenne_finanzamt("Landeshauptkasse", "EST 2024 Erstattung", "einnahme", cfg)[0] == "steuererstattung_privat"
+    assert erkenne_finanzamt("REWE", "Einkauf Umsatzsteuer", "ausgabe", cfg)[0] is None
+    k, grund = erkenne_finanzamt("Finanzamt Gießen", "Saeumniszuschlag", "ausgabe", cfg)
+    assert k is None and "Steuerart" in grund
 
 
 def test_konfidenz_aus_feldern():

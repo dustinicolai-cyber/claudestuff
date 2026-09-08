@@ -487,7 +487,7 @@ def api_neu_erkennen(buchung_id: int, s: Session = Depends(get_session)) -> HTML
 @app.post("/api/buchungen/neu-erkennen", response_class=HTMLResponse)
 async def api_buchungen_neu_erkennen(request: Request, s: Session = Depends(get_session)) -> HTMLResponse:
     form = await request.form()
-    ids = [int(x) for x in form.getlist("ids") if str(x).isdigit()]
+    ids = [int(t) for x in form.getlist("ids") for t in str(x).split(",") if t.strip().isdigit()]
     n = 0
     for bid in ids:
         b = s.get(Buchung, bid)
@@ -501,7 +501,7 @@ async def api_buchungen_neu_erkennen(request: Request, s: Session = Depends(get_
 async def api_buchungen_loeschen(request: Request, s: Session = Depends(get_session)) -> HTMLResponse:
     """Sammel-Löschen aus der Prüfliste (Checkboxen)."""
     form = await request.form()
-    ids = [int(x) for x in form.getlist("ids") if str(x).isdigit()]
+    ids = [int(t) for x in form.getlist("ids") for t in str(x).split(",") if t.strip().isdigit()]
     n = 0
     for bid in ids:
         b = s.get(Buchung, bid)
@@ -525,7 +525,8 @@ def ui_quartale(jahr: Optional[int] = None, modus: str = "brutto", s: Session = 
     if modus not in ("brutto", "netto", "ust", "abzugsfaehig"):
         modus = "brutto"
     anlagen = s.exec(select(Anlagegut).where(Anlagegut.aktiv == True)).all()  # noqa: E712
-    return _html(ui.quartale_view(_uebersicht(s, jahr), modus, _jahre(s), len(_offene(s)), anlagen))
+    ust = steuerlogik.ust_abgleich(_aktive(s), _kats(s), jahr, config.regeln())
+    return _html(ui.quartale_view(_uebersicht(s, jahr), modus, _jahre(s), len(_offene(s)), anlagen, ust))
 
 
 @app.post("/api/anlage/{anlage_id}", response_class=HTMLResponse)
@@ -605,11 +606,20 @@ def _buchung_aus_konto(s: Session, k: Kontobewegung) -> Buchung:
                 extraktion_stufe="kontoauszug", klassifizierung_weg="-",
                 hinweise_json=json.dumps(["Aus Kontobewegung angelegt – Beleg fehlt. USt-Satz ist eine Annahme."], ensure_ascii=False),
                 extraktion_json=json.dumps({"kontobewegung_id": k.id, "verwendungszweck": k.verwendungszweck}, ensure_ascii=False))
-    kat, weg, _ = klassifizierung.klassifiziere(
-        s, {"lieferant": k.gegenkonto, "beschreibung": k.verwendungszweck, "richtung": richtung, "betrag_brutto": brutto}, cfg) \
-        if (KI_AN["wert"] or regelwerk.passende_regel(s, k.gegenkonto, k.verwendungszweck)) else (None, "-", 0)
-    if kat:
-        b.kategorie_id, b.klassifizierung_weg = kat.id, weg
+    fa_schluessel, fa_grund = steuerlogik.erkenne_finanzamt(k.gegenkonto, k.verwendungszweck, richtung, cfg)
+    if fa_schluessel:
+        kat = next((x for x in _kats(s).values() if x.schluessel == fa_schluessel), None)
+        if kat:
+            # Steuerzahlungen tragen keine Umsatzsteuer – Brutto = Netto
+            b.betrag_netto, b.ust_satz, b.ust_betrag = brutto, 0.0, 0.0
+            b.kategorie_id, b.klassifizierung_weg, b.konfidenz = kat.id, "finanzamt", 0.85
+            b.hinweise_json = json.dumps([fa_grund], ensure_ascii=False)
+    else:
+        kat, weg, _ = klassifizierung.klassifiziere(
+            s, {"lieferant": k.gegenkonto, "beschreibung": k.verwendungszweck, "richtung": richtung, "betrag_brutto": brutto}, cfg) \
+            if (KI_AN["wert"] or regelwerk.passende_regel(s, k.gegenkonto, k.verwendungszweck)) else (None, "-", 0)
+        if kat:
+            b.kategorie_id, b.klassifizierung_weg = kat.id, weg
     s.add(b)
     s.commit()
     s.refresh(b)
@@ -638,6 +648,12 @@ def ui_abgleich(jahr: Optional[int] = None, filter: str = "offen", s: Session = 
         if z["status"] == "kein_beleg":
             r = regelwerk.passende_regel(s, z["k"].gegenkonto, z["k"].verwendungszweck)
             vorschlag[z["k"].id] = kats.get(r.kategorie_id).name if r and r.kategorie_id in kats else ""
+            if not vorschlag[z["k"].id]:
+                fa, grund = steuerlogik.erkenne_finanzamt(z["k"].gegenkonto, z["k"].verwendungszweck, "ausgabe" if z["k"].betrag < 0 else "einnahme", config.regeln())
+                if fa:
+                    vorschlag[z["k"].id] = next((x.name for x in kats.values() if x.schluessel == fa), "") or grund
+                elif grund:
+                    vorschlag[z["k"].id] = grund
     return _html(ui.abgleich_view(zeilen, regeln_, jahr, filter, vorschlag))
 
 
@@ -646,7 +662,7 @@ async def api_abgleich_aktion(request: Request, s: Session = Depends(get_session
     """anlegen | ignorieren | regel | loesen | freigeben – für eine Auswahl von Kontobewegungen."""
     form = await request.form()
     aktion = form.get("aktion", "")
-    ids = [int(x) for x in form.getlist("ids") if str(x).isdigit()]
+    ids = [int(t) for x in form.getlist("ids") for t in str(x).split(",") if t.strip().isdigit()]
     jahr = int(form["jahr"]) if str(form.get("jahr", "")).isdigit() else None
     filter = _abgleich_filter(form.get("filter"))
     n = 0
@@ -765,7 +781,7 @@ async def api_ohnekonto_aktion(request: Request, s: Session = Depends(get_sessio
     """Beleg ohne Kontobewegung: privat | stornieren (Vorschläge werden gelöscht, Bestätigte storniert)."""
     form = await request.form()
     aktion = form.get("aktion", "")
-    ids = [int(x) for x in form.getlist("ids") if str(x).isdigit()]
+    ids = [int(t) for x in form.getlist("ids") for t in str(x).split(",") if t.strip().isdigit()]
     n = 0
     for bid in ids:
         b = s.get(Buchung, bid)
@@ -981,7 +997,16 @@ def _einstellungen(s: Session, meldung: str = "", typ: str = "ok-box") -> HTMLRe
     pfade = {"db": str(config.db_path()), "belege": str(config.beleg_dir()), "regeln": str(config.regeln_path()),
              "vision": cfg["ollama"]["vision_modell"], "text": cfg["ollama"]["text_modell"], "version": config.version()}
     hat_pw = bool(e["imap"].get("user") and mail.passwort_lesen(e["imap"]["user"]))
-    return _html(ui.einstellungen_view(ollama.verfuegbar(cfg), e, hat_pw, regeln_, _kats(s), pfade, meldung, typ))
+    return _html(ui.einstellungen_view(ollama.verfuegbar(cfg), e, hat_pw, regeln_, _kats(s), pfade, meldung, typ, steuerlogik.ust_basis(cfg)))
+
+
+@app.post("/api/einstellungen/ust-basis", response_class=HTMLResponse)
+def api_ust_basis(basis: str = Form("zahlung"), s: Session = Depends(get_session)) -> HTMLResponse:
+    basis = "rechnung" if basis == "rechnung" else "zahlung"
+    config.regeln_setzen(ust_zeile48_basis=basis)
+    text = ("Zeile 48 wird jetzt aus den Zahlungen an das Finanzamt gebildet (Abflussprinzip)." if basis == "zahlung"
+            else "Zeile 48 wird jetzt aus der §13b-Steuer je Rechnung gebildet; Zahlungen ans Finanzamt zählen nicht doppelt.")
+    return _einstellungen(s, text)
 
 
 @app.get("/ui/einstellungen", response_class=HTMLResponse)

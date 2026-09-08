@@ -68,8 +68,15 @@ Kontoauszüge (CSV deutscher Banken oder CAMT.053) unter Import einlesen; Matchi
 
 - **§19**: kein Vorsteuerabzug, Brutto ist die Betriebsausgabe.
 - **§13b Reverse-Charge** (Adobe, Figma, Google …): Erkennung über ausländische USt-IdNr,
-  Hinweistext, bekannte Anbieter. 19 % auf den Nettobetrag werden als Zahllast (Kz 47) und
-  als gezahlte USt (EÜR Zeile 48) ausgewiesen.
+  Hinweistext, bekannte Anbieter. 19 % auf den Nettobetrag werden als Zahllast (Kz 47) ausgewiesen.
+- **Umsatzsteuer ans Finanzamt (EÜR Zeile 48)**: Standard ist das Abflussprinzip – Zeile 48 ist die
+  Summe der tatsächlich überwiesenen Umsatzsteuer im Jahr. Überweisungen ans Finanzamt werden aus dem
+  Kontoauszug erkannt (Kategorie „Umsatzsteuer ans Finanzamt gezahlt“), Erstattungen landen als
+  Betriebseinnahme in Zeile 17, Einkommensteuer/Soli/Kirchensteuer sind privat. Unter Einstellungen
+  lässt sich alternativ die rechnerische §13b-Steuer je Rechnung als Zeile 48 wählen; die Zahlungen
+  zählen dann nicht doppelt. Die Quartalsübersicht zeigt entstandene und gezahlte Steuer nebeneinander.
+- **Rückbuchungen**: Zahlung und Storno (gleicher Betrag, umgekehrtes Vorzeichen, gleicher Partner,
+  ±14 Tage) werden im Abgleich als Paar markiert und lassen sich mit einem Klick beide ignorieren.
 - **Bewirtung** 70 %, Warnung bei fehlendem Anlass/Teilnehmern.
 - **GWG** bis 800 € netto Sofortabzug; darüber automatisch Anlagegut mit linearer,
   monatsgenauer AfA (Zeile 30).

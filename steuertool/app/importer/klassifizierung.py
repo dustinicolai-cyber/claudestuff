@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from sqlmodel import Session, select
 
-from .. import ollama, regeln
+from .. import ollama, regeln, steuerlogik
 from ..models import Kategorie
 
 
@@ -19,6 +19,11 @@ def klassifiziere(s: Session, felder: dict, cfg: dict, text: str = "") -> tuple[
         return k, f"regel:{regel.id}", 0.95
 
     kategorien = s.exec(select(Kategorie).where(Kategorie.aktiv == True)).all()  # noqa: E712
+    fa_schluessel, _ = steuerlogik.erkenne_finanzamt(lieferant, felder.get("beschreibung") or "", felder.get("richtung") or "ausgabe", cfg)
+    if fa_schluessel:
+        k = next((k for k in kategorien if k.schluessel == fa_schluessel), None)
+        if k:
+            return k, "finanzamt", 0.85
     if felder.get("richtung") == "einnahme":
         k = next((k for k in kategorien if k.schluessel == "einnahmen"), None)
         return k, "richtung", 0.8

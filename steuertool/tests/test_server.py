@@ -63,7 +63,7 @@ def test_import_pruefen_bestaetigen_gwg_wird_afa():
         assert "300,00" in q.text           # AfA 2025: 3 Monate
         eur = c.get("/export/eur.json?jahr=2025").json()["zeilen"]
         z = {e["zeile"]: e["betrag"] for e in eur if e["zeile"]}
-        assert z[50] == 59.49 and z[48] == 11.3 and z[30] == 300.0
+        assert z[50] == 59.49 and z[30] == 300.0 and 48 not in z  # Zeile 48 erst mit Zahlung ans Finanzamt (Abfluss)
         u = c.get("/export/ustva/2025/1").json()
         assert u["kennzahlen"] == {"46": 59.49, "47": 11.3}
         assert c.get("/export/quartale.pdf?jahr=2025").content.startswith(b"%PDF")
@@ -389,3 +389,42 @@ def test_schnell_korrektur_in_tabelle():
             assert b.status == "bestaetigt"
         # Vorschlagsliste enthält den neuen Namen alphabetisch
         assert 'option value="Adobe Inc."' in c.get("/ui/manuell").text
+
+
+def test_finanzamt_aus_kontoauszug_und_rueckbuchung():
+    """Überweisung ans Finanzamt wird als USt-Zahlung erkannt (Zeile 48); Zahlung + Storno werden als Rückbuchungspaar markiert."""
+    with client() as c:
+        kopf = erzeuge.CSV_SPARKASSE.splitlines()[0]
+        csv = kopf + ("\nDE00123;10.04.2025;10.04.2025;UEBERWEISUNG;STEUERNR 039/852 UMS.ST 1.VJ 25;Finanzamt Giessen;DE12;XXX;-72,82;EUR;Umsatz gebucht"
+                      "\nDE00123;12.05.2025;12.05.2025;LASTSCHRIFT;Abo Mai;Zeitschrift XY;DE13;XXX;-29,90;EUR;Umsatz gebucht"
+                      "\nDE00123;14.05.2025;14.05.2025;RUECKBUCHUNG;Storno Abo Mai;Zeitschrift XY;DE13;XXX;29,90;EUR;Umsatz gebucht\n")
+        c.post("/api/konto/import", files={"datei": ("umsaetze.csv", csv.encode(), "text/csv")})
+        a = c.get("/ui/abgleich?jahr=2025&filter=alle").text
+        assert "Umsatzsteuer ans Finanzamt gezahlt" in a          # Vorschlag in der Abgleich-Spalte
+        assert a.count("Rückbuchung</span>") == 2 and "beide ignorieren" in a
+        from app.models import Kontobewegung
+        with Session(engine()) as s:
+            fa = s.exec(select(Kontobewegung).where(Kontobewegung.gegenkonto == "Finanzamt Giessen")).first()
+            paar = [k.id for k in s.exec(select(Kontobewegung).where(Kontobewegung.gegenkonto == "Zeitschrift XY")).all()]
+        # Paar mit einer Aktion ignorieren (ids mit Komma)
+        r = c.post("/api/abgleich/aktion", data={"aktion": "ignorieren", "ids": [",".join(map(str, paar))], "jahr": "2025", "filter": "alle"})
+        assert "2 ignoriert" in r.text
+        # Finanzamt-Zahlung ohne Beleg buchen → Kategorie ust_zahlung, kein USt-Anteil
+        c.post("/api/abgleich/aktion", data={"aktion": "anlegen", "ids": [str(fa.id)], "jahr": "2025"})
+        with Session(engine()) as s:
+            b = s.exec(select(Buchung).where(Buchung.lieferant == "Finanzamt Giessen")).first()
+            kat = s.get(Kategorie, b.kategorie_id)
+            assert kat.schluessel == "ust_zahlung" and b.ust_betrag == 0 and b.betrag_netto == 72.82 and b.klassifizierung_weg == "finanzamt"
+        # bestätigen → Zeile 48 = 72,82 (Abflussprinzip), Hinweiskasten in den Quartalen
+        c.post(f"/api/buchung/{b.id}/bestaetigen", data={"datum": "2025-04-10", "richtung": "ausgabe", "lieferant": "Finanzamt Giessen", "betrag_netto": "72.82",
+                                                        "ust_satz": "0", "ust_betrag": "0", "betrag_brutto": "72.82", "kategorie_id": str(kat.id), "waehrung": "EUR", "betrag_fremd": "0"})
+        z = {e["zeile"]: e["betrag"] for e in c.get("/export/eur.json?jahr=2025").json()["zeilen"] if e["zeile"]}
+        assert z[48] == 72.82
+        q = c.get("/ui/quartale?jahr=2025").text
+        assert "ans Finanzamt gezahlt" in q and "72,82" in q
+        # Umschalten auf „rechnung“: Zahlung zählt nicht mehr, Einstellung wird gespeichert
+        r = c.post("/api/einstellungen/ust-basis", data={"basis": "rechnung"})
+        assert "§13b-Steuer je Rechnung" in r.text
+        z = {e["zeile"]: e["betrag"] for e in c.get("/export/eur.json?jahr=2025").json()["zeilen"] if e["zeile"]}
+        assert 48 not in z
+        c.post("/api/einstellungen/ust-basis", data={"basis": "zahlung"})

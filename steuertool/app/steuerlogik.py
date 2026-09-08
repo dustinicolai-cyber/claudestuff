@@ -91,6 +91,52 @@ def erkenne_reverse_charge(text: str, ust_idnr: str, lieferant: str, ust_betrag:
     return treffer, gruende
 
 
+def ust_basis(cfg: dict) -> str:
+    """Woraus Zeile 48 gebildet wird: 'zahlung' (Zahlungen ans Finanzamt, Abfluss) oder 'rechnung' (§13b je Rechnung)."""
+    return "rechnung" if str(cfg.get("ust_zeile48_basis", "zahlung")).lower() == "rechnung" else "zahlung"
+
+
+def _enthaelt(text: str, muster: Iterable[str]) -> bool:
+    t = f" {text.lower()} "
+    return any(m in t for m in muster)
+
+
+def erkenne_finanzamt(gegenkonto: str, zweck: str, richtung: str, cfg: dict) -> tuple[str | None, str]:
+    """Zahlungen an das / vom Finanzamt einordnen.
+
+    Rückgabe: (Kategorie-Schlüssel oder None, Begründung). Umsatzsteuer → ust_zahlung / ust_erstattung,
+    Einkommensteuer, Soli, Kirchensteuer → privat (einkommensteuer / steuererstattung_privat).
+    """
+    fm = cfg.get("finanzamt_muster") or {}
+    beides = f"{gegenkonto} {zweck}"
+    if not _enthaelt(beides, fm.get("gegenkonto", ["finanzamt"])):
+        return None, ""
+    ausgabe = richtung == "ausgabe"
+    if _enthaelt(beides, fm.get("einkommensteuer", [])):
+        return ("einkommensteuer" if ausgabe else "steuererstattung_privat"), "Finanzamt: Einkommensteuer/Soli/Kirchensteuer ist privat, keine Betriebsausgabe."
+    if _enthaelt(beides, fm.get("umsatzsteuer", [])):
+        return ("ust_zahlung" if ausgabe else "ust_erstattung"), ("Finanzamt: gezahlte Umsatzsteuer → Zeile 48." if ausgabe else "Finanzamt: erstattete Umsatzsteuer → Zeile 17.")
+    return None, "Zahlung vom/ans Finanzamt – Steuerart aus dem Verwendungszweck nicht erkennbar, bitte Kategorie wählen."
+
+
+def ust_abgleich(buchungen: Iterable[Buchung], kategorien: dict[int, Kategorie], jahr: int, cfg: dict) -> dict:
+    """§13b-Steuer, die im Jahr entstanden ist, gegen das, was tatsächlich ans Finanzamt floss."""
+    entstanden = gezahlt = erstattet = 0.0
+    for b in buchungen:
+        if b.datum.year != jahr or b.status != "bestaetigt" or getattr(b, "storniert", False):
+            continue
+        entstanden += ust_13b(b, cfg)
+        k = kategorien.get(b.kategorie_id or -1)
+        if k and k.sonderfall == "ust_zahlung":
+            gezahlt += b.betrag_brutto
+        elif k and k.sonderfall == "ust_erstattung":
+            erstattet += b.betrag_brutto
+    basis = ust_basis(cfg)
+    return {"entstanden": runde(entstanden), "gezahlt": runde(gezahlt), "erstattet": runde(erstattet),
+            "offen": runde(entstanden - gezahlt + erstattet), "basis": basis,
+            "zeile48": runde(gezahlt if basis == "zahlung" else entstanden)}
+
+
 def ust_13b(b: Buchung, cfg: dict) -> float:
     """Steuer, die der Leistungsempfänger nach §13b selbst schuldet."""
     if not b.reverse_charge or b.richtung != "ausgabe":
@@ -136,6 +182,14 @@ def bewerte(b: Buchung, k: Kategorie | None, cfg: dict,
 
     if b.richtung == "einnahme":
         bw.eur_zeile = k.eur_zeile if k else 11
+        if sonderfall == "privat":
+            bw.abzugsfaehig = 0.0
+            bw.eur_zeile = None
+            bw.hinweise.append("Private Einnahme (z. B. Steuererstattung) – keine Betriebseinnahme.")
+            return bw
+        if sonderfall == "ust_erstattung":
+            bw.hinweise.append("Vom Finanzamt erstattete Umsatzsteuer ist Betriebseinnahme (Zeile 17).")
+            return bw
         if b.ust_betrag:
             bw.warnungen.append("Einnahme mit USt-Ausweis – als Kleinunternehmer darf keine USt ausgewiesen werden (§19 UStG).")
         return bw
@@ -149,6 +203,15 @@ def bewerte(b: Buchung, k: Kategorie | None, cfg: dict,
     if sonderfall == "privat":
         bw.abzugsfaehig = 0.0
         bw.eur_zeile = None
+        return bw
+
+    if sonderfall == "ust_zahlung":
+        if ust_basis(cfg) == "rechnung":
+            bw.abzugsfaehig = 0.0
+            bw.eur_zeile = None
+            bw.hinweise.append("Zeile 48 wird aus der §13b-Steuer je Rechnung gebildet – diese Zahlung zählt nicht noch einmal (Einstellung „Zeile 48“).")
+        else:
+            bw.hinweise.append("An das Finanzamt gezahlte Umsatzsteuer: Betriebsausgabe im Jahr der Zahlung (Zeile 48).")
         return bw
 
     if sonderfall == "bewirtung":
@@ -390,14 +453,17 @@ def eur_zeilen(buchungen: list[Buchung], kategorien: dict[int, Kategorie],
         if z is None:
             continue
         summen[z] = summen.get(z, 0.0) + r["jahr"].abzugsfaehig
-    # §13b-Steuer als gezahlte USt (Zeile 48) – nur soweit tatsächlich abgeführt
-    s13b = sum(ust_13b(b, cfg) for b in buchungen if b.datum.year == jahr and b.status == "bestaetigt")
-    if s13b:
-        summen[48] = summen.get(48, 0.0) + s13b
+    # Zeile 48: Standard sind die tatsächlichen Zahlungen ans Finanzamt (Kategorie ust_zahlung, fließt oben schon ein).
+    # Alternativ (Einstellung „rechnung“) die §13b-Steuer je Rechnung – dann zählen die Zahlungen nicht (bewerte setzt sie auf 0).
+    s13b = 0.0
+    if ust_basis(cfg) == "rechnung":
+        s13b = sum(ust_13b(b, cfg) for b in buchungen if b.datum.year == jahr and b.status == "bestaetigt")
+        if s13b:
+            summen[48] = summen.get(48, 0.0) + s13b
     # Geschenke-Zeile: nicht abziehbare Anteile sind bereits durch bewerte() auf 0 gesetzt
     bez = cfg["eur_zeilen"]
     out = [{"zeile": z, "bezeichnung": bez.get(str(z), f"Zeile {z}"), "betrag": runde(v)}
-           for z, v in sorted(summen.items())]
+           for z, v in sorted(summen.items()) if abs(v) >= 0.005]
     out.append({"zeile": None, "bezeichnung": "Summe Betriebseinnahmen", "betrag": runde(ue["einnahmen"][4].abzugsfaehig)})
     out.append({"zeile": None, "bezeichnung": "Summe Betriebsausgaben", "betrag": runde(ue["ausgaben"][4].abzugsfaehig + s13b)})
     out.append({"zeile": None, "bezeichnung": "Gewinn / Verlust", "betrag": runde(ue["einnahmen"][4].abzugsfaehig - ue["ausgaben"][4].abzugsfaehig - s13b)})

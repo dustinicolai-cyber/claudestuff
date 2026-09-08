@@ -17,6 +17,14 @@
 
   "matching_tage_toleranz": 5,
 
+  "ust_zeile48_basis": "zahlung",
+  "_ust_zeile48_basis_hinweis": "zahlung = Zeile 48 aus den tatsächlichen Zahlungen an das Finanzamt (Abflussprinzip, Standard). rechnung = Zeile 48 aus der §13b-Steuer je Rechnung; Zahlungen ans Finanzamt zählen dann nicht doppelt.",
+  "finanzamt_muster": {
+    "gegenkonto": ["finanzamt", "finanzkasse", "landeshauptkasse", "landeskasse", "bundeskasse", "kasse.hamburg", "oberfinanzdirektion", "zentralkasse"],
+    "umsatzsteuer": ["umsatzsteuer", "umsatzst", "ums.st", "ums st", "umsst", "ust", "umst", "usteuer", "u-steuer", "ustva", "vorauszahlung ust"],
+    "einkommensteuer": ["einkommensteuer", "eink.st", "eink st", "einkst", "ekst", "est ", "est-", "est/", "solidarit", "soli", "kirchensteuer", "kist", "vorauszahlung est"]
+  },
+
   "ustva_kennzahlen": {
     "reverse_charge_eu_basis": "46",
     "reverse_charge_eu_steuer": "47",
@@ -53,7 +61,8 @@
     "41": "Rechts- und Steuerberatung, Buchführung",
     "43": "Beiträge, Gebühren, Abgaben und Versicherungen",
     "44": "Werbekosten",
-    "48": "An das Finanzamt gezahlte Umsatzsteuer (§13b)",
+    "17": "Vom Finanzamt erstattete und ggf. verrechnete Umsatzsteuer",
+    "48": "An das Finanzamt gezahlte und ggf. verrechnete Umsatzsteuer",
     "50": "Übrige unbeschränkt abziehbare Betriebsausgaben",
     "51": "Geschenke (abziehbar)",
     "52": "Bewirtungsaufwendungen (abziehbarer Anteil)",
@@ -86,7 +95,11 @@
     {"schluessel": "geschenke",          "name": "Geschenke",                      "richtung": "ausgabe",  "eur_zeile": 51, "sonderfall": "geschenk"},
     {"schluessel": "steuerberatung",     "name": "Rechts- und Steuerberatung",     "richtung": "ausgabe",  "eur_zeile": 41, "sonderfall": null},
     {"schluessel": "sonstige",           "name": "Sonstige Betriebsausgaben",      "richtung": "ausgabe",  "eur_zeile": 50, "sonderfall": null},
-    {"schluessel": "privat",             "name": "Privat (nicht betrieblich)",     "richtung": "ausgabe",  "eur_zeile": null, "sonderfall": "privat"}
+    {"schluessel": "privat",             "name": "Privat (nicht betrieblich)",     "richtung": "ausgabe",  "eur_zeile": null, "sonderfall": "privat"},
+    {"schluessel": "ust_zahlung",        "name": "Umsatzsteuer ans Finanzamt gezahlt (§13b-Abführung)", "richtung": "ausgabe", "eur_zeile": 48, "sonderfall": "ust_zahlung"},
+    {"schluessel": "ust_erstattung",     "name": "Umsatzsteuer vom Finanzamt erstattet", "richtung": "einnahme", "eur_zeile": 17, "sonderfall": "ust_erstattung"},
+    {"schluessel": "einkommensteuer",    "name": "Einkommensteuer / Soli / Kirchensteuer (privat)", "richtung": "ausgabe", "eur_zeile": null, "sonderfall": "privat"},
+    {"schluessel": "steuererstattung_privat", "name": "Steuererstattung Einkommensteuer (privat)", "richtung": "einnahme", "eur_zeile": null, "sonderfall": "privat"}
   ],
 
   "mail": {
