@@ -812,7 +812,7 @@ def abgleich_view(zeilen: list[dict], regeln: list[IgnorRegel], jahr: int, filte
             return (f'<span class="badge mid">Rückfrage</span> <span class="muted klein">Betrag passt zu {len(z["kandidaten"])} Rechnung(en), Datum weicht ab:</span>'
                     f'<form class="inline" hx-post="/api/abgleich/{k.id}/zuordnen" hx-target="#main"><input type="hidden" name="jahr" value="{jahr}"><select name="buchung_id">{opts}</select><button class="klein btn-secondary">zuordnen</button></form>')
         vs = vorschlag.get(k.id, "")
-        return (f'<span class="badge low">kein Beleg</span>' + (f' <span class="muted klein">Kategorie laut Regel: {h(vs)}</span>' if vs else ' <span class="muted klein">Beleg importieren – dann matcht es</span>'))
+        return (f'<span class="badge low">kein Beleg</span>' + (f'<div class="muted klein">Regel: {h(vs)}</div>' if vs else ''))
 
     def aktionen(z: dict) -> str:
         k, st = z["k"], z["status"]
@@ -829,7 +829,7 @@ def abgleich_view(zeilen: list[dict], regeln: list[IgnorRegel], jahr: int, filte
         f'<td>{d(z["k"].datum)}</td><td class="num">{eur_fmt(z["k"].betrag)}</td>'
         f'<td><span class="badge {"plus-b" if z["k"].betrag > 0 else "minus-b"}">{"Einnahme" if z["k"].betrag > 0 else "Ausgabe"}</span></td>'
         f'<td>{h(z["k"].gegenkonto)}<div class="muted klein">{h(z["k"].verwendungszweck[:110])}</div>'
-        + (f'<div class="klein"><span class="badge low">evtl. doppelt</span> <span class="muted">gleiche Bewegung am {d(z["doppelt"].datum)}</span></div>' if z["doppelt"] else "")
+        + (f'<div class="klein"><span class="badge low">evtl. doppelt</span> <span class="muted">gleicher Betrag und Empfänger am {d(z["doppelt"].datum)} – prüfen, ob beide echt sind</span></div>' if z["doppelt"] else "")
         + f'</td><td>{status_zelle(z)}</td><td class="aktionen-zelle">{aktionen(z)}</td></tr>'
         for z in zeilen)
     regeln_html = "".join(f'<li><code>{h(r.muster)}</code> <span class="muted klein">{r.treffer} Treffer</span> '

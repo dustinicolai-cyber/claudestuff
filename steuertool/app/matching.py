@@ -136,7 +136,7 @@ def abgleich(s: Session, jahr: int | None = None) -> list[dict]:
         # evtl. doppelt: gleicher Betrag, gleiches Gegenkonto, ±2 Tage, andere Bewegung
         for o in alle:
             if o.id != k.id and abs(o.betrag - k.betrag) < 0.005 and o.gegenkonto.lower() == k.gegenkonto.lower() \
-                    and abs((o.datum - k.datum).days) <= 2 and o.verwendungszweck.strip().lower() == k.verwendungszweck.strip().lower():
+                    and abs((o.datum - k.datum).days) <= 2:
                 eintrag["doppelt"] = o
                 break
         zeilen.append(eintrag)
