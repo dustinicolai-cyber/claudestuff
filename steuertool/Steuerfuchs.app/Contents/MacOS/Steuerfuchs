@@ -4,6 +4,13 @@
 #  - läuft eine andere Version (alter Ordner): sauber beenden, notfalls über den Port stoppen, neu starten
 #  - läuft nichts: Server im Hintergrund starten, Browser öffnen, sobald er antwortet
 # Alles wird in ~/Steuertool/app.log protokolliert.
+# macOS erwartet, dass eine App sofort „antwortet“. Deshalb löst sich dieses Skript sofort
+# in einen Hintergrundprozess auf und beendet sich; der Hintergrundprozess macht die Arbeit.
+if [ "$1" != "--worker" ]; then
+  nohup "$0" --worker >/dev/null 2>&1 &
+  disown 2>/dev/null
+  exit 0
+fi
 PROJEKT="$(cd "$(dirname "$0")/../../.." && pwd)"
 PORT="${PORT:-8347}"
 URL="http://127.0.0.1:$PORT"
