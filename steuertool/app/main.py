@@ -490,8 +490,14 @@ def api_auswertung(jahr: int, s: Session = Depends(get_session)) -> JSONResponse
     kategorien = [{"name": r["kategorie"].name, "richtung": r["kategorie"].richtung, "brutto": round(r["jahr"].brutto, 2),
                    "abzugsfaehig": round(r["jahr"].abzugsfaehig, 2), "ust": round(r["jahr"].ust, 2), "anzahl": r["jahr"].anzahl}
                   for r in ue["zeilen"]]
+    kunden: dict[str, float] = {}
+    for b in _aktive(s):
+        if b.richtung == "einnahme" and b.status == "bestaetigt" and b.datum.year == jahr:
+            name = (b.lieferant or "Ohne Kunde").strip()
+            kunden[name] = kunden.get(name, 0.0) + b.betrag_brutto
     return JSONResponse({
         "jahr": jahr,
+        "kunden": [{"name": k, "betrag": round(v, 2)} for k, v in sorted(kunden.items(), key=lambda kv: -kv[1])],
         "quartale": [{"q": i + 1, "einnahmen": round(ue["einnahmen"][i].abzugsfaehig, 2), "ausgaben": round(ue["ausgaben"][i].abzugsfaehig, 2),
                       "gewinn": ue["gewinn"][i], "ust": ue["entgangene_vorsteuer"][i]} for i in range(4)],
         "jahr_summe": {"einnahmen": round(ue["einnahmen"][4].abzugsfaehig, 2), "ausgaben": round(ue["ausgaben"][4].abzugsfaehig, 2),
@@ -499,6 +505,29 @@ def api_auswertung(jahr: int, s: Session = Depends(get_session)) -> JSONResponse
         "monate": ue["monate"],
         "kategorien": kategorien,
     })
+
+
+# --------------------------------------------------------------- Suche
+
+@app.get("/ui/suche", response_class=HTMLResponse)
+def ui_suche(q: str = "", s: Session = Depends(get_session)) -> HTMLResponse:
+    """Volltextsuche über Buchungen: Lieferant, Beschreibung, Rechnungsnummer, Betrag, Datum."""
+    q = q.strip()
+    treffer: list[Buchung] = []
+    if q:
+        ql = q.lower()
+        zahl = None
+        try:
+            zahl = float(ql.replace("€", "").replace(".", "").replace(",", ".").strip()) if any(ch.isdigit() for ch in ql) else None
+        except ValueError:
+            zahl = None
+        for b in s.exec(select(Buchung).order_by(Buchung.datum.desc())).all():
+            text = " ".join([b.lieferant or "", b.beschreibung or "", b.rechnungsnummer or "", b.ust_idnr or "",
+                             b.datum.strftime("%d.%m.%Y"), f"{b.betrag_brutto:.2f}".replace(".", ",")]).lower()
+            if ql in text or (zahl is not None and (abs(b.betrag_brutto - zahl) < 0.005 or abs(b.betrag_netto - zahl) < 0.005)):
+                treffer.append(b)
+    belege = {x.buchung_id for x in s.exec(select(Kontobewegung).where(Kontobewegung.buchung_id != None)).all()}  # noqa: E711
+    return _html(ui.suche_view(q, treffer[:300], _kats(s), belege))
 
 
 # ------------------------------------------------------------ Abgleich

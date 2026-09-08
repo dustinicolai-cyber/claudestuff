@@ -623,8 +623,7 @@ def auswertung_view(jahr: int, jahre: list[int]) -> str:
   <p class="muted" id="chart-erkl-alt" hidden>Einnahmen und abzugsfähige Ausgaben je Quartal. Nur bestätigte Buchungen; Grün = Plus, Gelb = neutral, Rot = Minus.</p>
   <div class="karte chart-karte">
     <div class="legende" id="chart-legende"></div>
-    <div class="chart-wrap" id="chart-wrap"><svg id="chart" viewBox="0 0 960 380" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Diagramm"></svg><div class="tooltip" id="chart-tip" hidden></div></div>
-    <div id="chart-tabelle" hidden></div>
+    <div class="chart-wrap" id="chart-wrap"><svg id="chart" viewBox="0 0 960 380" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Diagramm"></svg><div class="tooltip" id="chart-tip" hidden></div><div id="chart-tabelle" hidden></div></div>
   </div>
 </section>
 <script>
@@ -682,19 +681,28 @@ def auswertung_view(jahr: int, jahre: list[int]) -> str:
     const tk = []; for (let v = mnLo; v <= mxHi + schritt * 0.001; v += schritt) tk.push(Math.round(v * 100) / 100);
     const y = v => B - (B - T) * (v - mnLo) / (mxHi - mnLo || 1);
     tk.forEach(v => {{ svg.appendChild(el('line', {{x1: L, x2: R, y1: y(v), y2: y(v), class: v === 0 ? 'achse' : 'grid'}})); svg.appendChild(el('text', {{x: L - 8, y: y(v) + 4, class: 'tick', 'text-anchor': 'end'}}, kurz(v))); }});
-    const x = i => L + (R - L) * i / 11; const farbe = css('--orange');
+    const x = i => L + (R - L) * i / 11;
+    // Farbverlauf wie ein Kurschart: unten (Verlust) rot, an der Nulllinie orange, oben grün
+    const defs = el('defs', {{}}); const nullAnteil = Math.min(1, Math.max(0, (y(0) - T) / (B - T)));
+    const grad = el('linearGradient', {{id: 'gewinn-grad', gradientUnits: 'userSpaceOnUse', x1: 0, x2: 0, y1: T, y2: B}});
+    grad.appendChild(el('stop', {{offset: '0%', 'stop-color': css('--gruen')}}));
+    grad.appendChild(el('stop', {{offset: (Math.max(0.05, nullAnteil - 0.05) * 100) + '%', 'stop-color': css('--orange')}}));
+    grad.appendChild(el('stop', {{offset: (Math.min(1, nullAnteil + 0.15) * 100) + '%', 'stop-color': css('--rot')}}));
+    grad.appendChild(el('stop', {{offset: '100%', 'stop-color': css('--rot')}}));
+    defs.appendChild(grad); svg.appendChild(defs);
+    const farbe = 'url(#gewinn-grad)';
     const pfad = w.map((v, i) => (i ? 'L' : 'M') + x(i) + ' ' + y(v)).join(' ');
-    svg.appendChild(el('path', {{d: pfad + ` L${{x(11)}} ${{y(0)}} L${{x(0)}} ${{y(0)}} Z`, fill: farbe, opacity: .1}}));
-    svg.appendChild(el('path', {{d: pfad, fill: 'none', stroke: farbe, 'stroke-width': 2, 'stroke-linejoin': 'round', 'stroke-linecap': 'round'}}));
+    svg.appendChild(el('path', {{d: pfad + ` L${{x(11)}} ${{y(0)}} L${{x(0)}} ${{y(0)}} Z`, fill: farbe, opacity: .16}}));
+    svg.appendChild(el('path', {{d: pfad, fill: 'none', stroke: farbe, 'stroke-width': 2.5, 'stroke-linejoin': 'round', 'stroke-linecap': 'round'}}));
     m.forEach((z, i) => {{
       svg.appendChild(el('text', {{x: x(i), y: B + 20, class: 'tick', 'text-anchor': 'middle'}}, MON[i]));
-      const c = el('circle', {{cx: x(i), cy: y(w[i]), r: 4.5, fill: farbe, stroke: css('--card'), 'stroke-width': 2}}); svg.appendChild(c);
+      const c = el('circle', {{cx: x(i), cy: y(w[i]), r: 4.5, fill: w[i] > 0 ? css('--gruen') : (w[i] < 0 ? css('--rot') : css('--orange')), stroke: css('--card'), 'stroke-width': 2}}); svg.appendChild(c);
       const hit = el('rect', {{x: x(i) - (R - L) / 22, y: T, width: (R - L) / 11, height: B - T, fill: 'transparent'}});
       hit.addEventListener('mousemove', ev => zeigeTip(ev, `<b>${{MON[i]}} ${{jahr}}</b><br>Einnahmen: ${{eur(z.einnahmen)}}<br>Ausgaben: ${{eur(z.ausgaben)}}<br>Gewinn kumuliert: ${{eur(z.gewinn_kumuliert)}}`));
       hit.addEventListener('mouseleave', hideTip); svg.appendChild(hit);
     }});
     const ende = w[11]; const t = el('text', {{x: x(11) + 10, y: y(ende) + 4, class: 'wert'}}, eur(ende)); svg.appendChild(t);
-    legendeSetzen([{{name: 'Gewinn kumuliert', farbe, wert: eur(ende)}}]);
+    legendeSetzen([{{name: 'Gewinn kumuliert', farbe: ende >= 0 ? css('--gruen') : css('--rot'), wert: eur(ende)}}]);
     erkl.textContent = 'Kumulierter Gewinn über das Jahr (Einnahmen minus abzugsfähige Ausgaben, AfA gleichmäßig verteilt). Nulllinie hervorgehoben.';
   }}
 
@@ -702,7 +710,7 @@ def auswertung_view(jahr: int, jahre: list[int]) -> str:
     const kats = d.kategorien.filter(k => k.richtung === 'ausgabe' && k.abzugsfaehig > 0).sort((a, b) => b.abzugsfaehig - a.abzugsfaehig).slice(0, 12);
     if (!kats.length) return leerHinweis();
     const L = 240, R = 880, T = 24, schritt = Math.min(56, (330 - T) / kats.length), hoehe = Math.min(24, schritt - 8);
-    const max = Math.max(...kats.map(k => k.abzugsfaehig)); const farbe = css('--rot');
+    const max = Math.max(...kats.map(k => k.abzugsfaehig)); const farbe = css('--orange');
     kats.forEach((k, i) => {{
       const y = T + schritt * i + (schritt - hoehe) / 2, x1 = L + (R - L) * k.abzugsfaehig / max;
       svg.appendChild(el('text', {{x: L - 10, y: y + hoehe / 2 + 4, class: 'tick', 'text-anchor': 'end'}}, k.name.length > 30 ? k.name.slice(0, 29) + '…' : k.name));
@@ -713,33 +721,45 @@ def auswertung_view(jahr: int, jahre: list[int]) -> str:
       hit.addEventListener('mouseleave', hideTip); svg.appendChild(hit);
     }});
     legendeSetzen([]);
-    erkl.textContent = 'Abzugsfähige Ausgaben je Kategorie, absteigend. Rot, weil Ausgaben das Minus sind.';
+    erkl.textContent = 'Abzugsfähige Ausgaben je Kategorie, absteigend.';
   }}
 
+  function ring(cx, cy, r, ri, farbe, a1, a2){{
+    // Ein voller Kreis (360°) ist als ein Bogen unsichtbar – deshalb ab 359,9° in zwei Hälften zeichnen
+    if (a2 - a1 >= 2 * Math.PI - 0.001) {{ const g = el('g', {{}}); g.appendChild(ring(cx, cy, r, ri, farbe, a1, a1 + Math.PI)); g.appendChild(ring(cx, cy, r, ri, farbe, a1 + Math.PI, a2)); return g; }}
+    const gross = (a2 - a1) > Math.PI ? 1 : 0, p = (rad, w) => [cx + rad * Math.cos(w), cy + rad * Math.sin(w)];
+    const [x1, y1] = p(r, a1), [x2, y2] = p(r, a2), [x3, y3] = p(ri, a2), [x4, y4] = p(ri, a1);
+    return el('path', {{d: `M${{x1}} ${{y1}} A${{r}} ${{r}} 0 ${{gross}} 1 ${{x2}} ${{y2}} L${{x3}} ${{y3}} A${{ri}} ${{ri}} 0 ${{gross}} 0 ${{x4}} ${{y4}} Z`, fill: farbe, stroke: css('--card'), 'stroke-width': 2}});
+  }}
+  function donutZeichnen(eintraege, cx, cy, r, ri, legendeX, titel){{
+    // eintraege: [{{name, wert}}] – mehr als sechs werden zu „Sonstige“
+    let e = eintraege.filter(k => k.wert > 0).sort((a, b) => b.wert - a.wert);
+    const farben = KAT();
+    if (!e.length) {{ svg.appendChild(el('text', {{x: cx, y: cy, class: 'tick', 'text-anchor': 'middle'}}, 'keine Daten')); svg.appendChild(el('text', {{x: cx, y: cy - r - 14, class: 'label', 'text-anchor': 'middle'}}, titel)); return; }}
+    if (e.length > 6) {{ const rest = e.slice(5).reduce((a, k) => a + k.wert, 0); e = e.slice(0, 5).concat([{{name: 'Sonstige (' + (eintraege.length - 5) + ')', wert: rest}}]); }}
+    const gesamt = e.reduce((a, k) => a + k.wert, 0); let winkel = -Math.PI / 2;
+    e.forEach((k, i) => {{
+      const a2 = winkel + k.wert / gesamt * 2 * Math.PI; const seg = ring(cx, cy, r, ri, farben[i], winkel, a2);
+      seg.addEventListener('mousemove', ev => zeigeTip(ev, `<b>${{k.name}}</b><br>${{eur(k.wert)}} · ${{(k.wert / gesamt * 100).toFixed(1)}} %`));
+      seg.addEventListener('mouseleave', hideTip); svg.appendChild(seg); winkel = a2;
+    }});
+    svg.appendChild(el('text', {{x: cx, y: cy - 4, class: 'hero', 'text-anchor': 'middle'}}, kurz(gesamt) + (Math.abs(gesamt) >= 1000 ? '' : ' €')));
+    svg.appendChild(el('text', {{x: cx, y: cy + 16, class: 'tick', 'text-anchor': 'middle'}}, titel));
+    e.forEach((k, i) => {{
+      const y = cy - r + 10 + i * 36; svg.appendChild(el('rect', {{x: legendeX, y: y - 11, width: 12, height: 12, rx: 3, fill: farben[i]}}));
+      svg.appendChild(el('text', {{x: legendeX + 20, y, class: 'label', style: 'font-size:12.5px'}}, k.name.length > 24 ? k.name.slice(0, 23) + '…' : k.name));
+      svg.appendChild(el('text', {{x: legendeX + 20, y: y + 15, class: 'tick'}}, `${{eur(k.wert)}} · ${{(k.wert / gesamt * 100).toFixed(1)}} %`));
+    }});
+  }}
   function donut(d){{
-    let kats = d.kategorien.filter(k => k.richtung === 'ausgabe' && k.abzugsfaehig > 0).sort((a, b) => b.abzugsfaehig - a.abzugsfaehig);
-    if (!kats.length) return leerHinweis();
-    if (kats.length > 6) {{ const rest = kats.slice(5).reduce((a, k) => a + k.abzugsfaehig, 0); kats = kats.slice(0, 5).concat([{{name: 'Sonstige (zusammengefasst)', abzugsfaehig: rest}}]); }}
-    const gesamt = kats.reduce((a, k) => a + k.abzugsfaehig, 0), cx = 300, cy = 190, r = 140, ri = 92, farben = KAT();
-    let winkel = -Math.PI / 2;
-    kats.forEach((k, i) => {{
-      const a = k.abzugsfaehig / gesamt * 2 * Math.PI, a2 = winkel + a, gross = a > Math.PI ? 1 : 0;
-      const p = (rad, w) => [cx + rad * Math.cos(w), cy + rad * Math.sin(w)];
-      const [x1, y1] = p(r, winkel), [x2, y2] = p(r, a2), [x3, y3] = p(ri, a2), [x4, y4] = p(ri, winkel);
-      const seg = el('path', {{d: `M${{x1}} ${{y1}} A${{r}} ${{r}} 0 ${{gross}} 1 ${{x2}} ${{y2}} L${{x3}} ${{y3}} A${{ri}} ${{ri}} 0 ${{gross}} 0 ${{x4}} ${{y4}} Z`, fill: farben[i], stroke: css('--card'), 'stroke-width': 2}});
-      seg.addEventListener('mousemove', ev => zeigeTip(ev, `<b>${{k.name}}</b><br>${{eur(k.abzugsfaehig)}} · ${{(k.abzugsfaehig / gesamt * 100).toFixed(1)}} %`));
-      seg.addEventListener('mouseleave', hideTip); svg.appendChild(seg);
-      winkel = a2;
-    }});
-    svg.appendChild(el('text', {{x: cx, y: cy - 6, class: 'hero', 'text-anchor': 'middle'}}, eur(gesamt)));
-    svg.appendChild(el('text', {{x: cx, y: cy + 16, class: 'tick', 'text-anchor': 'middle'}}, 'Ausgaben gesamt'));
-    kats.forEach((k, i) => {{
-      const y = 60 + i * 42; svg.appendChild(el('rect', {{x: 520, y: y - 12, width: 14, height: 14, rx: 4, fill: farben[i]}}));
-      svg.appendChild(el('text', {{x: 544, y, class: 'label'}}, k.name));
-      svg.appendChild(el('text', {{x: 544, y: y + 17, class: 'tick'}}, `${{eur(k.abzugsfaehig)}} · ${{(k.abzugsfaehig / gesamt * 100).toFixed(1)}} %`));
-    }});
+    const ausgaben = d.kategorien.filter(k => k.richtung === 'ausgabe').map(k => ({{name: k.name, wert: k.abzugsfaehig}}));
+    const kunden = (d.kunden || []).map(k => ({{name: k.name, wert: k.betrag}}));
+    if (!ausgaben.some(k => k.wert > 0) && !kunden.some(k => k.wert > 0)) return leerHinweis();
+    donutZeichnen(kunden, 130, 190, 105, 68, 255, 'Umsatz nach Kunde');
+    donutZeichnen(ausgaben, 610, 190, 105, 68, 735, 'Ausgaben nach Kategorie');
+    svg.appendChild(el('line', {{x1: 480, x2: 480, y1: 40, y2: 340, class: 'grid'}}));
     legendeSetzen([]);
-    erkl.textContent = 'Anteile der abzugsfähigen Ausgaben. Mehr als sechs Kategorien werden zu „Sonstige“ zusammengefasst.';
+    erkl.textContent = 'Links: Wer bringt welchen Anteil vom Umsatz. Rechts: Wohin gehen die abzugsfähigen Ausgaben. Mehr als sechs Positionen werden zu „Sonstige“ zusammengefasst.';
   }}
 
   function tabelleZeigen(d){{
@@ -882,3 +902,30 @@ def abgleich_view(zeilen: list[dict], regeln: list[IgnorRegel], jahr: int, filte
   }});
 }})();
 </script>"""
+
+
+# ---------------------------------------------------------------- Suche
+
+def suche_view(q: str, treffer: list[Buchung], kategorien: dict[int, Kategorie], mit_konto: set) -> str:
+    def status(b: Buchung) -> str:
+        if b.storniert:
+            return '<span class="badge">storniert</span>'
+        if b.status == "bestaetigt":
+            return '<span class="badge ok">bestätigt</span>'
+        return '<span class="badge mid">Vorschlag</span>'
+    def konto_badge(b: Buchung) -> str:
+        return '<span class="badge ok" title="Kontobewegung zugeordnet">Konto ✓</span>' if b.id in mit_konto else ""
+    rows = "".join(
+        f'<tr><td>{d(b.datum)}</td><td><span class="badge {"plus-b" if b.richtung == "einnahme" else "minus-b"}">{"Einnahme" if b.richtung == "einnahme" else "Ausgabe"}</span></td>'
+        f'<td>{h(b.lieferant)}<div class="muted klein">{h(b.beschreibung[:80])}{(" · " + h(b.rechnungsnummer)) if b.rechnungsnummer else ""}</div></td>'
+        f'<td class="num">{eur_fmt(b.betrag_brutto)}</td><td>{h(kategorien[b.kategorie_id].name) if b.kategorie_id in kategorien else "–"}</td>'
+        f'<td>{status(b)} {konto_badge(b)}</td>'
+        f'<td><a href="#" hx-get="/ui/pruefen/{b.id}" hx-target="#main">öffnen</a></td></tr>'
+        for b in treffer)
+    summe = sum(b.betrag_brutto for b in treffer)
+    return f"""
+<section>
+  <p class="muted erkl">{f"{len(treffer)} Treffer für „{h(q)}“ · Summe {eur_fmt(summe)}" if q else "Suchbegriff oben eingeben: Lieferant, Beschreibung, Rechnungsnummer, Betrag oder Datum."}</p>
+  <div class="scroll"><table class="tabelle kompakt"><thead><tr><th>Datum</th><th>Art</th><th>Lieferant / Kunde</th><th class="num">Brutto</th><th>Kategorie</th><th>Status</th><th></th></tr></thead>
+  <tbody>{rows or f'<tr><td colspan=7 class="muted">{"Keine Buchung passt." if q else ""}</td></tr>'}</tbody></table></div>
+</section>"""

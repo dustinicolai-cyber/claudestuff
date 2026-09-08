@@ -268,3 +268,19 @@ def test_abgleich_beleg_hochladen_und_pdf_auszug():
         with Session(engine()) as s:
             k = s.get(Kontobewegung, k.id); b = s.get(Buchung, k.buchung_id)
             assert b is not None and b.betrag_brutto == 92.21 and b.richtung == "ausgabe"
+
+
+def test_suche_und_kunden_umsatz():
+    with client() as c:
+        with Session(engine()) as s:
+            k = {x.schluessel: x for x in s.exec(select(Kategorie)).all()}
+            s.add(Buchung(datum=date(2025, 2, 1), richtung="einnahme", lieferant="Kunde Muster AG", beschreibung="Logo", rechnungsnummer="RE-7", betrag_netto=1500, betrag_brutto=1500, kategorie_id=k["einnahmen"].id, status="bestaetigt"))
+            s.add(Buchung(datum=date(2025, 3, 1), richtung="einnahme", lieferant="Zweiter Kunde", betrag_netto=500, betrag_brutto=500, kategorie_id=k["einnahmen"].id, status="bestaetigt"))
+            s.add(Buchung(datum=date(2025, 3, 5), richtung="ausgabe", lieferant="Adobe", betrag_netto=50, betrag_brutto=59.5, kategorie_id=k["software"].id, status="vorschlag"))
+            s.commit()
+        assert "Kunde Muster AG" in c.get("/ui/suche?q=muster").text
+        assert "1 Treffer" in c.get("/ui/suche?q=RE-7").text
+        assert "1 Treffer" in c.get("/ui/suche?q=59,50").text        # Betragssuche
+        assert "2 Treffer" in c.get("/ui/suche?q=Kunde").text
+        d = c.get("/api/auswertung?jahr=2025").json()
+        assert d["kunden"] == [{"name": "Kunde Muster AG", "betrag": 1500.0}, {"name": "Zweiter Kunde", "betrag": 500.0}]
