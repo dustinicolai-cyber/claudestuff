@@ -444,7 +444,7 @@ def export_view(jahr: int, eur: list[dict], ustva_liste: list[dict], jahre: list
 # --------------------------------------------------------- Einstellungen
 
 def einstellungen_view(ollama_status: dict, mail: dict, hat_pw: bool, regeln: list[Regel], kategorien: dict[int, Kategorie],
-                       pfade: dict, meldung: str = "") -> str:
+                       pfade: dict, meldung: str = "", meldung_typ: str = "ok-box") -> str:
     regeln_html = "".join(
         f'<tr><td><code>{h(r.muster)}</code>{" <span class=muted>(regex)</span>" if r.ist_regex else ""}</td><td>{h(kategorien[r.kategorie_id].name) if r.kategorie_id in kategorien else "?"}</td>'
         f'<td>{r.prioritaet}</td><td>{"aus Korrektur" if r.erstellt_aus_korrektur else "manuell"}</td><td>{r.treffer}</td>'
@@ -454,7 +454,7 @@ def einstellungen_view(ollama_status: dict, mail: dict, hat_pw: bool, regeln: li
     return f"""
 <section>
   <h2>Einstellungen</h2>
-  {f'<p class="ok-box">{h(meldung)}</p>' if meldung else ''}
+  {meldung_box(meldung, meldung_typ) if meldung else ''}
   <div class="karte"><h3>Dateien</h3>
     <p>Datenbank: <code>{h(pfade["db"])}</code><br>Belegordner: <code>{h(pfade["belege"])}</code><br>Regeln &amp; Grenzwerte: <code>{h(pfade["regeln"])}</code>
     <button class="klein" hx-post="/api/config/reload" hx-target="#main">neu laden</button></p>
@@ -493,7 +493,8 @@ def einstellungen_view(ollama_status: dict, mail: dict, hat_pw: bool, regeln: li
 
 
 def meldung_box(text: str, cls: str = "ok-box") -> str:
-    return f'<p class="{cls}">{h(text)}</p>'
+    """cls: ok-box (Erfolg), warn-box (Hinweis), fehler-box (Fehler). Icon kommt per CSS."""
+    return f'<p class="{cls}" role="{"alert" if cls == "fehler-box" else "status"}"><span>{h(text)}</span></p>'
 
 
 # ------------------------------------------------------------ Auswertung

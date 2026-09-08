@@ -198,7 +198,7 @@ async def api_import(datei: UploadFile = File(...), ki: str = Form("1"), s: Sess
 def api_import_ordner(pfad: str = Form(...), ki: str = Form("1"), s: Session = Depends(get_session)) -> HTMLResponse:
     p = Path(pfad).expanduser()
     if not p.is_dir():
-        return _html(ui.meldung_box(f"Kein Ordner: {p}", "warn-box"))
+        return _html(ui.meldung_box(f"Kein Ordner: {p}", "fehler-box"))
     zeilen = []
     for f in sorted(p.iterdir()):
         if f.is_file() and f.suffix.lower() in {".pdf", ".xml"} | pipeline.BILD_ENDUNGEN:
@@ -215,7 +215,7 @@ async def api_konto_import(datei: UploadFile = File(...), s: Session = Depends(g
     daten = await datei.read()
     bewegungen = kontoauszug.lese_kontoauszug(daten, datei.filename or "")
     if not bewegungen:
-        return _html(ui.meldung_box("Keine Buchungen erkannt – Spalten Datum/Betrag nicht gefunden.", "warn-box"))
+        return _html(ui.meldung_box("Keine Buchungen erkannt – Spalten Datum/Betrag nicht gefunden.", "fehler-box"))
     neu, dup = matching.kontobewegungen_speichern(s, bewegungen, datei.filename or "")
     treffer = matching.matche(s)
     return _html(ui.meldung_box(f"{neu} neue Kontobewegungen ({dup} Duplikate übersprungen), {treffer} automatisch zugeordnet. "
@@ -280,7 +280,7 @@ async def api_buchung_neu(request: Request, s: Session = Depends(get_session)) -
     b = Buchung(datum=date.today(), extraktion_stufe="manuell", klassifizierung_weg="manuell")
     _buchung_aus_form(b, form)
     if not b.kategorie_id:
-        return _html(ui.meldung_box("Kategorie fehlt.", "warn-box"))
+        return _html(ui.meldung_box("Kategorie fehlt – Buchung nicht gespeichert.", "fehler-box"))
     s.add(b)
     s.commit()
     s.refresh(b)
@@ -623,14 +623,14 @@ def export_ustva(jahr: int, q: int, s: Session = Depends(get_session)):
 
 # --------------------------------------------------------- Einstellungen
 
-def _einstellungen(s: Session, meldung: str = "") -> HTMLResponse:
+def _einstellungen(s: Session, meldung: str = "", typ: str = "ok-box") -> HTMLResponse:
     cfg = config.regeln()
     e = mail.einstellungen()
     regeln_ = s.exec(select(Regel).order_by(Regel.prioritaet, Regel.muster)).all()
     pfade = {"db": str(config.db_path()), "belege": str(config.beleg_dir()), "regeln": str(config.regeln_path()),
              "vision": cfg["ollama"]["vision_modell"], "text": cfg["ollama"]["text_modell"]}
     hat_pw = bool(e["imap"].get("user") and mail.passwort_lesen(e["imap"]["user"]))
-    return _html(ui.einstellungen_view(ollama.verfuegbar(cfg), e, hat_pw, regeln_, _kats(s), pfade, meldung))
+    return _html(ui.einstellungen_view(ollama.verfuegbar(cfg), e, hat_pw, regeln_, _kats(s), pfade, meldung, typ))
 
 
 @app.get("/ui/einstellungen", response_class=HTMLResponse)
@@ -653,24 +653,30 @@ def api_mail_einstellungen(imap_host: str = Form(""), imap_user: str = Form(""),
     e["imap"].update({"host": imap_host.strip(), "user": imap_user.strip(), "ordner": imap_ordner.strip() or "Belege", "aktiv": bool(imap_host.strip())})
     e["emlx"].update({"pfad": emlx_pfad.strip(), "ordner_filter": emlx_filter.strip(), "aktiv": bool(emlx_pfad.strip())})
     mail.einstellungen_speichern(e)
-    meldung = "Einstellungen gespeichert."
+    meldung, typ = "Einstellungen gespeichert.", "ok-box"
     if imap_passwort:
-        meldung += " Passwort im Schlüsselbund abgelegt." if mail.passwort_setzen(imap_user.strip(), imap_passwort) \
-            else " Passwort konnte NICHT gespeichert werden (keyring fehlt?) – es wurde nirgends abgelegt."
-    return _einstellungen(s, meldung)
+        if mail.passwort_setzen(imap_user.strip(), imap_passwort):
+            meldung += " Passwort im Schlüsselbund abgelegt."
+        else:
+            meldung, typ = "Einstellungen gespeichert, aber das Passwort konnte NICHT im Schlüsselbund abgelegt werden (keyring fehlt?). Es wurde nirgends gespeichert.", "fehler-box"
+    return _einstellungen(s, meldung, typ)
 
 
 @app.post("/api/mail/imap", response_class=HTMLResponse)
 def api_mail_imap(s: Session = Depends(get_session)) -> HTMLResponse:
     erg = mail.imap_lauf(s, KI_AN["wert"])
-    return _einstellungen(s, erg.get("fehler") or f"IMAP: {erg['neue_mails']} neue Mails, {erg['importiert']} Anhänge importiert, "
+    if erg.get("fehler"):
+        return _einstellungen(s, erg["fehler"], "fehler-box")
+    return _einstellungen(s, f"IMAP: {erg['neue_mails']} neue Mails, {erg['importiert']} Anhänge importiert, "
                           f"{erg['duplikate']} Duplikate, {erg['links']} Link-Mails → „manuell holen“, {erg['ignoriert']} ignoriert.")
 
 
 @app.post("/api/mail/emlx", response_class=HTMLResponse)
 def api_mail_emlx(s: Session = Depends(get_session)) -> HTMLResponse:
     erg = mail.emlx_lauf(s, KI_AN["wert"])
-    return _einstellungen(s, erg.get("fehler") or f"Apple Mail: {erg['neue_mails']} neue Mails, {erg['importiert']} Anhänge importiert, "
+    if erg.get("fehler"):
+        return _einstellungen(s, erg["fehler"], "fehler-box")
+    return _einstellungen(s, f"Apple Mail: {erg['neue_mails']} neue Mails, {erg['importiert']} Anhänge importiert, "
                           f"{erg['duplikate']} Duplikate, {erg['links']} Link-Mails → „manuell holen“, {erg['ignoriert']} ignoriert.")
 
 

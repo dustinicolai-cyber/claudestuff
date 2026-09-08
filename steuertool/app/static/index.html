@@ -92,8 +92,12 @@ a{color:var(--orange)}
 .dropzone.aktiv,.dropzone:hover{border-color:var(--orange);background:var(--orange-hell)}
 .karte{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:1.1rem 1.3rem;margin:.9rem 0;box-shadow:var(--schatten)}
 .karten{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:.9rem}
-.ok-box{background:var(--gruen-hell);border-left:4px solid var(--gruen);padding:.7rem 1rem;border-radius:10px}
-.warn-box{background:var(--gelb-hell);border-left:4px solid var(--gelb);padding:.7rem 1rem;border-radius:10px}
+/* Alerts: Erfolg grün ✓, Warnung gelb !, Fehler rot ! – Icon immer dabei, nie Farbe allein */
+.ok-box,.warn-box,.fehler-box{display:flex;align-items:flex-start;gap:.7rem;padding:.7rem 1rem;border-radius:10px;border-left:4px solid;margin:.6rem 0}
+.ok-box::before,.warn-box::before,.fehler-box::before{content:"!";flex:none;width:20px;height:20px;border-radius:50%;display:grid;place-items:center;font-weight:800;font-size:.85em;color:#fff;margin-top:.05em}
+.ok-box{background:var(--gruen-hell);border-color:var(--gruen)} .ok-box::before{content:"✓";background:var(--gruen)}
+.warn-box{background:var(--gelb-hell);border-color:var(--gelb)} .warn-box::before{background:var(--gelb);color:#1a1a22}
+.fehler-box{background:var(--rot-hell);border-color:var(--rot)} .fehler-box::before{background:var(--rot)}
 /* Kennzahlen-Kacheln */
 .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:.9rem;margin:.6rem 0 1.2rem}
 .kpi{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:1rem 1.2rem;box-shadow:var(--schatten)}
