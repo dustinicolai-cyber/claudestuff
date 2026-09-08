@@ -56,13 +56,14 @@ def belegjournal_csv(buchungen: list[Buchung], belege: dict[int, Beleg], kategor
     buf = io.StringIO()
     w = csv.writer(buf, delimiter=";")
     w.writerow(["Nr", "Datum", "Richtung", "Lieferant", "Beschreibung", "Rechnungsnr", "Netto", "USt-Satz", "USt", "Brutto",
-                "Kategorie", "EÜR-Zeile", "§13b", "Status", "Konfidenz", "Extraktion", "Klassifizierung", "Belegdatei"])
+                "Kategorie", "EÜR-Zeile", "§13b", "Fremdwährung", "Status", "Konfidenz", "Extraktion", "Klassifizierung", "Belegdatei"])
     for i, b in enumerate(sorted(buchungen, key=lambda x: (x.datum, x.id or 0)), 1):
         k = kategorien.get(b.kategorie_id or -1)
         beleg = belege.get(b.beleg_id or -1)
         w.writerow([i, b.datum.strftime("%d.%m.%Y"), b.richtung, b.lieferant, b.beschreibung, b.rechnungsnummer,
                     _num(b.betrag_netto), _num(b.ust_satz), _num(b.ust_betrag), _num(b.betrag_brutto),
                     k.name if k else "", (k.eur_zeile if k else "") or "", "ja" if b.reverse_charge else "",
+                    (f"{b.waehrung} {_num(b.betrag_fremd)}" if b.waehrung != "EUR" else ""),
                     ("storniert" if b.storniert else b.status) + (" · privat verauslagt" if b.privat_verauslagt else ""),
                     _num(b.konfidenz), b.extraktion_stufe, b.klassifizierung_weg,
                     beleg.dateipfad if beleg else ""])

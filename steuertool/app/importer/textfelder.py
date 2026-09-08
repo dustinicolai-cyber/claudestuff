@@ -27,7 +27,15 @@ DATUM_KEYWORDS = re.compile(r"rechnungsdatum|belegdatum|invoice date|date of iss
 RE_BETRAG = re.compile(r"(?<![\d,./-])(-?\d{1,3}(?:[.,]\d{3})+[.,]\d{2}|-?\d+[,.]\d{2}|-?\d+,-|"
                        r"(?<=€\s)\d{1,6}(?![\d,.])|(?<=EUR\s)\d{1,6}(?![\d,.])|\d{1,6}(?=\s?(?:€|EUR\b)))(?![\d])")
 BETRAG_MAX_PLAUSIBEL = 1_000_000.0
-RE_WAEHRUNG = re.compile(r"€|EUR\b|Euro\b", re.I)
+RE_WAEHRUNG = re.compile(r"€|EUR\b|Euro\b|\$|USD\b|US-?Dollar", re.I)
+RE_EURO = re.compile(r"€|EUR\b|Euro\b", re.I)
+RE_DOLLAR = re.compile(r"\$|USD\b|US-?Dollar", re.I)
+
+
+def erkenne_waehrung(text: str) -> str:
+    """USD nur, wenn Dollar-Zeichen klar überwiegen – Rechnungen nennen oft beide Währungen."""
+    euro = len(RE_EURO.findall(text)); dollar = len(RE_DOLLAR.findall(text))
+    return "USD" if dollar > euro else "EUR"
 
 # Stark = eindeutig die Endsumme; schwach = kann auch Zwischensumme oder Tabellenkopf sein.
 BRUTTO_STARK = re.compile(r"gesamtbetrag|rechnungsbetrag|zu zahlen(?:der betrag)?|zahlbetrag|endbetrag|bruttobetrag|summe brutto|"
@@ -398,5 +406,6 @@ def extrahiere_felder(text: str, cfg: dict) -> dict:
         "rechnungsnummer": finde_rechnungsnummer(text),
         "lieferant": finde_lieferant(text, cfg.get("reverse_charge_lieferanten", []), cfg.get("bekannte_lieferanten", [])),
         "reverse_charge_hinweis": rc_hinweis,
-        "waehrung_eur": bool(RE_WAEHRUNG.search(text)),
+        "waehrung_eur": bool(RE_EURO.search(text)),
+        "waehrung": erkenne_waehrung(text),
     }

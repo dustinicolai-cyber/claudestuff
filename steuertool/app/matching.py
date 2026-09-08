@@ -25,14 +25,36 @@ def kontobewegungen_speichern(s: Session, bewegungen: list[Bewegung], quelle: st
     return neu, dup
 
 
+FREMDWAEHRUNG_TOLERANZ = 0.08   # ±8 % um Kursschwankung und Bankgebühr abzudecken
+
+
 def _passt(b: Buchung, k: Kontobewegung, toleranz: int) -> bool:
     if b.richtung == "ausgabe" and k.betrag >= 0:
         return False
     if b.richtung == "einnahme" and k.betrag <= 0:
         return False
-    if abs(abs(k.betrag) - abs(b.betrag_brutto)) > 0.005:
+    if abs((k.datum - b.datum).days) > toleranz:
         return False
-    return abs((k.datum - b.datum).days) <= toleranz
+    if abs(abs(k.betrag) - abs(b.betrag_brutto)) <= 0.005:
+        return True
+    if b.waehrung != "EUR" and b.betrag_fremd:
+        # Fremdwährung: der Euro-Betrag ist noch unbekannt, der Kurs liegt grob bei 1 (USD) – Toleranzband
+        return abs(abs(k.betrag) - b.betrag_fremd) / b.betrag_fremd <= FREMDWAEHRUNG_TOLERANZ
+    return False
+
+
+def euro_uebernehmen(b: Buchung, k: Kontobewegung) -> bool:
+    """Bei Fremdwährungsrechnung den tatsächlich abgebuchten Euro-Betrag in die Buchung schreiben."""
+    if b.waehrung == "EUR" or not b.betrag_fremd:
+        return False
+    eur = abs(k.betrag)
+    if abs(eur - b.betrag_brutto) < 0.005:
+        return False
+    faktor = eur / b.betrag_brutto if b.betrag_brutto else 1.0
+    b.betrag_brutto = round(eur, 2)
+    b.betrag_netto = round(b.betrag_netto * faktor, 2) if b.ust_betrag else round(eur, 2)
+    b.ust_betrag = round(b.betrag_brutto - b.betrag_netto, 2)
+    return True
 
 
 def matche(s: Session) -> int:
@@ -47,6 +69,8 @@ def matche(s: Session) -> int:
         if len(kandidaten) == 1:
             b = kandidaten[0]
             k.buchung_id = b.id
+            if euro_uebernehmen(b, k):
+                s.add(b)
             offen_b.remove(b)
             s.add(k)
             treffer += 1
@@ -67,7 +91,9 @@ def kandidaten_fuer(s: Session, k: Kontobewegung, toleranz_tage: int = 30) -> li
     """Manuelle Zuordnung: Buchungen mit gleichem Betrag in weitem Fenster, dann nach Datum."""
     belegt = {x.buchung_id for x in s.exec(select(Kontobewegung).where(Kontobewegung.buchung_id != None)).all()}  # noqa: E711
     alle = [b for b in s.exec(select(Buchung)).all() if b.id not in belegt]
-    exakt = [b for b in alle if abs(abs(k.betrag) - b.betrag_brutto) < 0.005 and abs((k.datum - b.datum).days) <= toleranz_tage]
+    exakt = [b for b in alle if abs((k.datum - b.datum).days) <= toleranz_tage and (
+        abs(abs(k.betrag) - b.betrag_brutto) < 0.005 or
+        (b.waehrung != "EUR" and b.betrag_fremd and abs(abs(k.betrag) - b.betrag_fremd) / b.betrag_fremd <= FREMDWAEHRUNG_TOLERANZ))]
     exakt.sort(key=lambda b: abs((k.datum - b.datum).days))
     return exakt[:10]
 

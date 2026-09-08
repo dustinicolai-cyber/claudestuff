@@ -94,6 +94,8 @@ def _buchung_aus_form(b: Buchung, form) -> None:
     b.betrag_netto, b.ust_satz, b.ust_betrag, b.betrag_brutto = round(netto, 2), satz, round(ust, 2), round(brutto, 2)
     b.kategorie_id = int(form["kategorie_id"]) if form.get("kategorie_id") else None
     b.reverse_charge = form.get("reverse_charge") == "1"
+    b.waehrung = "USD" if form.get("waehrung") == "USD" else "EUR"
+    b.betrag_fremd = round(_f(form.get("betrag_fremd")), 2) if b.waehrung != "EUR" else 0.0
     alt = json.loads(b.meta_json or "{}")
     alt.update(_meta_aus_form(form))
     b.meta_json = json.dumps(alt, ensure_ascii=False)
@@ -607,8 +609,11 @@ async def api_abgleich_aktion(request: Request, s: Session = Depends(get_session
 @app.post("/api/abgleich/{konto_id}/zuordnen", response_class=HTMLResponse)
 def api_abgleich_zuordnen(konto_id: int, buchung_id: int = Form(...), jahr: Optional[int] = Form(None), s: Session = Depends(get_session)) -> HTMLResponse:
     k = s.get(Kontobewegung, konto_id)
-    if k and s.get(Buchung, buchung_id):
+    b = s.get(Buchung, buchung_id)
+    if k and b:
         k.buchung_id = buchung_id
+        if matching.euro_uebernehmen(b, k):
+            s.add(b)
         s.add(k)
         s.commit()
     return ui_abgleich(jahr, "offen", s)
@@ -630,7 +635,10 @@ async def api_abgleich_beleg(konto_id: int, datei: UploadFile = File(...), jahr:
         if b and not k.buchung_id:
             k.buchung_id = b.id
             s.add(k)
-            if abs(b.betrag_brutto - abs(k.betrag)) > 0.005:
+            if matching.euro_uebernehmen(b, k):
+                s.add(b)
+                hinweis = f" Rechnung in {b.waehrung} ({b.betrag_fremd:.2f}) – Euro-Betrag {export.eur_fmt(b.betrag_brutto)} aus dem Kontoauszug übernommen."
+            elif abs(b.betrag_brutto - abs(k.betrag)) > 0.005:
                 hinweis = f" Achtung: Rechnungsbetrag {export.eur_fmt(b.betrag_brutto)} weicht von der Kontobewegung {export.eur_fmt(abs(k.betrag))} ab – bitte unter „Prüfen“ kontrollieren."
             s.commit()
     meldung = f"{datei.filename}: {erg.status}, {erg.meldung}.{hinweis}"

@@ -152,6 +152,12 @@ def importiere_datei(s: Session, daten: bytes, original_name: str, herkunft: str
         if ki_erlaubt or True else (None, "-", 0.0)
 
     hinweise = list(rc_gruende)
+    waehrung = felder.get("waehrung", "EUR")
+    betrag_fremd = 0.0
+    if waehrung == "USD" and brutto:
+        betrag_fremd = brutto
+        hinweise.append(f"Rechnung in USD ({brutto:.2f} $). Der Euro-Betrag ist vorläufig gleich gesetzt – "
+                        "beim Abgleich mit dem Kontoauszug wird der tatsächlich abgebuchte Euro-Betrag übernommen.")
     if brutto == 0:
         hinweise.append("Kein Betrag erkannt.")
     if not felder.get("datum"):
@@ -164,7 +170,8 @@ def importiere_datei(s: Session, daten: bytes, original_name: str, herkunft: str
         lieferant=lieferant, beschreibung=felder.get("beschreibung") or "",
         rechnungsnummer=felder.get("rechnungsnummer") or "", ust_idnr=felder.get("ust_idnr") or "",
         kategorie_id=kategorie.id if kategorie else None, eur_zeile=kategorie.eur_zeile if kategorie else None,
-        reverse_charge=rc, status="vorschlag", konfidenz=konf,
+        reverse_charge=rc, status="vorschlag", konfidenz=round(konf * (0.8 if waehrung == "USD" else 1.0), 2),
+        waehrung=waehrung, betrag_fremd=betrag_fremd,
         extraktion_stufe=stufe, klassifizierung_weg=weg,
         extraktion_json=json.dumps({k: v for k, v in felder.items() if k != "volltext"}, default=_json_default, ensure_ascii=False),
         hinweise_json=json.dumps(hinweise, ensure_ascii=False),

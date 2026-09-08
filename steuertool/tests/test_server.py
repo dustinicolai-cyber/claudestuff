@@ -284,3 +284,43 @@ def test_suche_und_kunden_umsatz():
         assert "2 Treffer" in c.get("/ui/suche?q=Kunde").text
         d = c.get("/api/auswertung?jahr=2025").json()
         assert d["kunden"] == [{"name": "Kunde Muster AG", "betrag": 1500.0}, {"name": "Zweiter Kunde", "betrag": 500.0}]
+
+
+def test_usd_rechnung_euro_aus_kontoauszug():
+    from app.importer import textfelder
+    from app.models import Kontobewegung
+    usd = """Figma, Inc.
+760 Market St, San Francisco, CA
+Invoice number FIG-1
+Invoice date 15-JAN-2025
+Professional plan            $15.00
+Subtotal                     $15.00
+Tax                          $0.00
+Total                        $15.00
+Reverse charge: VAT to be accounted for by the recipient.
+"""
+    assert textfelder.erkenne_waehrung(usd) == "USD"
+    with client() as c:
+        r = c.post("/api/import", files={"datei": ("figma.pdf", erzeuge.text_pdf(usd), "application/pdf")}, data={"ki": "0"})
+        with Session(engine()) as s:
+            b = s.exec(select(Buchung)).first()
+            assert b.waehrung == "USD" and b.betrag_fremd == 15.0 and b.betrag_brutto == 15.0 and b.reverse_charge
+        # Kontoauszug: 15 $ wurden als 14,20 € abgebucht → passt per Kurstoleranz, Euro-Betrag wird übernommen
+        csv = "Buchungstag;Betrag;Verwendungszweck;Beguenstigter/Zahlungspflichtiger\n17.01.2025;-14,20;FIGMA MONTHLY;VISA FIGMA\n"
+        r = c.post("/api/konto/import", files={"datei": ("k.csv", csv.encode(), "text/csv")})
+        assert "1 automatisch" in r.text
+        with Session(engine()) as s:
+            b = s.exec(select(Buchung)).first(); k = s.exec(select(Kontobewegung)).first()
+            assert k.buchung_id == b.id and b.betrag_brutto == 14.2 and b.betrag_netto == 14.2 and b.betrag_fremd == 15.0
+        # Formular: Währung wechseln und Fremdbetrag speichern
+        with Session(engine()) as s:
+            kat = s.exec(select(Kategorie).where(Kategorie.schluessel == "software")).first()
+        r = c.post(f"/api/buchung/{b.id}/bestaetigen", data={"datum": "2025-01-15", "richtung": "ausgabe", "lieferant": "Figma", "betrag_netto": "14.20",
+                                                            "ust_satz": "0", "ust_betrag": "0", "betrag_brutto": "14.20", "kategorie_id": str(kat.id),
+                                                            "reverse_charge": "1", "waehrung": "USD", "betrag_fremd": "15"})
+        assert r.status_code == 200
+        with Session(engine()) as s:
+            b = s.get(Buchung, b.id); assert b.status == "bestaetigt" and b.waehrung == "USD" and b.betrag_fremd == 15.0
+        assert "USD 15,00" in c.get("/export/belegjournal.csv?jahr=2025").text
+        a = c.get("/ui/abgleich?jahr=2025&filter=alle").text
+        assert 'data-sort="betrag"' in a and "listen-suche" in a

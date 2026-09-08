@@ -228,7 +228,8 @@ def buchung_formular(b: Buchung, kategorien: list[Kategorie], cfg: dict, action:
     loeschen = f'<button type="button" class="outline-rot" hx-post="/api/buchung/{b.id}/loeschen" hx-confirm="Buchung wirklich löschen? Die Belegdatei wandert nach Belege/Papierkorb." hx-target="#main">{ICON["x"]}Löschen</button>' if b.id else ""
     if titel is None:
         titel = (b.lieferant or "Unbekannter Beleg") if b.id else "Neue Buchung"
-    untertitel = f'{h(d(b.datum))} · <span class="{"plus" if b.richtung == "einnahme" else "minus"}">{eur_fmt(b.betrag_brutto)}</span>' if b.id else ""
+    fremd_txt = f' <span class="muted">({b.betrag_fremd:,.2f} $)</span>'.replace(",", "X").replace(".", ",").replace("X", ".") if b.waehrung == "USD" and b.betrag_fremd else ""
+    untertitel = f'{h(d(b.datum))} · <span class="{"plus" if b.richtung == "einnahme" else "minus"}">{eur_fmt(b.betrag_brutto)}</span>{fremd_txt}' if b.id else ""
     beschreibung_kopf = f"""<div class="kopf-beschreibung">
         <span class="txt {"leer" if not b.beschreibung else ""}">{h(b.beschreibung) if b.beschreibung else "Beschreibung hinzufügen"}</span>
         <button type="button" class="stift" title="Beschreibung bearbeiten" aria-label="Beschreibung bearbeiten">{ICON["stift"]}</button>
@@ -253,7 +254,10 @@ def buchung_formular(b: Buchung, kategorien: list[Kategorie], cfg: dict, action:
     <label>Netto <input type="number" step="0.01" name="betrag_netto" id="f_netto" value="{b.betrag_netto:.2f}"></label>
     <label>USt-Satz % <select name="ust_satz" id="f_satz">{''.join(f'<option value="{s}" {"selected" if float(s) == float(b.ust_satz) else ""}>{s} %</option>' for s in cfg["ust_saetze"])}</select></label>
     <label>USt-Betrag <input type="number" step="0.01" name="ust_betrag" id="f_ust" value="{b.ust_betrag:.2f}"></label>
-    <label>Brutto <input type="number" step="0.01" name="betrag_brutto" id="f_brutto" value="{b.betrag_brutto:.2f}" required></label>
+    <label>Brutto in € <input type="number" step="0.01" name="betrag_brutto" id="f_brutto" value="{b.betrag_brutto:.2f}" required></label>
+    <label>Währung der Rechnung <select name="waehrung" id="f_waehrung"><option value="EUR" {"selected" if b.waehrung == "EUR" else ""}>EUR €</option><option value="USD" {"selected" if b.waehrung == "USD" else ""}>USD $</option></select></label>
+    <label class="fremd" {"hidden" if b.waehrung == "EUR" else ""}>Rechnungsbetrag in $ <input type="number" step="0.01" name="betrag_fremd" id="f_fremd" value="{b.betrag_fremd:.2f}"></label>
+    <div class="breit fremd muted klein" {"hidden" if b.waehrung == "EUR" else ""} id="f_kurs">Brutto in € ist der tatsächlich abgebuchte Betrag (Kontoauszug). Netto/USt werden daraus gerechnet.</div>
     <label class="breit">Kategorie <select name="kategorie_id" id="f_kat" required><option value="">– bitte wählen –</option>{opts}</select></label>
     <label class="breit check"><input type="checkbox" name="reverse_charge" value="1" {"checked" if b.reverse_charge else ""}> §13b Reverse-Charge (Steuerschuld liegt bei mir, UStVA Kz 46/47)</label>
   </div>
@@ -286,6 +290,14 @@ def buchung_formular(b: Buchung, kategorien: list[Kategorie], cfg: dict, action:
     f.querySelectorAll('.sonderfall').forEach(fs => fs.hidden = !fs.dataset.fuer.split(' ').includes(sf));
   }}
   kat.addEventListener('change', sonderfall); sonderfall();
+  const waehrung = f.querySelector('#f_waehrung'), fremd = f.querySelector('#f_fremd'), kurs = f.querySelector('#f_kurs');
+  function waehrungAnzeigen(){{
+    const usd = waehrung.value === 'USD';
+    f.querySelectorAll('.fremd').forEach(x => x.hidden = !usd);
+    if (usd) {{ const u = +fremd.value || 0, e = +brutto.value || 0; kurs.textContent = (u && e) ? `Kurs ${{(u / e).toFixed(4)}} $ je € · Brutto in € ist der tatsächlich abgebuchte Betrag (Kontoauszug).` : 'Brutto in € ist der tatsächlich abgebuchte Betrag (Kontoauszug). Netto/USt werden daraus gerechnet.'; }}
+  }}
+  waehrung.addEventListener('change', () => {{ if (waehrung.value === 'USD' && !(+fremd.value)) fremd.value = brutto.value; waehrungAnzeigen(); }});
+  fremd.addEventListener('input', waehrungAnzeigen); brutto.addEventListener('input', waehrungAnzeigen); waehrungAnzeigen();
   const kb = f.querySelector('.kopf-beschreibung');
   if (kb) {{
     const txt = kb.querySelector('.txt'), inp = kb.querySelector('input'), stift = kb.querySelector('.stift');
@@ -454,8 +466,25 @@ def offen_view(op: dict, kandidaten: dict[int, list[Buchung]], funde: list[MailF
     const leiste = f.querySelector('.auswahl-leiste'), alle = f.querySelector('input.alle');
     const boxen = () => [...f.querySelectorAll('tbody input[type=checkbox]')];
     function zaehlen(){{ const n = boxen().filter(b => b.checked).length; leiste.hidden = !n; leiste.querySelector('.anzahl').textContent = n + ' ausgewählt ·'; }}
-    if (alle) alle.addEventListener('change', () => {{ boxen().forEach(b => b.checked = alle.checked); zaehlen(); }});
+    if (alle) alle.addEventListener('change', () => {{ boxen().filter(b => !b.closest('tr').hidden).forEach(b => b.checked = alle.checked); zaehlen(); }});
     f.addEventListener('change', e => {{ if (e.target.type === 'checkbox' && e.target !== alle) zaehlen(); }});
+    // Suche innerhalb der Liste
+    const suche = f.querySelector('.listen-suche'), zaehler = f.querySelector('.listen-zaehler'), tbody = f.querySelector('tbody');
+    const zeilen = () => [...tbody.querySelectorAll('tr[data-datum]')];
+    function filtern(){{
+      const q = (suche.value || '').trim().toLowerCase(); let n = 0;
+      zeilen().forEach(tr => {{ const ok = !q || tr.textContent.toLowerCase().includes(q); tr.hidden = !ok; if (ok) n++; }});
+      zaehler.textContent = q ? n + ' von ' + zeilen().length : '';
+    }}
+    if (suche) suche.addEventListener('input', filtern);
+    // Sortieren per Klick auf Datum/Betrag
+    let sortKey = null, sortDir = -1;
+    f.querySelectorAll('th.sortierbar').forEach(th => th.addEventListener('click', () => {{
+      const key = th.dataset.sort; sortDir = (sortKey === key) ? -sortDir : (key === 'datum' ? -1 : 1); sortKey = key;
+      const rows = zeilen(); rows.sort((a, b) => {{ const va = a.dataset[key], vb = b.dataset[key]; const r = key === 'betrag' ? (+va - +vb) : (va < vb ? -1 : va > vb ? 1 : 0); return r * sortDir; }});
+      rows.forEach(r => tbody.appendChild(r));
+      f.querySelectorAll('th.sortierbar').forEach(t => {{ t.classList.toggle('aktiv', t === th); t.querySelector('.pfeil').textContent = t === th ? (sortDir > 0 ? '▲' : '▼') : ''; }});
+    }}));
   }});
 }})();
 </script>"""
@@ -845,7 +874,7 @@ def abgleich_view(zeilen: list[dict], regeln: list[IgnorRegel], jahr: int, filte
                 f'<button class="klein btn-ghost" hx-post="/api/abgleich/aktion" hx-vals=\'{{"aktion":"regel","ids":"{k.id}","jahr":"{jahr}"}}\' hx-target="#main" title="Regel: „{h(k.gegenkonto or k.verwendungszweck[:40])}“ künftig immer ignorieren">immer ignorieren</button>')
 
     rows = "".join(
-        f'<tr class="{"doppelt" if z["doppelt"] else ""}"><td><input type="checkbox" name="ids" value="{z["k"].id}"></td>'
+        f'<tr class="{"doppelt" if z["doppelt"] else ""}" data-datum="{z["k"].datum.isoformat()}" data-betrag="{z["k"].betrag:.2f}"><td><input type="checkbox" name="ids" value="{z["k"].id}"></td>'
         f'<td>{d(z["k"].datum)}</td><td class="num">{eur_fmt(z["k"].betrag)}</td>'
         f'<td><span class="badge {"plus-b" if z["k"].betrag > 0 else "minus-b"}">{"Einnahme" if z["k"].betrag > 0 else "Ausgabe"}</span></td>'
         f'<td>{h(z["k"].gegenkonto)}<div class="muted klein">{h(z["k"].verwendungszweck[:110])}</div>'
@@ -875,14 +904,16 @@ def abgleich_view(zeilen: list[dict], regeln: list[IgnorRegel], jahr: int, filte
   <form class="auswahl-form" hx-post="/api/abgleich/aktion" hx-target="#main">
     <input type="hidden" name="jahr" value="{jahr}">
     <div class="klebe-leiste">
-    <div class="row zwischen"><div class="tabs reiter abgleich-tabs">{tabs}</div><label class="check klein"><input type="checkbox" class="alle"> alle auswählen</label></div>
+    <div class="row zwischen"><div class="tabs reiter abgleich-tabs">{tabs}</div>
+      <span class="row" style="margin:0;gap:.8rem"><input type="search" class="listen-suche" placeholder="in dieser Liste suchen …" aria-label="In der Liste suchen">
+      <span class="muted klein listen-zaehler"></span><label class="check klein"><input type="checkbox" class="alle"> alle auswählen</label></span></div>
     <div class="auswahl-leiste" hidden><span class="anzahl"></span>
       <button type="submit" name="aktion" value="anlegen" class="btn-primary klein">Buchungen anlegen</button>
       <button type="submit" name="aktion" value="ignorieren" class="btn-secondary klein">Ignorieren</button>
       <button type="submit" name="aktion" value="regel" class="btn-ghost klein" hx-confirm="Für jede ausgewählte Bewegung eine Ignorier-Regel auf das Gegenkonto anlegen?">Immer ignorieren</button>
       <button type="submit" name="aktion" value="loesen" class="btn-ghost klein">Zuordnung lösen</button></div>
     </div>
-    <div class="scroll"><table class="tabelle kompakt abgleich-tabelle"><thead><tr><th></th><th>Datum</th><th class="num">Betrag</th><th>Art</th><th>Gegenkonto / Zweck</th><th>Abgleich</th><th class="aktion-kopf">Aktion</th></tr></thead>
+    <div class="scroll"><table class="tabelle kompakt abgleich-tabelle"><thead><tr><th></th><th class="sortierbar" data-sort="datum" title="nach Datum sortieren">Datum <span class="pfeil"></span></th><th class="num sortierbar" data-sort="betrag" title="nach Betrag sortieren">Betrag <span class="pfeil"></span></th><th>Art</th><th>Gegenkonto / Zweck</th><th>Abgleich</th><th class="aktion-kopf">Aktion</th></tr></thead>
     <tbody>{rows or '<tr><td colspan=7 class="muted">Nichts in dieser Liste.</td></tr>'}</tbody></table></div>
   </form>
   <details class="karte" {"open" if regeln else ""}><summary><strong>Ignorier-Regeln</strong> <span class="muted">({len(regeln)}) – Bewegungen, die nie betrieblich sind</span></summary>
@@ -897,8 +928,25 @@ def abgleich_view(zeilen: list[dict], regeln: list[IgnorRegel], jahr: int, filte
     const leiste = f.querySelector('.auswahl-leiste'), alle = f.querySelector('input.alle');
     const boxen = () => [...f.querySelectorAll('tbody input[type=checkbox]')];
     function zaehlen(){{ const n = boxen().filter(b => b.checked).length; leiste.hidden = !n; leiste.querySelector('.anzahl').textContent = n + ' ausgewählt ·'; }}
-    if (alle) alle.addEventListener('change', () => {{ boxen().forEach(b => b.checked = alle.checked); zaehlen(); }});
+    if (alle) alle.addEventListener('change', () => {{ boxen().filter(b => !b.closest('tr').hidden).forEach(b => b.checked = alle.checked); zaehlen(); }});
     f.addEventListener('change', e => {{ if (e.target.type === 'checkbox' && e.target !== alle) zaehlen(); }});
+    // Suche innerhalb der Liste
+    const suche = f.querySelector('.listen-suche'), zaehler = f.querySelector('.listen-zaehler'), tbody = f.querySelector('tbody');
+    const zeilen = () => [...tbody.querySelectorAll('tr[data-datum]')];
+    function filtern(){{
+      const q = (suche.value || '').trim().toLowerCase(); let n = 0;
+      zeilen().forEach(tr => {{ const ok = !q || tr.textContent.toLowerCase().includes(q); tr.hidden = !ok; if (ok) n++; }});
+      zaehler.textContent = q ? n + ' von ' + zeilen().length : '';
+    }}
+    if (suche) suche.addEventListener('input', filtern);
+    // Sortieren per Klick auf Datum/Betrag
+    let sortKey = null, sortDir = -1;
+    f.querySelectorAll('th.sortierbar').forEach(th => th.addEventListener('click', () => {{
+      const key = th.dataset.sort; sortDir = (sortKey === key) ? -sortDir : (key === 'datum' ? -1 : 1); sortKey = key;
+      const rows = zeilen(); rows.sort((a, b) => {{ const va = a.dataset[key], vb = b.dataset[key]; const r = key === 'betrag' ? (+va - +vb) : (va < vb ? -1 : va > vb ? 1 : 0); return r * sortDir; }});
+      rows.forEach(r => tbody.appendChild(r));
+      f.querySelectorAll('th.sortierbar').forEach(t => {{ t.classList.toggle('aktiv', t === th); t.querySelector('.pfeil').textContent = t === th ? (sortDir > 0 ? '▲' : '▼') : ''; }});
+    }}));
   }});
 }})();
 </script>"""

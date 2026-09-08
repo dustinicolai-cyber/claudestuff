@@ -53,6 +53,8 @@ class Buchung(SQLModel, table=True):
 
     status: str = "vorschlag"          # vorschlag | bestaetigt
     konfidenz: float = 0.0
+    waehrung: str = "EUR"              # Rechnungswährung; Beträge oben sind immer EUR (tatsächlich gezahlt)
+    betrag_fremd: float = 0.0          # Rechnungsbetrag in Fremdwährung (z. B. USD), 0 bei EUR
     privat_verauslagt: bool = False    # bar/privat bezahlt – braucht keine Kontobewegung
     storniert: bool = False            # bestätigte Buchungen werden nie gelöscht, nur storniert
 
