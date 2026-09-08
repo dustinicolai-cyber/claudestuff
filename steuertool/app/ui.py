@@ -221,9 +221,9 @@ def buchung_formular(b: Buchung, kategorien: list[Kategorie], cfg: dict, action:
     m = json.loads(b.meta_json or "{}")
     opts = "".join(f'<option value="{k.id}" data-sonderfall="{h(k.sonderfall or "")}" data-richtung="{k.richtung}" {"selected" if k.id == b.kategorie_id else ""}>'
                    f'{h(k.name)}{f" (Zeile {k.eur_zeile})" if k.eur_zeile else ""}</option>' for k in kategorien)
-    knopf = "Bestätigen &amp; weiter" if naechste else "Speichern"
-    skip = f'<button type="button" class="outline-gelb" hx-get="/ui/pruefen?ueberspringen={b.id}&richtung={b.richtung}" hx-target="#main">{ICON["pfeil"]}Überspringen <kbd>Esc</kbd></button>' if naechste and b.id else ""
-    neu_erkennen = f'<button type="button" class="outline-orange" hx-post="/api/buchung/{b.id}/neu-erkennen" hx-target="#main" title="Felder aus der Belegdatei neu ziehen">{ICON["reload"]}Neu erkennen</button>' if b.id and b.beleg_id and b.status == "vorschlag" else ""
+    knopf = "Beleg OK" if naechste else "Speichern"
+    skip = f'<button type="button" class="outline-gelb" hx-get="/ui/pruefen?ueberspringen={b.id}&richtung={b.richtung}" hx-target="#main" title="Überspringen (Esc)">{ICON["pfeil"]}Überspringen</button>' if naechste and b.id else ""
+    neu_erkennen = f'<button type="button" class="outline-orange" hx-post="/api/buchung/{b.id}/neu-erkennen" hx-target="#main" title="Felder aus der Belegdatei neu ziehen">{ICON["reload"]}Neu laden</button>' if b.id and b.beleg_id and b.status == "vorschlag" else ""
     loeschen = f'<button type="button" class="outline-rot" hx-post="/api/buchung/{b.id}/loeschen" hx-confirm="Buchung wirklich löschen? Die Belegdatei wandert nach Belege/Papierkorb." hx-target="#main">{ICON["x"]}Löschen</button>' if b.id else ""
     if titel is None:
         titel = (b.lieferant or "Unbekannter Beleg") if b.id else "Neue Buchung"
@@ -235,7 +235,7 @@ def buchung_formular(b: Buchung, kategorien: list[Kategorie], cfg: dict, action:
       <h2>{h(titel)} {konf_badge(b.konfidenz) if b.id else ""} {'<span class="badge rc">§13b</span>' if b.reverse_charge else ''}</h2>
       <div class="muted klein">{untertitel}</div>
     </div>
-    <div class="row aktionen"><button type="submit" class="gruen">{ICON["check"]}{knopf} <kbd>⏎</kbd></button> {skip} {neu_erkennen} {loeschen}</div>
+    <div class="aktionen aktionen-raster"><button type="submit" class="gruen" title="Bestätigen und weiter (⏎)">{ICON["check"]}{knopf}</button>{skip}{neu_erkennen}{loeschen}</div>
   </div>
   <div class="grid2">
     <label>Datum <input type="date" name="datum" value="{b.datum.isoformat()}" required autofocus></label>
