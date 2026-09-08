@@ -52,7 +52,7 @@ def eur_csv(zeilen: list[dict]) -> str:
     return buf.getvalue()
 
 
-def belegjournal_csv(buchungen: list[Buchung], belege: dict[int, Beleg], kategorien: dict[int, Kategorie]) -> str:
+def belegjournal_csv(buchungen: list[Buchung], belege: dict[int, Beleg], kategorien: dict[int, Kategorie], protokoll: list | None = None) -> str:
     buf = io.StringIO()
     w = csv.writer(buf, delimiter=";")
     w.writerow(["Nr", "Datum", "Richtung", "Lieferant", "Beschreibung", "Rechnungsnr", "Netto", "USt-Satz", "USt", "Brutto",
@@ -63,8 +63,14 @@ def belegjournal_csv(buchungen: list[Buchung], belege: dict[int, Beleg], kategor
         w.writerow([i, b.datum.strftime("%d.%m.%Y"), b.richtung, b.lieferant, b.beschreibung, b.rechnungsnummer,
                     _num(b.betrag_netto), _num(b.ust_satz), _num(b.ust_betrag), _num(b.betrag_brutto),
                     k.name if k else "", (k.eur_zeile if k else "") or "", "ja" if b.reverse_charge else "",
-                    b.status, _num(b.konfidenz), b.extraktion_stufe, b.klassifizierung_weg,
+                    ("storniert" if b.storniert else b.status) + (" · privat verauslagt" if b.privat_verauslagt else ""),
+                    _num(b.konfidenz), b.extraktion_stufe, b.klassifizierung_weg,
                     beleg.dateipfad if beleg else ""])
+    if protokoll:
+        w.writerow([])
+        w.writerow(["Protokoll", "Zeitpunkt", "Aktion", "Details", "Buchung"])
+        for e in protokoll:
+            w.writerow(["", e.zeitpunkt.strftime("%d.%m.%Y %H:%M"), e.aktion, e.details, e.buchung_id or ""])
     return buf.getvalue()
 
 

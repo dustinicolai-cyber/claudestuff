@@ -16,7 +16,7 @@ from sqlmodel import Session, select
 from . import config, export, matching, ollama, regeln as regelwerk, steuerlogik, ui
 from .db import get_session, init_db, kategorien_synchronisieren
 from .importer import klassifizierung, kontoauszug, mail, pipeline
-from .models import Anlagegut, Beleg, Buchung, Fragebogen, Kategorie, Kontobewegung, MailFund, Regel
+from .models import Anlagegut, Beleg, Buchung, DedupIgnoriert, Fragebogen, Kategorie, Kontobewegung, MailFund, Protokoll, Regel
 
 @asynccontextmanager
 async def _lebenszyklus(_: FastAPI):
@@ -52,6 +52,10 @@ def _standardjahr(s: Session) -> int:
     return max(jahre) if jahre else date.today().year
 
 
+def _aktive(s: Session) -> list[Buchung]:
+    return [b for b in s.exec(select(Buchung)).all() if not b.storniert]
+
+
 def _offene(s: Session) -> list[Buchung]:
     return s.exec(select(Buchung).where(Buchung.status == "vorschlag").order_by(Buchung.konfidenz, Buchung.datum)).all()
 
@@ -76,7 +80,7 @@ def _meta_aus_form(form) -> dict:
 
 
 def _buchung_aus_form(b: Buchung, form) -> None:
-    b.datum = date.fromisoformat(form["datum"])
+    b.datum = date.fromisoformat(form["datum"]) if form.get("datum") else b.datum
     b.richtung = form.get("richtung", "ausgabe")
     b.lieferant = form.get("lieferant", "").strip()
     b.beschreibung = form.get("beschreibung", "").strip()
@@ -158,13 +162,22 @@ def static(name: str):
     return FileResponse(p)
 
 
-@app.get("/api/status")
-def status(s: Session = Depends(get_session)) -> JSONResponse:
-    offene = len(_offene(s))
+def _nav_counts(s: Session, jahr: int) -> dict:
+    """Einmal pro Request: alles, was die Navigation anzeigen soll."""
     op = matching.offene_punkte(s)
     funde = s.exec(select(MailFund).where(MailFund.status == "offen")).all()
-    return JSONResponse({"vorschlaege": offene, "beleg_fehlt": len(op["ohne_beleg"]), "manuell_holen": len(funde),
-                         "ollama": ollama.verfuegbar(config.regeln())["online"], "jahre": _jahre(s)})
+    fragen = config.regeln()["jahresabschluss_fragen"]
+    erledigt = sum(1 for f in s.exec(select(Fragebogen).where(Fragebogen.jahr == jahr)).all() if f.erledigt)
+    return {"vorschlaege": len(_offene(s)), "beleg_fehlt": len(op["ohne_beleg"]), "manuell_holen": len(funde),
+            "offen_gesamt": len(op["ohne_beleg"]) + len(funde) + len(op["ohne_konto"]) + len(op["doppel"]),
+            "jahresabschluss": {"erledigt": erledigt, "gesamt": len(fragen)}}
+
+
+@app.get("/api/status")
+def status(jahr: Optional[int] = None, s: Session = Depends(get_session)) -> JSONResponse:
+    jahr = jahr or _standardjahr(s)
+    ki = ollama.status(config.regeln(), KI_AN["wert"])
+    return JSONResponse({**_nav_counts(s, jahr), "ki": ki, "ollama": ki == "aktiv", "jahre": _jahre(s), "standardjahr": _standardjahr(s), "jahr": jahr})
 
 
 @app.get("/beleg/{beleg_id}/datei")
@@ -429,7 +442,7 @@ async def api_buchungen_loeschen(request: Request, s: Session = Depends(get_sess
 # ------------------------------------------------------------ Quartale
 
 def _uebersicht(s: Session, jahr: int) -> dict:
-    return steuerlogik.quartalsuebersicht(s.exec(select(Buchung)).all(), _kats(s), s.exec(select(Anlagegut)).all(), jahr, config.regeln())
+    return steuerlogik.quartalsuebersicht(_aktive(s), _kats(s), s.exec(select(Anlagegut)).all(), jahr, config.regeln())
 
 
 @app.get("/ui/quartale", response_class=HTMLResponse)
@@ -484,6 +497,88 @@ def ui_offen(s: Session = Depends(get_session)) -> HTMLResponse:
     kandidaten = {k.id: matching.kandidaten_fuer(s, k) for k in op["ohne_beleg"][:100]}
     funde = s.exec(select(MailFund).where(MailFund.status == "offen").order_by(MailFund.datum.desc())).all()
     return _html(ui.offen_view(op, kandidaten, funde, _kats(s)))
+
+
+def _protokoll(s: Session, aktion: str, details: str, buchung_id: Optional[int] = None) -> None:
+    s.add(Protokoll(aktion=aktion, details=details, buchung_id=buchung_id))
+
+
+@app.post("/api/ohnekonto/aktion", response_class=HTMLResponse)
+async def api_ohnekonto_aktion(request: Request, s: Session = Depends(get_session)) -> HTMLResponse:
+    """Beleg ohne Kontobewegung: privat | stornieren (Vorschläge werden gelöscht, Bestätigte storniert)."""
+    form = await request.form()
+    aktion = form.get("aktion", "")
+    ids = [int(x) for x in form.getlist("ids") if str(x).isdigit()]
+    n = 0
+    for bid in ids:
+        b = s.get(Buchung, bid)
+        if not b:
+            continue
+        if aktion == "privat":
+            b.privat_verauslagt = True
+            s.add(b)
+            _protokoll(s, "privat_verauslagt", f"{b.datum} {b.lieferant} {b.betrag_brutto:.2f}", b.id)
+            n += 1
+        elif aktion == "stornieren":
+            if b.status == "bestaetigt":
+                b.storniert = True
+                s.add(b)
+                _protokoll(s, "storniert", f"{b.datum} {b.lieferant} {b.betrag_brutto:.2f}", b.id)
+            else:
+                _protokoll(s, "geloescht", f"Vorschlag {b.datum} {b.lieferant} {b.betrag_brutto:.2f}", b.id)
+                _buchung_loeschen(s, b)
+            n += 1
+    s.commit()
+    text = {"privat": f"{n} als privat verauslagt markiert.", "stornieren": f"{n} storniert bzw. gelöscht."}.get(aktion, "Nichts geändert.")
+    return _html(ui.meldung_box(text) + ui_offen(s).body.decode())
+
+
+def _paare(form) -> list[tuple[int, int]]:
+    out = []
+    for p in form.getlist("paare"):
+        try:
+            a, b = (int(x) for x in str(p).split("-"))
+            out.append((min(a, b), max(a, b)))
+        except ValueError:
+            continue
+    return out
+
+
+@app.post("/api/doppel/zusammenfuehren", response_class=HTMLResponse)
+async def api_zusammenfuehren(request: Request, s: Session = Depends(get_session)) -> HTMLResponse:
+    """Ältere Buchungs-ID bleibt, neuere geht; Beleg und Kontobewegung wandern mit; Protokoll."""
+    form = await request.form()
+    n = 0
+    for alt_id, neu_id in _paare(form):
+        alt, neu = s.get(Buchung, alt_id), s.get(Buchung, neu_id)
+        if not alt or not neu:
+            continue
+        if not alt.beleg_id and neu.beleg_id:
+            alt.beleg_id, neu.beleg_id = neu.beleg_id, None
+        for k in s.exec(select(Kontobewegung).where(Kontobewegung.buchung_id == neu.id)).all():
+            k.buchung_id = alt.id
+            s.add(k)
+        if alt.status != "bestaetigt" and neu.status == "bestaetigt":
+            alt.status, alt.bestaetigt_am, alt.konfidenz = "bestaetigt", neu.bestaetigt_am, 1.0
+            alt.kategorie_id, alt.eur_zeile = neu.kategorie_id, neu.eur_zeile
+        s.add(alt)
+        _protokoll(s, "zusammengefuehrt", f"#{neu.id} in #{alt.id} ({alt.datum} {alt.lieferant} {alt.betrag_brutto:.2f})", alt.id)
+        _buchung_loeschen(s, neu)
+        n += 1
+    s.commit()
+    return _html(ui.meldung_box(f"{n} Paare zusammengeführt.") + ui_offen(s).body.decode())
+
+
+@app.post("/api/doppel/unterschiedlich", response_class=HTMLResponse)
+async def api_unterschiedlich(request: Request, s: Session = Depends(get_session)) -> HTMLResponse:
+    form = await request.form()
+    n = 0
+    for a, b in _paare(form):
+        if not s.exec(select(DedupIgnoriert).where(DedupIgnoriert.a_id == a, DedupIgnoriert.b_id == b)).first():
+            s.add(DedupIgnoriert(a_id=a, b_id=b))
+            n += 1
+    s.commit()
+    return _html(ui.meldung_box(f"{n} Paare als geprüft markiert – tauchen nicht mehr auf.") + ui_offen(s).body.decode())
 
 
 @app.post("/api/matching", response_class=HTMLResponse)
@@ -584,7 +679,7 @@ def api_fragebogen(jahr: int, key: str, s: Session = Depends(get_session)) -> HT
 def ui_export(jahr: Optional[int] = None, s: Session = Depends(get_session)) -> HTMLResponse:
     jahr = jahr or _standardjahr(s)
     cfg = config.regeln()
-    buchungen = s.exec(select(Buchung)).all()
+    buchungen = _aktive(s)
     eur = steuerlogik.eur_zeilen(buchungen, _kats(s), s.exec(select(Anlagegut)).all(), jahr, cfg)
     ustva = [steuerlogik.ustva(buchungen, jahr, q, cfg) for q in (1, 2, 3, 4)]
     return _html(ui.export_view(jahr, eur, ustva, _jahre(s)))
@@ -597,19 +692,19 @@ def _download(inhalt: bytes | str, name: str, typ: str) -> Response:
 
 @app.get("/export/eur.csv")
 def export_eur_csv(jahr: int, s: Session = Depends(get_session)):
-    eur = steuerlogik.eur_zeilen(s.exec(select(Buchung)).all(), _kats(s), s.exec(select(Anlagegut)).all(), jahr, config.regeln())
+    eur = steuerlogik.eur_zeilen(_aktive(s), _kats(s), s.exec(select(Anlagegut)).all(), jahr, config.regeln())
     return _download(export.eur_csv(eur), f"EUER_{jahr}.csv", "text/csv")
 
 
 @app.get("/export/eur.json")
 def export_eur_json(jahr: int, s: Session = Depends(get_session)):
-    eur = steuerlogik.eur_zeilen(s.exec(select(Buchung)).all(), _kats(s), s.exec(select(Anlagegut)).all(), jahr, config.regeln())
+    eur = steuerlogik.eur_zeilen(_aktive(s), _kats(s), s.exec(select(Anlagegut)).all(), jahr, config.regeln())
     return JSONResponse({"jahr": jahr, "zeilen": eur})
 
 
 @app.get("/export/eur.pdf")
 def export_eur_pdf(jahr: int, s: Session = Depends(get_session)):
-    eur = steuerlogik.eur_zeilen(s.exec(select(Buchung)).all(), _kats(s), s.exec(select(Anlagegut)).all(), jahr, config.regeln())
+    eur = steuerlogik.eur_zeilen(_aktive(s), _kats(s), s.exec(select(Anlagegut)).all(), jahr, config.regeln())
     return Response(export.eur_pdf(eur, jahr), media_type="application/pdf")
 
 
@@ -627,12 +722,13 @@ def export_quartale_pdf(jahr: int, modus: str = "brutto", s: Session = Depends(g
 def export_journal(jahr: Optional[int] = None, s: Session = Depends(get_session)):
     buchungen = [b for b in s.exec(select(Buchung)).all() if jahr is None or b.datum.year == jahr]
     belege = {b.id: b for b in s.exec(select(Beleg)).all()}
-    return _download(export.belegjournal_csv(buchungen, belege, _kats(s)), f"Belegjournal_{jahr or 'alle'}.csv", "text/csv")
+    protokoll = s.exec(select(Protokoll).order_by(Protokoll.zeitpunkt)).all()
+    return _download(export.belegjournal_csv(buchungen, belege, _kats(s), protokoll), f"Belegjournal_{jahr or 'alle'}.csv", "text/csv")
 
 
 @app.get("/export/ustva/{jahr}/{q}")
 def export_ustva(jahr: int, q: int, s: Session = Depends(get_session)):
-    u = steuerlogik.ustva(s.exec(select(Buchung)).all(), jahr, q, config.regeln())
+    u = steuerlogik.ustva(_aktive(s), jahr, q, config.regeln())
     return JSONResponse({"jahr": jahr, "quartal": q, "kennzahlen": u["kennzahlen"], "zahllast": u["zahllast"],
                          "positionen": [{"buchung_id": p["buchung"].id, "lieferant": p["buchung"].lieferant, "netto": p["buchung"].betrag_netto,
                                          "kz_basis": p["kz_basis"], "kz_steuer": p["kz_steuer"], "steuer": p["steuer"]} for p in u["positionen"]]})

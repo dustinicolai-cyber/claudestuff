@@ -53,6 +53,8 @@ class Buchung(SQLModel, table=True):
 
     status: str = "vorschlag"          # vorschlag | bestaetigt
     konfidenz: float = 0.0
+    privat_verauslagt: bool = False    # bar/privat bezahlt – braucht keine Kontobewegung
+    storniert: bool = False            # bestätigte Buchungen werden nie gelöscht, nur storniert
 
     # Nachvollziehbarkeit: welche Pipeline-Stufe, welche Rohfelder
     extraktion_stufe: str = "manuell"  # zugferd | pdf | ocr | manuell | kontoauszug
@@ -137,3 +139,19 @@ class Fragebogen(SQLModel, table=True):
     frage_key: str
     erledigt: bool = False
     notiz: str = ""
+
+
+class DedupIgnoriert(SQLModel, table=True):
+    """Paare, die der Nutzer als „sind unterschiedlich“ geprüft hat."""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    a_id: int = Field(index=True)
+    b_id: int = Field(index=True)
+
+
+class Protokoll(SQLModel, table=True):
+    """Nachvollziehbarkeit für Eingriffe: Zusammenführen, Stornieren, Privat verauslagt."""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    zeitpunkt: datetime = Field(default_factory=datetime.now)
+    aktion: str
+    details: str = ""
+    buchung_id: Optional[int] = None

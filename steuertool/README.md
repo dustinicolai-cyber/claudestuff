@@ -49,11 +49,14 @@ Sichern = diese Dateien kopieren. Pfad überschreibbar per `STEUERTOOL_HOME`.
    `⏎` bestätigt und springt weiter, `Esc` überspringt. Jede Korrektur der Kategorie legt
    automatisch eine Regel für den Lieferanten an.
 3. **Quartale** – Kategorien × Q1–Q4 + Jahr. Umschalter Brutto / Netto / USt / Abzugsfähig.
+   Das Steuerjahr wird oben im Kopf gewählt und gilt für alle Ansichten.
    Die USt-Spalte ist der Was-wäre-wenn-Rechner: so viel Vorsteuer kostet §19 pro Quartal.
 4. **Auswertung** – dieselben Zahlen als Diagramm, per Button umschaltbar: Quartale, Monate,
-   Gewinnverlauf, Kategorien, Anteile, Tabelle. Grün = Plus, Gelb = neutral, Rot = Minus.
-5. **Offene Punkte** – Kontobewegungen ohne Beleg (wichtigste Liste), Mails „manuell holen“,
-   Belege ohne Kontobewegung, mögliche Doppelbuchungen.
+   Gewinnverlauf, Kategorien, Anteile, Tabelle.
+5. **Offene Punkte** – Kontobewegungen ohne Beleg (wichtigste Liste), Mails „Rechnung manuell
+   laden“, Belege ohne Kontobewegung (privat verauslagt / stornieren), mögliche Doppelbuchungen
+   (zusammenführen / sind unterschiedlich). Bestätigte Buchungen werden nie gelöscht, nur storniert;
+   jeder Eingriff steht im Protokoll am Ende des Belegjournals.
 6. **Jahresabschluss** – Fragebogen gegen vergessene Posten, pro Frage Direkterfassung.
 7. **Export** – Anlage EÜR (Zeile, Bezeichnung, Betrag – abtippfertig), UStVA je Quartal
    (nur §13b, Kz 46/47 bzw. 84/85), Quartalstabelle CSV/PDF, Belegjournal.
@@ -83,7 +86,7 @@ gegen das aktuelle Formular geprüft werden – nur in der JSON, kein Codeeingri
   Gmail/iCloud: app-spezifisches Passwort.
 - **Apple Mail lokal**: `~/Library/Mail` wird nach `.emlx` durchsucht, ohne Netz.
 - Empfehlung: Mailregel, die Rechnungsmails in einen Ordner „Belege“ sortiert.
-- PDF im Anhang → Pipeline (Duplikate via SHA-256). Nur ein Link → Liste „manuell holen“.
+- PDF im Anhang → Pipeline (Duplikate via SHA-256). Nur ein Link → Liste „Rechnung manuell laden“.
 
 ## Entwicklung
 

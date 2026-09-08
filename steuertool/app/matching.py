@@ -7,7 +7,7 @@ from sqlmodel import Session, select
 
 from . import config
 from .importer.kontoauszug import Bewegung
-from .models import Buchung, Kontobewegung
+from .models import Buchung, DedupIgnoriert, Kontobewegung
 
 
 def kontobewegungen_speichern(s: Session, bewegungen: list[Bewegung], quelle: str) -> tuple[int, int]:
@@ -40,7 +40,7 @@ def matche(s: Session) -> int:
     toleranz = int(config.regeln().get("matching_tage_toleranz", 5))
     offen_k = s.exec(select(Kontobewegung).where(Kontobewegung.buchung_id == None, Kontobewegung.ignoriert == False)).all()  # noqa: E711,E712
     belegt = {k.buchung_id for k in s.exec(select(Kontobewegung).where(Kontobewegung.buchung_id != None)).all()}  # noqa: E711
-    offen_b = [b for b in s.exec(select(Buchung)).all() if b.id not in belegt and b.betrag_brutto]
+    offen_b = [b for b in s.exec(select(Buchung)).all() if b.id not in belegt and b.betrag_brutto and not b.storniert]
     treffer = 0
     for k in offen_k:
         kandidaten = [b for b in offen_b if _passt(b, k, toleranz)]
@@ -77,12 +77,15 @@ def offene_punkte(s: Session) -> dict:
     ohne_beleg = s.exec(select(Kontobewegung).where(Kontobewegung.buchung_id == None, Kontobewegung.ignoriert == False)  # noqa: E711,E712
                         .order_by(Kontobewegung.datum.desc())).all()
     belegt = {k.buchung_id for k in s.exec(select(Kontobewegung).where(Kontobewegung.buchung_id != None)).all()}  # noqa: E711
-    buchungen = s.exec(select(Buchung).order_by(Buchung.datum.desc())).all()
-    ohne_konto = [b for b in buchungen if b.id not in belegt and b.betrag_brutto]
+    buchungen = [b for b in s.exec(select(Buchung).order_by(Buchung.datum.desc())).all() if not b.storniert]
+    ohne_konto = [b for b in buchungen if b.id not in belegt and b.betrag_brutto and not b.privat_verauslagt]
+    geprueft = {(min(x.a_id, x.b_id), max(x.a_id, x.b_id)) for x in s.exec(select(DedupIgnoriert)).all()}
     # Doppelbuchungen: gleicher Lieferant, gleicher Bruttobetrag, ±3 Tage oder gleiche Rechnungsnummer
     doppel: list[tuple[Buchung, Buchung]] = []
     for i, a in enumerate(buchungen):
         for b in buchungen[i + 1:]:
+            if (min(a.id, b.id), max(a.id, b.id)) in geprueft:
+                continue
             if a.betrag_brutto and abs(a.betrag_brutto - b.betrag_brutto) < 0.005 and (
                 (a.rechnungsnummer and a.rechnungsnummer == b.rechnungsnummer) or
                 (a.lieferant and a.lieferant.lower() == b.lieferant.lower() and abs((a.datum - b.datum).days) <= 3)

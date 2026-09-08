@@ -96,7 +96,7 @@ def test_jahresabschluss_direkterfassung():
             ho = s.exec(select(Kategorie).where(Kategorie.schluessel == "arbeitszimmer")).first()
         r = c.post("/api/buchung/neu", data={"datum": "2025-12-31", "richtung": "ausgabe", "kategorie_id": str(ho.id), "betrag_brutto": "",
                                              "ust_satz": "0", "meta_tage": "120", "zurueck": "jahresabschluss:2025"})
-        assert "Jahresabschluss 2025" in r.text
+        assert "Fragen geprüft" in r.text and "jahresabschluss" in r.text
         z = {e["zeile"]: e["betrag"] for e in c.get("/export/eur.json?jahr=2025").json()["zeilen"] if e["zeile"]}
         assert z[54] == 720.0
         r = c.post("/api/fragebogen/2025/homeoffice/toggle")
@@ -167,3 +167,49 @@ def test_import_einnahme_und_reiter():
         r = c.get("/ui/pruefen?richtung=einnahme")
         assert "buchung-form" in r.text and "Designstudio Test" in r.text
         assert "buchung-form" in c.get("/ui/pruefen").text   # ohne Reiter: springt zum Reiter mit Vorschlägen
+
+
+def test_offene_punkte_aktionen_und_status():
+    with client() as c:
+        with Session(engine()) as s:
+            k = {x.schluessel: x for x in s.exec(select(Kategorie)).all()}
+            for i in range(2):   # zwei identische bestätigte Buchungen → Doppelbuchung
+                s.add(Buchung(datum=date(2025, 3, 1), lieferant="Adobe", rechnungsnummer="X-1", betrag_netto=50, betrag_brutto=59.5,
+                              kategorie_id=k["software"].id, eur_zeile=50, status="bestaetigt"))
+            s.add(Buchung(datum=date(2025, 4, 1), lieferant="Bar-Kauf", betrag_netto=10, betrag_brutto=11.9,
+                          kategorie_id=k["buerobedarf"].id, eur_zeile=50, status="bestaetigt"))
+            s.commit()
+            ids = [b.id for b in s.exec(select(Buchung).order_by(Buchung.id)).all()]
+        st = c.get("/api/status?jahr=2025").json()
+        assert st["offen_gesamt"] == 4 and st["jahresabschluss"]["gesamt"] == 13 and st["ki"] in ("aktiv", "aus", "nicht_erreichbar")
+        o = c.get("/ui/offen")
+        assert "Zusammenführen" in o.text and "Privat verauslagt" in o.text and "Alle Kontobewegungen haben einen Beleg." in o.text
+        # privat verauslagt
+        r = c.post("/api/ohnekonto/aktion", data={"aktion": "privat", "ids": [str(ids[2])]})
+        assert "1 als privat verauslagt" in r.text
+        # stornieren einer bestätigten Buchung: bleibt, zählt nicht mehr
+        r = c.post("/api/ohnekonto/aktion", data={"aktion": "stornieren", "ids": [str(ids[2])]})
+        with Session(engine()) as s:
+            b = s.get(Buchung, ids[2]); assert b is not None and b.storniert
+        z = {e["zeile"]: e["betrag"] for e in c.get("/export/eur.json?jahr=2025").json()["zeilen"] if e["zeile"]}
+        assert z[50] == 119.0   # 2 × 59,50, die stornierte 11,90 fehlt
+        # zusammenführen: ältere ID bleibt
+        r = c.post("/api/doppel/zusammenfuehren", data={"paare": [f"{ids[0]}-{ids[1]}"]})
+        assert "1 Paare zusammengeführt" in r.text
+        with Session(engine()) as s:
+            assert s.get(Buchung, ids[0]) is not None and s.get(Buchung, ids[1]) is None
+            from app.models import Protokoll
+            assert any(p.aktion == "zusammengefuehrt" for p in s.exec(select(Protokoll)).all())
+        assert "Protokoll" in c.get("/export/belegjournal.csv?jahr=2025").text
+        assert c.get("/api/status?jahr=2025").json()["offen_gesamt"] == 1   # nur noch eine ohne Kontobewegung
+
+
+def test_doppel_sind_unterschiedlich():
+    with client() as c:
+        with Session(engine()) as s:
+            for i in range(2):
+                s.add(Buchung(datum=date(2025, 3, 1), lieferant="Hoster", rechnungsnummer="H-1", betrag_netto=10, betrag_brutto=11.9, status="bestaetigt"))
+            s.commit()
+            ids = [b.id for b in s.exec(select(Buchung)).all()]
+        r = c.post("/api/doppel/unterschiedlich", data={"paare": [f"{ids[0]}-{ids[1]}"]})
+        assert "1 Paare als geprüft" in r.text and "Keine Auffälligkeiten." in r.text

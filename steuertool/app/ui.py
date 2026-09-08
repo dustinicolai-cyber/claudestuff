@@ -23,6 +23,13 @@ ICON = {
 STUFEN = {"zugferd": "E-Rechnung (XML)", "pdf": "PDF-Text", "ocr": "Vision-OCR", "manuell": "manuell", "keine": "keine", "kontoauszug": "Kontoauszug"}
 
 
+def eur_zelle(x: float, cls: str = "") -> str:
+    """Tabellenzelle: 0 als gedämpfter Strich, sonst Betrag; Minus steht immer explizit dabei."""
+    if abs(x) < 0.005:
+        return f'<td class="num leer{(" " + cls) if cls else ""}">–</td>'
+    return f'<td class="num{(" " + cls) if cls else ""}">{eur_fmt(x)}</td>'
+
+
 def d(x: date | None) -> str:
     return x.strftime("%d.%m.%Y") if x else ""
 
@@ -55,8 +62,7 @@ def import_view(ollama_status: dict, ki_an: bool) -> str:
         if ollama_status["online"] else "<span class='badge low'>Ollama nicht erreichbar – Stufe 3/4-KI aus, Regeln laufen weiter</span>"
     return f"""
 <section>
-  <h2>Import</h2>
-  <p class="muted">Reihenfolge: E-Rechnung (ZUGFeRD/XRechnung) → PDF-Text → Vision-OCR → Klassifizierung. Die erste Stufe, die greift, gewinnt. Nichts wird ohne Bestätigung verbucht.</p>
+  <p class="muted erkl">Reihenfolge: E-Rechnung (ZUGFeRD/XRechnung) → PDF-Text → Vision-OCR → Klassifizierung. Die erste Stufe, die greift, gewinnt. Nichts wird ohne Bestätigung verbucht.</p>
   <div class="dropzonen">
     <div class="dropzone minus-zone" data-richtung="ausgabe" tabindex="0">
       <div class="dz-icon">{ICON["minus"]}</div>
@@ -73,27 +79,40 @@ def import_view(ollama_status: dict, ki_an: bool) -> str:
     <label class="check"><input type="checkbox" id="ki" {"checked" if ki_an else ""}> KI-Stufen (Ollama) verwenden</label>
     <span>{ki}</span>
   </div>
-  <table class="tabelle" id="import-tabelle"><thead><tr><th>Datei</th><th>Art</th><th>Status</th><th>Stufe</th><th>Konfidenz</th><th>Meldung</th></tr></thead><tbody></tbody></table>
+  <table class="tabelle" id="import-tabelle" hidden><thead><tr><th>Datei</th><th>Art</th><th>Status</th><th>Stufe</th><th>Konfidenz</th><th>Meldung</th></tr></thead><tbody></tbody></table>
 
   <h3>Ordner importieren</h3>
-  <form hx-post="/api/import/ordner" hx-target="#ordner-ergebnis" hx-include="#ki" class="row">
-    <input name="pfad" placeholder="/Users/…/Downloads/Belege" size="44" required>
-    <select name="richtung"><option value="ausgabe">als Ausgaben</option><option value="einnahme">als Einnahmen</option></select>
-    <button>Alle Dateien im Ordner importieren</button>
+  <form hx-post="/api/import/ordner" hx-target="#ordner-ergebnis" hx-include="#ki" class="row" id="ordner-form">
+    <label class="button btn-secondary" title="Ordner auswählen – die Dateien werden direkt hochgeladen">Ordner wählen …<input type="file" id="ordner-picker" webkitdirectory multiple hidden></label>
+    <span class="muted">oder Pfad:</span>
+    <input name="pfad" id="ordner-pfad" placeholder="/Users/…/Downloads/Belege" size="36" required>
+    <select name="richtung" id="ordner-richtung"><option value="ausgabe">als Ausgaben</option><option value="einnahme">als Einnahmen</option></select>
+    <button class="btn-primary">Alle Dateien im Ordner importieren</button>
   </form>
   <div id="ordner-ergebnis"></div>
 
+  <hr class="trenner">
   <h3>Kontoauszug importieren</h3>
+  <p class="muted erkl">Anderer Datentyp, andere Wirkung: Kontobewegungen werden mit Buchungen abgeglichen, nicht als Belege gespeichert.</p>
   <form hx-post="/api/konto/import" hx-target="#konto-ergebnis" hx-encoding="multipart/form-data" class="row">
     <input type="file" name="datei" accept=".csv,.xml,.txt" required>
-    <button>CSV / CAMT.053 einlesen und matchen</button>
+    <button class="btn-secondary">CSV / CAMT.053 einlesen und matchen</button>
   </form>
   <div id="konto-ergebnis"></div>
 </section>
 <script>
 (function(){{
-  const tbody = document.querySelector('#import-tabelle tbody');
+  const tabelle = document.getElementById('import-tabelle'), tbody = tabelle.querySelector('tbody');
+  const pfad = document.getElementById('ordner-pfad');
+  try {{ pfad.value = localStorage.getItem('ordner-pfad') || ''; }} catch(e) {{}}
+  document.getElementById('ordner-form').addEventListener('submit', () => {{ try {{ localStorage.setItem('ordner-pfad', pfad.value); }} catch(e) {{}} }});
+  document.getElementById('ordner-picker').addEventListener('change', e => {{
+    const richtung = document.getElementById('ordner-richtung').value;
+    for (const f of e.target.files) if (/\.(pdf|xml|png|jpe?g|tiff?|webp|heic)$/i.test(f.name)) senden(f, richtung);
+    e.target.value = '';
+  }});
   async function senden(f, richtung){{
+    tabelle.hidden = false;
     const tr = document.createElement('tr');
     tr.innerHTML = '<td>'+f.name.replace(/</g,'&lt;')+'</td><td>'+(richtung === 'einnahme' ? 'Einnahme' : 'Ausgabe')+'</td><td colspan=4><span class="spinner"></span> wird verarbeitet…</td>';
     tbody.prepend(tr);
@@ -270,7 +289,7 @@ def buchung_formular(b: Buchung, kategorien: list[Kategorie], cfg: dict, action:
 
 
 def manuell_view(b: Buchung, kategorien: list[Kategorie], cfg: dict) -> str:
-    return f'<section><h2>Manuell erfassen</h2><p class="muted">Von Hand erfasste Buchungen gelten als bestätigt – du bist die Quelle.</p>' \
+    return f'<section><p class="muted erkl">Von Hand erfasste Buchungen gelten als bestätigt – du bist die Quelle.</p>' \
            f'{buchung_formular(b, kategorien, cfg, action="/api/buchung/neu", titel="Neue Buchung")}</section>'
 
 
@@ -284,15 +303,14 @@ def quartale_view(ue: dict, modus: str, jahre: list[int], offene_vorschlaege: in
     tabs = "".join(
         f'<button class="{"aktiv" if modus == mo else ""}" hx-get="/ui/quartale?jahr={jahr}&modus={mo}" hx-target="#main">{name}</button>'
         for mo, name in (("brutto", "Brutto"), ("netto", "Netto"), ("ust", "USt-Spalte"), ("abzugsfaehig", "Abzugsfähig")))
-    jahr_opts = "".join(f'<option value="{j}" {"selected" if j == jahr else ""}>{j}</option>' for j in jahre)
     zeilen = "".join(
-        f'<tr class="{r["kategorie"].richtung}"><td>{h(r["kategorie"].name)}</td><td class="muted">{r["kategorie"].eur_zeile or "–"}</td>'
-        + "".join(f'<td class="num">{eur_fmt(w(z))}</td>' for z in r["q"]) + f'<td class="num fett">{eur_fmt(w(r["jahr"]))}</td></tr>'
+        f'<tr><td>{h(r["kategorie"].name)}</td><td class="muted">{r["kategorie"].eur_zeile or "–"}</td>'
+        + "".join(eur_zelle(w(z)) for z in r["q"]) + eur_zelle(w(r["jahr"]), "fett") + '</tr>'
         for r in ue["zeilen"])
     summen = (
-        f'<tr class="summe"><td>Summe Einnahmen</td><td></td>' + "".join(f'<td class="num">{eur_fmt(w(z))}</td>' for z in ue["einnahmen"]) + '</tr>'
-        f'<tr class="summe"><td>Summe Ausgaben</td><td></td>' + "".join(f'<td class="num">{eur_fmt(w(z))}</td>' for z in ue["ausgaben"]) + '</tr>'
-        f'<tr class="summe fett"><td>Gewinn (abzugsfähig)</td><td></td>' + "".join(f'<td class="num {"plus" if g >= 0 else "minus"}">{eur_fmt(g)}</td>' for g in ue["gewinn"]) + '</tr>')
+        f'<tr class="summe"><td>Summe Einnahmen</td><td></td>' + "".join(eur_zelle(w(z)) for z in ue["einnahmen"]) + '</tr>'
+        f'<tr class="summe"><td>Summe Ausgaben</td><td></td>' + "".join(eur_zelle(w(z)) for z in ue["ausgaben"]) + '</tr>'
+        f'<tr class="summe fett"><td>Gewinn / Verlust</td><td></td>' + "".join(eur_zelle(g, "plus" if g >= 0 else "minus") for g in ue["gewinn"]) + '</tr>')
     erkl = {
         "brutto": "Bei §19 ist der Bruttobetrag die Betriebsausgabe – das ist die maßgebliche Ansicht.",
         "netto": "Netto dient nur der Darstellung. So sähen die Ausgaben bei Regelbesteuerung mit Vorsteuerabzug aus.",
@@ -304,19 +322,19 @@ def quartale_view(ue: dict, modus: str, jahre: list[int], offene_vorschlaege: in
     quote = 100.0 * bestaetigt / (bestaetigt + offene_vorschlaege) if (bestaetigt + offene_vorschlaege) else 100.0
     anl = "".join(f'<tr><td>{h(a.bezeichnung)}</td><td>{d(a.anschaffung)}</td><td class="num">{eur_fmt(a.anschaffungskosten)}</td>'
                   f'<td><form hx-post="/api/anlage/{a.id}" hx-target="#main" class="inline"><input type="number" name="nutzungsdauer_jahre" value="{a.nutzungsdauer_jahre}" min="1" max="50" style="width:4em"> J. '
-                  f'<input type="hidden" name="jahr" value="{jahr}"><button class="klein">ok</button></form></td>'
+                  f'<input type="hidden" name="jahr" value="{jahr}"><button class="klein btn-secondary">ok</button></form></td>'
                   f'<td class="num">{eur_fmt(afa_fuer_jahr(a, jahr))}</td></tr>' for a in anlagen)
     return f"""
 <section>
   <div class="row zwischen">
-    <h2>Quartale <select hx-get="/ui/quartale?modus={modus}" hx-target="#main" name="jahr" hx-trigger="change">{jahr_opts}</select></h2>
+    <p class="muted erkl">{erkl}</p>
     <div class="tabs">{tabs}</div>
   </div>
-  <p class="muted">{erkl} {f'<span class="badge mid">{offene_vorschlaege} unbestätigte Vorschläge nicht enthalten</span>' if offene_vorschlaege else ''}</p>
+  <p class="muted"> {f'<span class="badge mid">{offene_vorschlaege} unbestätigte Vorschläge nicht enthalten</span>' if offene_vorschlaege else ''}</p>
   <div class="kpis">
-    <div class="kpi gruen"><div class="l">Einnahmen {jahr}</div><div class="w">{eur_fmt(ue["einnahmen"][4].abzugsfaehig)}</div></div>
-    <div class="kpi rot"><div class="l">Ausgaben (abzugsfähig)</div><div class="w">{eur_fmt(ue["ausgaben"][4].abzugsfaehig)}</div></div>
-    <div class="kpi {"gruen" if ue["gewinn"][4] >= 0 else "rot"}"><div class="l">Gewinn</div><div class="w">{eur_fmt(ue["gewinn"][4])}</div></div>
+    <div class="kpi"><div class="l">Einnahmen {jahr}</div><div class="w">{eur_fmt(ue["einnahmen"][4].abzugsfaehig)}</div></div>
+    <div class="kpi"><div class="l">Ausgaben (abzugsfähig)</div><div class="w">{eur_fmt(ue["ausgaben"][4].abzugsfaehig)}</div></div>
+    <div class="kpi {"gruen" if ue["gewinn"][4] >= 0 else "rot"}"><div class="l">{"Gewinn" if ue["gewinn"][4] >= 0 else "Verlust"}</div><div class="w">{eur_fmt(ue["gewinn"][4])}</div></div>
     <div class="kpi gelb"><div class="l">Entgangene Vorsteuer (§19)</div><div class="w">{eur_fmt(ev[4])}</div></div>
     <div class="kpi"><div class="ring"><div class="kreis" style="--p:{quote}"><span>{quote:.0f} %</span></div><div><div class="l">Belege bestätigt</div><div class="fett">{bestaetigt} von {bestaetigt + offene_vorschlaege}</div></div></div></div>
   </div>
@@ -327,12 +345,12 @@ def quartale_view(ue: dict, modus: str, jahre: list[int], offene_vorschlaege: in
     <h3>Was-wäre-wenn: Was kostet §19 an Vorsteuer?</h3>
     <p class="muted">Bei Regelbesteuerung wäre diese USt (inkl. §13b-Steuer) als Vorsteuer abziehbar. Dagegen stünde USt-Pflicht auf eigene Rechnungen – Entscheidungsgrundlage, keine Empfehlung.</p>
     <table class="tabelle kompakt"><tr><th>Q1</th><th>Q2</th><th>Q3</th><th>Q4</th><th>Jahr</th></tr>
-    <tr>{''.join(f'<td class="num neutral">{eur_fmt(v)}</td>' for v in ev)}</tr></table>
+    <tr>{''.join(eur_zelle(v, "neutral") for v in ev)}</tr></table>
   </div>
 
   <div class="row">
-    <a class="button" href="/export/quartale.csv?jahr={jahr}&modus={modus}">CSV</a>
-    <a class="button" href="/export/quartale.pdf?jahr={jahr}&modus={modus}" target="_blank">Druck-PDF</a>
+    <a class="button btn-secondary" href="/export/quartale.csv?jahr={jahr}&modus={modus}">CSV</a>
+    <a class="button btn-secondary" href="/export/quartale.pdf?jahr={jahr}&modus={modus}" target="_blank">Druck-PDF</a>
   </div>
 
   <details {"open" if anlagen else ""}><summary>Anlagevermögen / AfA ({len(anlagen)})</summary>
@@ -345,56 +363,87 @@ def quartale_view(ue: dict, modus: str, jahre: list[int], offene_vorschlaege: in
 
 def _mail_link(m: MailFund) -> str:
     if m.link:
-        return f'<a href="{h(m.link)}" target="_blank" rel="noopener">Link öffnen ↗</a>'
+        return f'<a href="{h(m.link)}" target="_blank" rel="noopener">Rechnung laden ↗</a>'
     return "Anhang importiert (Vorschlag)"
+
+
+def _sektion(titel: str, anzahl: int, leer: str, inhalt: str, farbe: str = "mid", rechts: str = "") -> str:
+    """Leere Sektionen: eine Zeile, kein Tabellenkopf."""
+    if anzahl == 0:
+        return f'<div class="sektion leer"><span class="badge ok">✓</span> <strong>{h(titel)}</strong> <span class="muted">– {h(leer)}</span></div>'
+    return f'<div class="sektion"><div class="row zwischen"><h3>{h(titel)} <span class="badge {farbe}">{anzahl}</span></h3>{rechts}</div>{inhalt}</div>'
 
 
 def offen_view(op: dict, kandidaten: dict[int, list[Buchung]], funde: list[MailFund], kategorien: dict[int, Kategorie]) -> str:
     def konto_zeile(k: Kontobewegung) -> str:
         kand = kandidaten.get(k.id, [])
         sel = "".join(f'<option value="{b.id}">{d(b.datum)} · {h(b.lieferant)} · {eur_fmt(b.betrag_brutto)}</option>' for b in kand)
-        zuordnen = (f'<form class="inline" hx-post="/api/konto/{k.id}/zuordnen" hx-target="#main"><select name="buchung_id">{sel}</select><button class="klein">zuordnen</button></form>'
+        zuordnen = (f'<form class="inline" hx-post="/api/konto/{k.id}/zuordnen" hx-target="#main"><select name="buchung_id">{sel}</select><button class="klein btn-secondary">zuordnen</button></form>'
                     if kand else '<span class="muted klein">kein Kandidat</span>')
-        return (f'<tr><td>{d(k.datum)}</td><td class="num {"neg" if k.betrag < 0 else "pos"}">{eur_fmt(k.betrag)}</td>'
+        return (f'<tr><td>{d(k.datum)}</td><td class="num">{eur_fmt(k.betrag)}</td>'
                 f'<td>{h(k.gegenkonto)}<div class="muted klein">{h(k.verwendungszweck[:120])}</div></td>'
                 f'<td class="aktionen-zelle">{zuordnen} '
-                f'<button class="klein" hx-post="/api/konto/{k.id}/buchung-anlegen" hx-target="#main" title="Buchung ohne Beleg anlegen (Beleg nachreichen)">Buchung anlegen</button> '
-                f'<button class="klein sekundaer" hx-post="/api/konto/{k.id}/ignorieren" hx-target="#main" title="privat / nicht betrieblich">ignorieren</button></td></tr>')
+                f'<button class="klein btn-secondary" hx-post="/api/konto/{k.id}/buchung-anlegen" hx-target="#main" title="Buchung ohne Beleg anlegen (Beleg nachreichen)">Buchung anlegen</button> '
+                f'<button class="klein btn-ghost" hx-post="/api/konto/{k.id}/ignorieren" hx-target="#main" title="privat / nicht betrieblich">ignorieren</button></td></tr>')
 
-    ohne_beleg = "".join(konto_zeile(k) for k in op["ohne_beleg"])
-    ohne_konto = "".join(
-        f'<tr><td>{d(b.datum)}</td><td class="num {"plus" if b.richtung == "einnahme" else "minus"}">{eur_fmt(b.betrag_brutto)}</td><td>{h(b.lieferant)} <span class="muted klein">{h(b.beschreibung[:60])}</span></td>'
-        f'<td>{h(kategorien[b.kategorie_id].name) if b.kategorie_id in kategorien else "–"}</td><td><a href="#" hx-get="/ui/pruefen/{b.id}" hx-target="#main">öffnen</a></td></tr>'
+    ohne_beleg_html = f"""<p class="muted erkl">Kontobewegungen ohne zugeordnete Buchung – die wichtigste Arbeitsliste. Beleg suchen und importieren, dann matcht es automatisch.</p>
+  <div class="scroll"><table class="tabelle kompakt"><thead><tr><th>Datum</th><th>Betrag</th><th>Gegenkonto / Zweck</th><th>Aktion</th></tr></thead><tbody>{"".join(konto_zeile(k) for k in op["ohne_beleg"])}</tbody></table></div>"""
+
+    mail_html = f"""<p class="muted erkl">Mails, die nur einen Link zur Rechnung enthalten. Kein Login-Automatismus – Link öffnen, PDF laden, importieren.</p>
+  <div class="scroll"><table class="tabelle kompakt"><thead><tr><th>Datum</th><th>Absender</th><th>Betreff</th><th>Link</th><th></th></tr></thead><tbody>{"".join(
+        f'<tr><td>{d(m.datum.date()) if m.datum else ""}</td><td>{h(m.absender)}</td><td>{h(m.betreff[:80])}</td><td>{_mail_link(m)}</td>'
+        f'<td><button class="klein btn-secondary" hx-post="/api/mailfund/{m.id}/erledigt" hx-target="#main">erledigt</button> <button class="klein btn-ghost" hx-post="/api/mailfund/{m.id}/ignoriert" hx-target="#main">ignorieren</button></td></tr>'
+        for m in funde)}</tbody></table></div>"""
+
+    ohne_konto_zeilen = "".join(
+        f'<tr><td><input type="checkbox" name="ids" value="{b.id}"></td><td>{d(b.datum)}</td><td class="num">{eur_fmt(b.betrag_brutto)}</td>'
+        f'<td>{h(b.lieferant)} <span class="muted klein">{h(b.beschreibung[:60])}</span></td>'
+        f'<td>{h(kategorien[b.kategorie_id].name) if b.kategorie_id in kategorien else "–"}</td>'
+        f'<td class="aktionen-zelle"><a href="#" class="btn-ghost" hx-get="/ui/pruefen/{b.id}" hx-target="#main">Beleg öffnen</a> '
+        f'<button class="klein btn-secondary" hx-post="/api/ohnekonto/aktion" hx-vals=\'{{"aktion":"privat","ids":"{b.id}"}}\' hx-target="#main" title="bar oder privat bezahlt – braucht keine Kontobewegung">Privat verauslagt</button> '
+        f'<button class="klein btn-ghost" hx-post="/api/ohnekonto/aktion" hx-vals=\'{{"aktion":"stornieren","ids":"{b.id}"}}\' hx-target="#main" hx-confirm="{"Bestätigte Buchung stornieren? Sie bleibt im Journal, zählt aber nicht mehr." if b.status == "bestaetigt" else "Unbestätigten Vorschlag löschen?"}">{"Stornieren" if b.status == "bestaetigt" else "Löschen"}</button></td></tr>'
         for b in op["ohne_konto"][:200])
-    doppel = "".join(
-        f'<tr><td>{d(a.datum)} / {d(b.datum)}</td><td class="num">{eur_fmt(a.betrag_brutto)}</td><td>{h(a.lieferant)} – {h(a.rechnungsnummer or "ohne Nr.")}</td>'
-        f'<td><a href="#" hx-get="/ui/pruefen/{a.id}" hx-target="#main">#{a.id}</a> · <a href="#" hx-get="/ui/pruefen/{b.id}" hx-target="#main">#{b.id}</a></td></tr>'
+    ohne_konto_html = f"""<p class="muted erkl">Bar bezahlt, privat verauslagt oder Kontoauszug fehlt noch. Bestätigte Buchungen werden nie gelöscht, nur storniert.</p>
+  <form class="auswahl-form" hx-post="/api/ohnekonto/aktion" hx-target="#main">
+    <div class="auswahl-leiste" hidden><span class="anzahl"></span>
+      <button type="submit" name="aktion" value="privat" class="btn-secondary klein">Privat verauslagt</button>
+      <button type="submit" name="aktion" value="stornieren" class="btn-ghost klein" hx-confirm="Ausgewählte stornieren (bestätigte) bzw. löschen (Vorschläge)?">Stornieren / Löschen</button></div>
+    <div class="scroll"><table class="tabelle kompakt"><thead><tr><th><input type="checkbox" class="alle" title="Alle auswählen"></th><th>Datum</th><th>Brutto</th><th>Lieferant</th><th>Kategorie</th><th>Aktion</th></tr></thead><tbody>{ohne_konto_zeilen}</tbody></table></div>
+  </form>"""
+
+    doppel_zeilen = "".join(
+        f'<tr><td><input type="checkbox" name="paare" value="{min(a.id, b.id)}-{max(a.id, b.id)}"></td><td>{d(a.datum)} / {d(b.datum)}</td><td class="num">{eur_fmt(a.betrag_brutto)}</td>'
+        f'<td>{h(a.lieferant)} – {h(a.rechnungsnummer or "ohne Nr.")} <span class="muted klein">#{min(a.id, b.id)} · #{max(a.id, b.id)}</span></td>'
+        f'<td class="aktionen-zelle"><button class="klein btn-primary" hx-post="/api/doppel/zusammenfuehren" hx-vals=\'{{"paare":"{min(a.id, b.id)}-{max(a.id, b.id)}"}}\' hx-target="#main" hx-confirm="Zusammenführen? #{max(a.id, b.id)} geht in #{min(a.id, b.id)} auf, das steht im Belegjournal.">Zusammenführen</button> '
+        f'<button class="klein btn-ghost" hx-post="/api/doppel/unterschiedlich" hx-vals=\'{{"paare":"{min(a.id, b.id)}-{max(a.id, b.id)}"}}\' hx-target="#main">Sind unterschiedlich</button></td></tr>'
         for a, b in op["doppel"])
-    mail = "".join(
-        f'<tr><td>{d(m.datum.date()) if m.datum else ""}</td><td>{h(m.absender)}</td><td>{h(m.betreff[:80])}</td>'
-        f'<td>{_mail_link(m)}</td>'
-        f'<td><button class="klein" hx-post="/api/mailfund/{m.id}/erledigt" hx-target="#main">erledigt</button> <button class="klein sekundaer" hx-post="/api/mailfund/{m.id}/ignoriert" hx-target="#main">ignorieren</button></td></tr>'
-        for m in funde)
+    doppel_html = f"""<p class="muted erkl">Gleicher Betrag und gleiche Rechnungsnummer oder gleicher Lieferant innerhalb von drei Tagen.</p>
+  <form class="auswahl-form" hx-target="#main">
+    <div class="auswahl-leiste" hidden><span class="anzahl"></span>
+      <button type="button" class="btn-primary klein" hx-post="/api/doppel/zusammenfuehren" hx-include="closest form" hx-confirm="Ausgewählte Paare zusammenführen? Die ältere Buchung bleibt jeweils.">Zusammenführen</button>
+      <button type="button" class="btn-ghost klein" hx-post="/api/doppel/unterschiedlich" hx-include="closest form">Sind unterschiedlich</button></div>
+    <div class="scroll"><table class="tabelle kompakt"><thead><tr><th><input type="checkbox" class="alle" title="Alle auswählen"></th><th>Daten</th><th>Betrag</th><th>Lieferant / Nr.</th><th>Aktion</th></tr></thead><tbody>{doppel_zeilen}</tbody></table></div>
+  </form>"""
+
     return f"""
-<section>
-  <h2>Offene Punkte</h2>
-  <div class="row"><button hx-post="/api/matching" hx-target="#main">Matching erneut laufen lassen</button></div>
-
-  <h3>Beleg fehlt <span class="badge {"low" if op["ohne_beleg"] else "ok"}">{len(op["ohne_beleg"])}</span></h3>
-  <p class="muted">Kontobewegungen ohne zugeordnete Buchung. Das ist die wichtigste Arbeitsliste: Beleg suchen und importieren, dann matcht es automatisch.</p>
-  <div class="scroll"><table class="tabelle kompakt"><thead><tr><th>Datum</th><th>Betrag</th><th>Gegenkonto / Zweck</th><th>Aktion</th></tr></thead><tbody>{ohne_beleg or '<tr><td colspan=4 class="muted">Nichts offen.</td></tr>'}</tbody></table></div>
-
-  <h3>Manuell holen <span class="badge {"mid" if funde else "ok"}">{len(funde)}</span></h3>
-  <p class="muted">Mails, die nur einen Link zur Rechnung enthalten. Kein Login-Automatismus – Link öffnen, PDF laden, importieren.</p>
-  <div class="scroll"><table class="tabelle kompakt"><thead><tr><th>Datum</th><th>Absender</th><th>Betreff</th><th>Link</th><th></th></tr></thead><tbody>{mail or '<tr><td colspan=5 class="muted">Keine offenen Mail-Funde.</td></tr>'}</tbody></table></div>
-
-  <h3>Beleg ohne Kontobewegung <span class="badge {"mid" if op["ohne_konto"] else "ok"}">{len(op["ohne_konto"])}</span></h3>
-  <p class="muted">Bar bezahlt, privat verauslagt oder Kontoauszug fehlt noch.</p>
-  <div class="scroll"><table class="tabelle kompakt"><thead><tr><th>Datum</th><th>Brutto</th><th>Lieferant</th><th>Kategorie</th><th></th></tr></thead><tbody>{ohne_konto or '<tr><td colspan=5 class="muted">Alle Buchungen haben eine Kontobewegung.</td></tr>'}</tbody></table></div>
-
-  <h3>Mögliche Doppelbuchungen <span class="badge {"low" if op["doppel"] else "ok"}">{len(op["doppel"])}</span></h3>
-  <div class="scroll"><table class="tabelle kompakt"><thead><tr><th>Daten</th><th>Betrag</th><th>Lieferant / Nr.</th><th>Buchungen</th></tr></thead><tbody>{doppel or '<tr><td colspan=4 class="muted">Keine Auffälligkeiten.</td></tr>'}</tbody></table></div>
-</section>"""
+<section class="offen">
+  <div class="row zwischen"><p class="muted erkl">Vier Listen, die zusammen sagen, was noch fehlt.</p><button class="btn-secondary" hx-post="/api/matching" hx-target="#main">Matching erneut laufen lassen</button></div>
+  {_sektion("Beleg fehlt", len(op["ohne_beleg"]), "Alle Kontobewegungen haben einen Beleg.", ohne_beleg_html, "low")}
+  {_sektion("Rechnung manuell laden", len(funde), "Keine Mails mit Rechnungslink gefunden.", mail_html)}
+  {_sektion("Beleg ohne Kontobewegung", len(op["ohne_konto"]), "Jede Buchung hat eine Kontobewegung oder ist als privat verauslagt markiert.", ohne_konto_html)}
+  {_sektion("Mögliche Doppelbuchungen", len(op["doppel"]), "Keine Auffälligkeiten.", doppel_html, "low")}
+</section>
+<script>
+(function(){{
+  document.querySelectorAll('.auswahl-form').forEach(f => {{
+    const leiste = f.querySelector('.auswahl-leiste'), alle = f.querySelector('input.alle');
+    const boxen = () => [...f.querySelectorAll('tbody input[type=checkbox]')];
+    function zaehlen(){{ const n = boxen().filter(b => b.checked).length; leiste.hidden = !n; leiste.querySelector('.anzahl').textContent = n + ' ausgewählt ·'; }}
+    if (alle) alle.addEventListener('change', () => {{ boxen().forEach(b => b.checked = alle.checked); zaehlen(); }});
+    f.addEventListener('change', e => {{ if (e.target.type === 'checkbox' && e.target !== alle) zaehlen(); }});
+  }});
+}})();
+</script>"""
 
 
 # -------------------------------------------------------- Jahresabschluss
@@ -412,70 +461,77 @@ def jahresabschluss_view(jahr: int, fragen: list[dict], status: dict[str, dict],
             extra = '<input type="number" name="meta_tage" placeholder="Tage" style="width:6em">'
         elif sf == "privatanteil":
             extra = f'<input type="number" name="meta_privatanteil_prozent" value="{cfg["privatanteil_standard_prozent"]}" title="Privatanteil %" style="width:5em">%'
+        betrag = summen.get(fr["kategorie"], 0.0)
         bloecke.append(f"""
-<div class="frage {"erledigt" if st.get("erledigt") else ""}">
-  <div class="row zwischen">
-    <label class="check"><input type="checkbox" hx-post="/api/fragebogen/{jahr}/{fr["key"]}/toggle" hx-target="#main" {"checked" if st.get("erledigt") else ""}> <strong>{h(fr["frage"])}</strong></label>
-    <span class="muted">{h(kat.name) if kat else ""} · bisher {eur_fmt(summen.get(fr["kategorie"], 0.0))}</span>
-  </div>
-  <form class="row inline" hx-post="/api/buchung/neu" hx-target="#main">
+<details class="frage {"erledigt" if st.get("erledigt") else ""}">
+  <summary>
+    <label class="check" onclick="event.stopPropagation()"><input type="checkbox" hx-post="/api/fragebogen/{jahr}/{fr["key"]}/toggle" hx-target="#main" {"checked" if st.get("erledigt") else ""}></label>
+    <span class="fragetext">{h(fr["frage"])}</span>
+    <span class="rechts"><span class="muted klein">{h(kat.name) if kat else ""}</span> <span class="num {"muted" if betrag < 0.005 else ""}">{eur_fmt(betrag) if betrag >= 0.005 else "–"}</span> <span class="btn-ghost klein">Ausgabe erfassen</span></span>
+  </summary>
+  <form class="row inline erfassen" hx-post="/api/buchung/neu" hx-target="#main">
     <input type="hidden" name="kategorie_id" value="{kat.id if kat else ""}"><input type="hidden" name="richtung" value="ausgabe"><input type="hidden" name="zurueck" value="jahresabschluss:{jahr}">
     <input type="hidden" name="ust_satz" value="{0 if sf in ("fahrtkosten", "homeoffice") else cfg["regelsteuersatz"]}">
-    <input type="date" name="datum" value="{jahr}-12-31" required>
+    <input type="date" name="datum" placeholder="Zahlungsdatum" min="{jahr}-01-01" max="{jahr}-12-31" required title="Datum der Zahlung (Abflussprinzip)">
     <input name="lieferant" placeholder="Anbieter">
     <input name="beschreibung" placeholder="Beschreibung" size="24">
     <input type="number" step="0.01" name="betrag_brutto" placeholder="Brutto €" style="width:8em" {"" if sf in ("fahrtkosten", "homeoffice") else "required"}>
     {extra}
-    <button class="klein">direkt erfassen</button>
+    <button class="klein btn-secondary">Erfassen</button>
   </form>
-</div>""")
+</details>""")
     erledigt = sum(1 for f in fragen if status.get(f["key"], {}).get("erledigt"))
+    fertig = erledigt == len(fragen)
+    prozent = 100 * erledigt // max(1, len(fragen))
     return f"""
-<section>
-  <h2>Jahresabschluss {jahr} <span class="badge {"ok" if erledigt == len(fragen) else "mid"}">{erledigt}/{len(fragen)} abgehakt</span></h2>
-  <p class="muted">Geführter Fragebogen gegen die typischen vergessenen Posten. Pro Frage ein Feld zum Direkterfassen; Haken setzen, wenn geprüft.</p>
+<section class="jahresabschluss">
+  <div class="fortschritt-leiste">
+    <div class="row zwischen"><span><strong>{erledigt}/{len(fragen)}</strong> <span class="muted">Fragen geprüft</span></span>
+    <span class="badge {"ok" if fertig else ""}">{"vollständig" if fertig else "offen"}</span></div>
+    <div class="balken"><div class="fuellung" style="width:{prozent}%"></div></div>
+  </div>
+  <p class="muted erkl">Typische vergessene Posten. Haken setzen, wenn geprüft – auch wenn es nichts zu erfassen gab. Datum ist das Zahlungsdatum (Abflussprinzip).</p>
   {''.join(bloecke)}
-  <p class="muted">Danach: <a href="#" hx-get="/ui/export?jahr={jahr}" hx-target="#main">Exporte für Elster</a>.</p>
+  <div class="row aktionen"><a class="button btn-primary" href="#" hx-get="/ui/export?jahr={jahr}" hx-target="#main">Jahresabschluss abschließen → Exporte für Elster</a></div>
 </section>"""
 
 
 # --------------------------------------------------------------- Export
 
 def export_view(jahr: int, eur: list[dict], ustva_liste: list[dict], jahre: list[int]) -> str:
-    jahr_opts = "".join(f'<option value="{j}" {"selected" if j == jahr else ""}>{j}</option>' for j in jahre)
-    def _cls(z):
-        if z["bezeichnung"].startswith("Gewinn"):
-            return "plus" if z["betrag"] >= 0 else "minus"
-        if z["bezeichnung"].startswith("Summe Betriebseinnahmen") or z["zeile"] in (11, 14):
-            return "plus"
-        return "minus" if z["zeile"] or z["bezeichnung"].startswith("Summe") else ""
-    eur_html = "".join(f'<tr class="{"fett" if z["zeile"] is None else ""}"><td>{z["zeile"] or ""}</td><td>{h(z["bezeichnung"])}</td><td class="num {_cls(z)}">{eur_fmt(z["betrag"])}</td></tr>' for z in eur)
+    def zeile(z: dict) -> str:
+        summe = z["zeile"] is None
+        gewinn = z["bezeichnung"].startswith("Gewinn")
+        cls = ("summe " if summe else "") + ("fett " if gewinn else "")
+        wert_cls = ("plus" if z["betrag"] >= 0 else "minus") if gewinn else ""
+        name = f'<span class="muted">{z["zeile"]} ·</span> {h(z["bezeichnung"])}' if not summe else h(z["bezeichnung"])
+        return f'<tr class="{cls.strip()}"><td>{name}</td>{eur_zelle(z["betrag"], wert_cls)}</tr>'
+    eur_html = "".join(zeile(z) for z in eur)
     ustva_html = ""
     for u in ustva_liste:
         if not u["positionen"]:
             ustva_html += f'<div class="karte"><h4>Q{u["quartal"]}</h4><p class="muted">Keine §13b-Positionen.</p></div>'
             continue
-        kz = "".join(f'<tr><td>Kz {h(k)}</td><td class="num">{eur_fmt(v)}</td></tr>' for k, v in u["kennzahlen"].items())
+        kz = "".join(f'<tr><td>Kz {h(k)}</td>{eur_zelle(v)}</tr>' for k, v in u["kennzahlen"].items())
         pos = "".join(f'<li>{d(p["buchung"].datum)} {h(p["buchung"].lieferant)} netto {eur_fmt(p["buchung"].betrag_netto)} → Kz {p["kz_basis"]}/{p["kz_steuer"]}: {eur_fmt(p["steuer"])}</li>' for p in u["positionen"])
         ustva_html += f'<div class="karte"><h4>Q{u["quartal"]} · Zahllast {eur_fmt(u["zahllast"])}</h4><table class="tabelle kompakt">{kz}</table><ul class="klein">{pos}</ul></div>'
     return f"""
 <section>
-  <h2>Export <select hx-get="/ui/export" hx-target="#main" name="jahr" hx-trigger="change">{jahr_opts}</select></h2>
-  <p class="muted">Kein Elster-Direktversand – die Zahlen werden von Hand eingetragen. Nur bestätigte Buchungen fließen ein.</p>
+  <p class="muted erkl">Kein Elster-Direktversand – die Zahlen werden von Hand eingetragen. Nur bestätigte, nicht stornierte Buchungen fließen ein.</p>
 
   <h3>Anlage EÜR {jahr}</h3>
-  <table class="tabelle kompakt"><thead><tr><th>Zeile</th><th>Bezeichnung</th><th>Betrag</th></tr></thead><tbody>{eur_html}</tbody></table>
-  <div class="row"><a class="button" href="/export/eur.csv?jahr={jahr}">CSV</a> <a class="button" href="/export/eur.pdf?jahr={jahr}" target="_blank">PDF</a> <a class="button" href="/export/eur.json?jahr={jahr}">JSON</a></div>
+  <table class="tabelle kompakt eur-tabelle"><thead><tr><th>Zeile · Bezeichnung</th><th class="num">Betrag</th></tr></thead><tbody>{eur_html}</tbody></table>
+  <div class="row"><a class="button btn-secondary" href="/export/eur.csv?jahr={jahr}">CSV</a> <a class="button btn-secondary" href="/export/eur.pdf?jahr={jahr}" target="_blank">PDF</a> <a class="button btn-secondary" href="/export/eur.json?jahr={jahr}">JSON</a></div>
 
   <h3>UStVA je Quartal – nur §13b</h3>
-  <p class="muted">Als Kleinunternehmer entsteht eine UStVA-Pflicht nur für bezogene Leistungen mit Umkehr der Steuerschuld. Kz 46/47 (EU) bzw. 84/85 (Drittland). Einmalig fachlich prüfen lassen.</p>
+  <p class="muted erkl">Als Kleinunternehmer entsteht eine UStVA-Pflicht nur für bezogene Leistungen mit Umkehr der Steuerschuld. Kz 46/47 (EU) bzw. 84/85 (Drittland). Einmalig fachlich prüfen lassen.</p>
   <div class="karten">{ustva_html}</div>
 
   <h3>Weitere Ausgaben</h3>
   <div class="row">
-    <a class="button" href="/export/quartale.csv?jahr={jahr}&modus=brutto">Quartalstabelle CSV</a>
-    <a class="button" href="/export/quartale.pdf?jahr={jahr}&modus=brutto" target="_blank">Quartalstabelle PDF</a>
-    <a class="button" href="/export/belegjournal.csv?jahr={jahr}">Belegjournal CSV</a>
+    <a class="button btn-secondary" href="/export/quartale.csv?jahr={jahr}&modus=brutto">Quartalstabelle CSV</a>
+    <a class="button btn-secondary" href="/export/quartale.pdf?jahr={jahr}&modus=brutto" target="_blank">Quartalstabelle PDF</a>
+    <a class="button btn-secondary" href="/export/belegjournal.csv?jahr={jahr}">Belegjournal CSV</a>
   </div>
 </section>"""
 
@@ -492,7 +548,6 @@ def einstellungen_view(ollama_status: dict, mail: dict, hat_pw: bool, regeln: li
     imap, emlx = mail["imap"], mail["emlx"]
     return f"""
 <section>
-  <h2>Einstellungen</h2>
   {meldung_box(meldung, meldung_typ) if meldung else ''}
   <div class="karte"><h3>Dateien</h3>
     <p>Datenbank: <code>{h(pfade["db"])}</code><br>Belegordner: <code>{h(pfade["belege"])}</code><br>Regeln &amp; Grenzwerte: <code>{h(pfade["regeln"])}</code>
@@ -546,10 +601,10 @@ def auswertung_view(jahr: int, jahre: list[int]) -> str:
     return f"""
 <section id="auswertung" data-jahr="{jahr}">
   <div class="row zwischen">
-    <h2>Auswertung <select hx-get="/ui/auswertung" hx-target="#main" name="jahr" hx-trigger="change">{jahr_opts}</select></h2>
+    <p class="muted erkl" id="chart-erkl">Einnahmen und abzugsfähige Ausgaben je Quartal. Nur bestätigte Buchungen.</p>
     <div class="tabs" id="chart-formen">{knoepfe}</div>
   </div>
-  <p class="muted" id="chart-erkl">Einnahmen und abzugsfähige Ausgaben je Quartal. Nur bestätigte Buchungen; Grün = Plus, Gelb = neutral, Rot = Minus.</p>
+  <p class="muted" id="chart-erkl-alt" hidden>Einnahmen und abzugsfähige Ausgaben je Quartal. Nur bestätigte Buchungen; Grün = Plus, Gelb = neutral, Rot = Minus.</p>
   <div class="karte chart-karte">
     <div class="legende" id="chart-legende"></div>
     <div class="chart-wrap" id="chart-wrap"><svg id="chart" viewBox="0 0 960 380" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Diagramm"></svg><div class="tooltip" id="chart-tip" hidden></div></div>
@@ -593,11 +648,11 @@ def auswertung_view(jahr: int, jahre: list[int]) -> str:
       const gesamt = dick * reihen.length + 2 * (reihen.length - 1);
       reihen.forEach((r, j) => {{
         const x = cx - gesamt / 2 + j * (dick + 2), y1 = B - (B - T) * r.werte[i] / mx;
-        const s = saeule(x, B, y1, dick, r.farbe, 4); svg.appendChild(s);
-        const hit = el('rect', {{x: x - 3, y: T, width: dick + 6, height: B - T, fill: 'transparent'}});
-        hit.addEventListener('mousemove', ev => zeigeTip(ev, `<b>${{lab}}</b><br>${{reihen.map(q => `<i style="background:${{q.farbe}}"></i>${{q.name}}: ${{eur(q.werte[i])}}`).join('<br>')}}`));
-        hit.addEventListener('mouseleave', hideTip); svg.appendChild(hit);
+        svg.appendChild(saeule(x, B, y1, dick, r.farbe, 4));
       }});
+      const hit = el('rect', {{x: L + band * i, y: T, width: band, height: B - T, fill: 'transparent', 'data-i': i}});
+      hit.addEventListener('mousemove', ev => {{ const k = +ev.currentTarget.dataset.i; zeigeTip(ev, `<b>${{labels[k]}}</b><br>${{reihen.map(q => `<i style="background:${{q.farbe}}"></i>${{q.name}}: ${{eur(q.werte[k])}}`).join('<br>')}}`); }});
+      hit.addEventListener('mouseleave', hideTip); svg.appendChild(hit);
     }});
     legendeSetzen(reihen.map(r => ({{name: r.name, farbe: r.farbe, wert: eur(r.werte.reduce((a, b) => a + b, 0))}})));
     erkl.textContent = hinweis;
@@ -679,11 +734,21 @@ def auswertung_view(jahr: int, jahre: list[int]) -> str:
     erkl.textContent = 'Dieselben Zahlen als Tabelle – für Screenreader, Kopieren und Gegenrechnen.';
   }}
 
-  function leerHinweis(){{ svg.appendChild(el('text', {{x: 480, y: 190, class: 'label', 'text-anchor': 'middle'}}, 'Noch keine bestätigten Buchungen in ' + jahr + '.')); legendeSetzen([]); }}
+  function leerHinweis(){{
+    svg.hidden = true; tabelle.hidden = false; legendeSetzen([]);
+    tabelle.innerHTML = '<p class="leer-hinweis">Für ' + jahr + ' sind noch keine Buchungen erfasst. <a href="#" hx-get="/ui/import" hx-target="#main">→ Belege importieren</a></p>';
+    htmx.process(tabelle);
+  }}
+  function tabsDaempfen(d){{
+    const kats = d.kategorien.filter(k => k.richtung === 'ausgabe' && k.abzugsfaehig > 0).length;
+    const leer = {{saeulen: d.jahr_summe.einnahmen === 0 && d.jahr_summe.ausgaben === 0, monate: d.jahr_summe.einnahmen === 0 && d.jahr_summe.ausgaben === 0,
+                  linie: d.monate.every(z => z.gewinn_kumuliert === 0), balken: kats === 0, donut: kats === 0, tabelle: false}};
+    document.querySelectorAll('#chart-formen button').forEach(b => b.classList.toggle('leer', !!leer[b.dataset.form]));
+  }}
 
   let daten = null, form = 'saeulen';
   function render(){{
-    leer(); hideTip(); const ist = form === 'tabelle'; svg.hidden = ist; tabelle.hidden = !ist; if (!daten) return;
+    leer(); hideTip(); const ist = form === 'tabelle'; svg.hidden = ist; tabelle.hidden = !ist; if (!ist) tabelle.innerHTML = ''; if (!daten) return;
     const g = css('--gruen'), r = css('--rot'), y = css('--gelb'), d = daten;
     const ohne = d.jahr_summe.einnahmen === 0 && d.jahr_summe.ausgaben === 0;
     if (ohne && !ist) return leerHinweis();
@@ -696,6 +761,6 @@ def auswertung_view(jahr: int, jahre: list[int]) -> str:
   }}
   document.getElementById('chart-formen').addEventListener('click', e => {{ const b = e.target.closest('button'); if (!b) return; form = b.dataset.form; document.querySelectorAll('#chart-formen button').forEach(x => x.classList.toggle('aktiv', x === b)); render(); }});
   document.getElementById('theme-toggle').addEventListener('click', () => setTimeout(render, 30));
-  fetch('/api/auswertung?jahr=' + jahr).then(r => r.json()).then(d => {{ daten = d; render(); }});
+  fetch('/api/auswertung?jahr=' + jahr).then(r => r.json()).then(d => {{ daten = d; tabsDaempfen(d); render(); }});
 }})();
 </script>"""

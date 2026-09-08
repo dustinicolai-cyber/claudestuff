@@ -14,14 +14,31 @@ def _basis(cfg: dict) -> str:
     return cfg["ollama"]["url"].rstrip("/")
 
 
+_CACHE = {"zeit": 0.0, "wert": None}
+CACHE_SEKUNDEN = 30
+
+
 def verfuegbar(cfg: dict) -> dict:
-    """{'online': bool, 'modelle': [...]}"""
+    """{'online': bool, 'modelle': [...]} – gecacht, damit kein Seitenaufruf auf Ollama wartet."""
+    import time
+    jetzt = time.monotonic()
+    if _CACHE["wert"] is not None and jetzt - _CACHE["zeit"] < CACHE_SEKUNDEN:
+        return _CACHE["wert"]
     try:
-        r = httpx.get(_basis(cfg) + "/api/tags", timeout=2.0)
+        r = httpx.get(_basis(cfg) + "/api/tags", timeout=0.5)
         r.raise_for_status()
-        return {"online": True, "modelle": [m.get("name", "") for m in r.json().get("models", [])]}
+        wert = {"online": True, "modelle": [m.get("name", "") for m in r.json().get("models", [])]}
     except Exception:
-        return {"online": False, "modelle": []}
+        wert = {"online": False, "modelle": []}
+    _CACHE.update(zeit=jetzt, wert=wert)
+    return wert
+
+
+def status(cfg: dict, ki_gewollt: bool) -> str:
+    """aktiv | aus (bewusst deaktiviert) | nicht_erreichbar"""
+    if not ki_gewollt:
+        return "aus"
+    return "aktiv" if verfuegbar(cfg)["online"] else "nicht_erreichbar"
 
 
 def chat_json(cfg: dict, modell: str, system: str, prompt: str, bilder: list[bytes] | None = None) -> dict | None:
