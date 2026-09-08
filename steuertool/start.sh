@@ -25,5 +25,8 @@ export STEUERTOOL_HOME="${STEUERTOOL_HOME:-$HOME/Steuertool}"
 echo "→ Daten liegen in $STEUERTOOL_HOME"
 echo "→ Steuerfuchs läuft auf http://127.0.0.1:$PORT  (Beenden mit Ctrl+C)"
 
-( sleep 1.5; if command -v open >/dev/null; then open "http://127.0.0.1:$PORT"; elif command -v xdg-open >/dev/null; then xdg-open "http://127.0.0.1:$PORT"; fi ) &
+if [ -z "${STEUERFUCHS_KEIN_BROWSER:-}" ]; then
+  ( for i in $(seq 1 240); do sleep 0.5; curl -s --max-time 1 "http://127.0.0.1:$PORT/gesund" >/dev/null 2>&1 && break; done
+    if command -v open >/dev/null; then open "http://127.0.0.1:$PORT"; elif command -v xdg-open >/dev/null; then xdg-open "http://127.0.0.1:$PORT"; fi ) &
+fi
 exec python -m uvicorn app.main:app --host 127.0.0.1 --port "$PORT" --log-level warning

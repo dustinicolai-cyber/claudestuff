@@ -436,7 +436,8 @@ def einstellungen_view(ollama_status: dict, mail: dict, hat_pw: bool, regeln: li
   <div class="karte"><h3>Dateien</h3>
     <p>Datenbank: <code>{h(pfade["db"])}</code><br>Belegordner: <code>{h(pfade["belege"])}</code><br>Regeln &amp; Grenzwerte: <code>{h(pfade["regeln"])}</code>
     <button class="klein" hx-post="/api/config/reload" hx-target="#main">neu laden</button></p>
-    <p class="muted">Sichern heißt: diese drei Dinge kopieren. Kein Cloud-Sync durch das Tool.</p></div>
+    <p class="muted">Sichern heißt: diese drei Dinge kopieren. Kein Cloud-Sync durch das Tool.</p>
+    <div class="row"><button class="gefahr" hx-post="/api/beenden" hx-target="#main" hx-confirm="Steuerfuchs beenden? Der Server wird gestoppt; alle Daten sind gespeichert.">Steuerfuchs beenden</button></div></div>
 
   <div class="karte"><h3>Lokale KI (Ollama)</h3>
     <p>{"<span class='badge ok'>erreichbar</span> Modelle: " + (", ".join(h(m) for m in ollama_status["modelle"]) or "keine") if ollama_status["online"] else "<span class='badge low'>nicht erreichbar</span> – Stufe 3 (OCR) und KI-Klassifizierung sind aus; E-Rechnung, PDF-Text und Regeln funktionieren trotzdem."}</p>

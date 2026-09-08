@@ -588,6 +588,14 @@ def api_regel_loeschen(regel_id: int, s: Session = Depends(get_session)) -> HTML
     return _einstellungen(s, "Regel gelöscht.")
 
 
+@app.post("/api/beenden", response_class=HTMLResponse)
+def api_beenden() -> HTMLResponse:
+    """Server sauber beenden (für den Dock-Start ohne Terminal)."""
+    import os, threading
+    threading.Timer(0.6, lambda: os._exit(0)).start()
+    return _html('<section><h2>Steuerfuchs ist beendet.</h2><p class="muted">Du kannst dieses Fenster schließen. Zum Neustart die App im Dock anklicken.</p></section>')
+
+
 @app.get("/gesund", response_class=PlainTextResponse)
 def gesund() -> str:
     return "ok"

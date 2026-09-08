@@ -5,7 +5,12 @@ in `~/Steuertool/` (SQLite + Belegordner). Keine Cloud, keine Telemetrie.
 
 ## Start
 
-Im Finder **„Steuerfuchs starten.command“** doppelklicken. Beim ersten Mal blockiert macOS
+**Steuerfuchs.app** in den Ordner-Inhalt schauen, ins Dock ziehen, anklicken. Die App startet
+den Server im Hintergrund und öffnet den Browser; läuft er schon, öffnet sie nur den Browser.
+Beenden über *Einstellungen → Steuerfuchs beenden*. Die App muss im Ordner `steuerfuchs`
+liegen bleiben (sie startet das Programm daneben).
+
+Alternativ im Finder **„Steuerfuchs starten.command“** doppelklicken (läuft sichtbar im Terminal). Beim ersten Mal blockiert macOS
 eventuell („kann nicht geöffnet werden, da es von einem nicht verifizierten Entwickler stammt“):
 dann Rechtsklick → **Öffnen** → nochmals **Öffnen**. Ab dann reicht der Doppelklick.
 
