@@ -4,7 +4,14 @@
 PROJEKT="$(cd "$(dirname "$0")/../../.." && pwd)"
 PORT="${PORT:-8347}"
 URL="http://127.0.0.1:$PORT"
-if curl -s --max-time 1 "$URL/gesund" >/dev/null 2>&1; then open "$URL"; exit 0; fi
+LOKAL="$(cat "$PROJEKT/VERSION" 2>/dev/null || echo dev)"
+if curl -s --max-time 1 "$URL/gesund" >/dev/null 2>&1; then
+  LAUFEND="$(curl -s --max-time 1 "$URL/api/version" | sed -E 's/.*"version": *"([^"]*)".*/\1/')"
+  if [ "$LAUFEND" = "$LOKAL" ]; then open "$URL"; exit 0; fi
+  # Andere Version läuft (z. B. aus einem alten Ordner): sauber beenden und neu starten
+  curl -s -X POST "$URL/api/beenden" >/dev/null 2>&1
+  for i in $(seq 1 20); do sleep 0.3; curl -s --max-time 1 "$URL/gesund" >/dev/null 2>&1 || break; done
+fi
 export STEUERTOOL_HOME="${STEUERTOOL_HOME:-$HOME/Steuertool}"
 mkdir -p "$STEUERTOOL_HOME"
 cd "$PROJEKT" || exit 1
@@ -12,7 +19,14 @@ chmod +x start.sh 2>/dev/null
 STEUERFUCHS_KEIN_BROWSER=1 nohup ./start.sh >> "$STEUERTOOL_HOME/server.log" 2>&1 &
 for i in $(seq 1 240); do
   sleep 0.5
-  if curl -s --max-time 1 "$URL/gesund" >/dev/null 2>&1; then open "$URL"; exit 0; fi
+  LOKAL="$(cat "$PROJEKT/VERSION" 2>/dev/null || echo dev)"
+if curl -s --max-time 1 "$URL/gesund" >/dev/null 2>&1; then
+  LAUFEND="$(curl -s --max-time 1 "$URL/api/version" | sed -E 's/.*"version": *"([^"]*)".*/\1/')"
+  if [ "$LAUFEND" = "$LOKAL" ]; then open "$URL"; exit 0; fi
+  # Andere Version läuft (z. B. aus einem alten Ordner): sauber beenden und neu starten
+  curl -s -X POST "$URL/api/beenden" >/dev/null 2>&1
+  for i in $(seq 1 20); do sleep 0.3; curl -s --max-time 1 "$URL/gesund" >/dev/null 2>&1 || break; done
+fi
 done
 osascript -e 'display alert "Steuerfuchs konnte nicht starten" message "Details stehen in ~/Steuertool/server.log. Ist Python 3 installiert?"' 2>/dev/null
 exit 1

@@ -6,7 +6,7 @@
 <title>Steuerfuchs</title>
 <link rel="icon" href="/static/icon-256.png" type="image/png">
 <script>(function(){try{var t=localStorage.getItem('theme');document.documentElement.dataset.theme=t||'dark';}catch(e){document.documentElement.dataset.theme='dark';}})();</script>
-<script src="/static/htmx.min.js"></script>
+<script src="/static/htmx.min.js?v=__VERSION__"></script>
 <style>
 /* Design-Tokens. Dark ist Standard, Light über den Toggle. */
 :root,:root[data-theme="dark"]{
@@ -243,7 +243,7 @@ footer{color:var(--muted);font-size:.78em;padding:1.4rem 0 0}
   </nav>
   <div class="unten">
     <button id="theme-toggle" type="button" title="Hell/Dunkel umschalten">🌙 <span class="txt">Dark</span></button>
-    <div class="user"><div class="avatar">🦊</div><div class="user-txt"><b>Steuerfuchs</b><span class="rolle">§19 · EÜR</span></div></div>
+    <div class="user"><div class="avatar">🦊</div><div class="user-txt"><b>Steuerfuchs</b><span class="rolle">§19 · EÜR</span> <span class="muted klein" title="Build">__VERSION__</span></div></div>
   </div>
 </aside>
 <header class="top">

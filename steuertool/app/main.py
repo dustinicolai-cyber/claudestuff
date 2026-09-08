@@ -149,9 +149,13 @@ def _bestaetigen(s: Session, b: Buchung, vorher_kat: Optional[int], vorher_weg: 
 
 # ------------------------------------------------------------ Seiten
 
+KEIN_CACHE = {"Cache-Control": "no-store, must-revalidate", "Pragma": "no-cache"}
+
+
 @app.get("/", response_class=HTMLResponse)
 def index() -> HTMLResponse:
-    return HTMLResponse((STATIC / "index.html").read_text(encoding="utf-8"))
+    html = (STATIC / "index.html").read_text(encoding="utf-8").replace("__VERSION__", config.version())
+    return HTMLResponse(html, headers=KEIN_CACHE)
 
 
 @app.get("/static/{name}")
@@ -159,7 +163,12 @@ def static(name: str):
     p = STATIC / Path(name).name
     if not p.exists():
         raise HTTPException(404)
-    return FileResponse(p)
+    return FileResponse(p, headers=KEIN_CACHE)
+
+
+@app.get("/api/version")
+def api_version() -> JSONResponse:
+    return JSONResponse({"version": config.version()})
 
 
 def _nav_counts(s: Session, jahr: int) -> dict:
@@ -741,7 +750,7 @@ def _einstellungen(s: Session, meldung: str = "", typ: str = "ok-box") -> HTMLRe
     e = mail.einstellungen()
     regeln_ = s.exec(select(Regel).order_by(Regel.prioritaet, Regel.muster)).all()
     pfade = {"db": str(config.db_path()), "belege": str(config.beleg_dir()), "regeln": str(config.regeln_path()),
-             "vision": cfg["ollama"]["vision_modell"], "text": cfg["ollama"]["text_modell"]}
+             "vision": cfg["ollama"]["vision_modell"], "text": cfg["ollama"]["text_modell"], "version": config.version()}
     hat_pw = bool(e["imap"].get("user") and mail.passwort_lesen(e["imap"]["user"]))
     return _html(ui.einstellungen_view(ollama.verfuegbar(cfg), e, hat_pw, regeln_, _kats(s), pfade, meldung, typ))
 

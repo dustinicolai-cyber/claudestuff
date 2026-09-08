@@ -550,6 +550,7 @@ def einstellungen_view(ollama_status: dict, mail: dict, hat_pw: bool, regeln: li
 <section>
   {meldung_box(meldung, meldung_typ) if meldung else ''}
   <div class="karte"><h3>Dateien</h3>
+    <p class="muted klein">Version <code>{h(pfade.get("version", "dev"))}</code> · Programmordner <code>{h(str(__import__("app.config", fromlist=["APP_DIR"]).APP_DIR.parent))}</code></p>
     <p>Datenbank: <code>{h(pfade["db"])}</code><br>Belegordner: <code>{h(pfade["belege"])}</code><br>Regeln &amp; Grenzwerte: <code>{h(pfade["regeln"])}</code>
     <button class="klein" hx-post="/api/config/reload" hx-target="#main">neu laden</button></p>
     <p class="muted">Sichern heißt: diese drei Dinge kopieren. Kein Cloud-Sync durch das Tool.</p>

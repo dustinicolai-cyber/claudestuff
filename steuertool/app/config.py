@@ -16,6 +16,15 @@ APP_DIR = Path(__file__).resolve().parent
 DEFAULT_REGELN = APP_DIR / "steuerregeln.json"
 
 
+def version() -> str:
+    """Build-Kennung aus der Datei VERSION (wird beim Packen geschrieben), sonst „dev“."""
+    p = APP_DIR.parent / "VERSION"
+    try:
+        return p.read_text(encoding="utf-8").strip() or "dev"
+    except OSError:
+        return "dev"
+
+
 def home_dir() -> Path:
     d = Path(os.environ.get("STEUERTOOL_HOME", Path.home() / "Steuertool"))
     d.mkdir(parents=True, exist_ok=True)
