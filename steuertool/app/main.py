@@ -559,6 +559,14 @@ def _buchung_aus_konto(s: Session, k: Kontobewegung) -> Buchung:
     return b
 
 
+ABGLEICH_FILTER = ("offen", "zugeordnet", "ignoriert", "alle")
+
+
+def _abgleich_filter(wert) -> str:
+    """Reiter, der nach einer Aktion wieder angezeigt wird – unbekannte Werte fallen auf „offen“ zurück."""
+    return wert if wert in ABGLEICH_FILTER else "offen"
+
+
 @app.get("/ui/abgleich", response_class=HTMLResponse)
 def ui_abgleich(jahr: Optional[int] = None, filter: str = "offen", s: Session = Depends(get_session)) -> HTMLResponse:
     jahr = jahr or _standardjahr(s)
@@ -580,6 +588,7 @@ async def api_abgleich_aktion(request: Request, s: Session = Depends(get_session
     aktion = form.get("aktion", "")
     ids = [int(x) for x in form.getlist("ids") if str(x).isdigit()]
     jahr = int(form["jahr"]) if str(form.get("jahr", "")).isdigit() else None
+    filter = _abgleich_filter(form.get("filter"))
     n = 0
     for kid in ids:
         k = s.get(Kontobewegung, kid)
@@ -603,11 +612,12 @@ async def api_abgleich_aktion(request: Request, s: Session = Depends(get_session
         matching.ignorregeln_anwenden(s)
     text = {"anlegen": f"{n} Buchungsvorschläge angelegt – jetzt unter „Prüfen“.", "ignorieren": f"{n} ignoriert.",
             "freigeben": f"{n} wieder freigegeben.", "loesen": f"{n} Zuordnungen gelöst.", "regel": f"{n} ignoriert und als Regel gemerkt."}.get(aktion, "Nichts geändert.")
-    return _html(ui.meldung_box(text) + ui_abgleich(jahr, "offen", s).body.decode())
+    return _html(ui.meldung_box(text) + ui_abgleich(jahr, filter, s).body.decode())
 
 
 @app.post("/api/abgleich/{konto_id}/zuordnen", response_class=HTMLResponse)
-def api_abgleich_zuordnen(konto_id: int, buchung_id: int = Form(...), jahr: Optional[int] = Form(None), s: Session = Depends(get_session)) -> HTMLResponse:
+def api_abgleich_zuordnen(konto_id: int, buchung_id: int = Form(...), jahr: Optional[int] = Form(None), filter: str = Form("offen"),
+                          s: Session = Depends(get_session)) -> HTMLResponse:
     k = s.get(Kontobewegung, konto_id)
     b = s.get(Buchung, buchung_id)
     if k and b:
@@ -616,11 +626,11 @@ def api_abgleich_zuordnen(konto_id: int, buchung_id: int = Form(...), jahr: Opti
             s.add(b)
         s.add(k)
         s.commit()
-    return ui_abgleich(jahr, "offen", s)
+    return ui_abgleich(jahr, _abgleich_filter(filter), s)
 
 
 @app.post("/api/abgleich/{konto_id}/beleg", response_class=HTMLResponse)
-async def api_abgleich_beleg(konto_id: int, datei: UploadFile = File(...), jahr: Optional[int] = Form(None),
+async def api_abgleich_beleg(konto_id: int, datei: UploadFile = File(...), jahr: Optional[int] = Form(None), filter: str = Form("offen"),
                              s: Session = Depends(get_session)) -> HTMLResponse:
     """Rechnung zu einer Kontobewegung hochladen: importieren und direkt zuordnen."""
     k = s.get(Kontobewegung, konto_id)
@@ -642,26 +652,26 @@ async def api_abgleich_beleg(konto_id: int, datei: UploadFile = File(...), jahr:
                 hinweis = f" Achtung: Rechnungsbetrag {export.eur_fmt(b.betrag_brutto)} weicht von der Kontobewegung {export.eur_fmt(abs(k.betrag))} ab – bitte unter „Prüfen“ kontrollieren."
             s.commit()
     meldung = f"{datei.filename}: {erg.status}, {erg.meldung}.{hinweis}"
-    return _html(ui.meldung_box(meldung, "warn-box" if hinweis or erg.status != "neu" else "ok-box") + ui_abgleich(jahr or k.datum.year, "offen", s).body.decode())
+    return _html(ui.meldung_box(meldung, "warn-box" if hinweis or erg.status != "neu" else "ok-box") + ui_abgleich(jahr or k.datum.year, _abgleich_filter(filter), s).body.decode())
 
 
 @app.post("/api/ignorregel/neu", response_class=HTMLResponse)
-def api_ignorregel_neu(muster: str = Form(...), jahr: Optional[int] = Form(None), s: Session = Depends(get_session)) -> HTMLResponse:
+def api_ignorregel_neu(muster: str = Form(...), jahr: Optional[int] = Form(None), filter: str = Form("offen"), s: Session = Depends(get_session)) -> HTMLResponse:
     m = muster.strip().lower()
     if m and not s.exec(select(IgnorRegel).where(IgnorRegel.muster == m)).first():
         s.add(IgnorRegel(muster=m))
         s.commit()
     n = matching.ignorregeln_anwenden(s)
-    return _html(ui.meldung_box(f"Regel „{m}“ angelegt, {n} Kontobewegungen ignoriert.") + ui_abgleich(jahr, "offen", s).body.decode())
+    return _html(ui.meldung_box(f"Regel „{m}“ angelegt, {n} Kontobewegungen ignoriert.") + ui_abgleich(jahr, _abgleich_filter(filter), s).body.decode())
 
 
 @app.post("/api/ignorregel/{regel_id}/loeschen", response_class=HTMLResponse)
-def api_ignorregel_loeschen(regel_id: int, jahr: Optional[int] = Form(None), s: Session = Depends(get_session)) -> HTMLResponse:
+def api_ignorregel_loeschen(regel_id: int, jahr: Optional[int] = Form(None), filter: str = Form("offen"), s: Session = Depends(get_session)) -> HTMLResponse:
     r = s.get(IgnorRegel, regel_id)
     if r:
         s.delete(r)
         s.commit()
-    return ui_abgleich(jahr, "offen", s)
+    return ui_abgleich(jahr, _abgleich_filter(filter), s)
 
 
 # -------------------------------------------------------- Offene Punkte

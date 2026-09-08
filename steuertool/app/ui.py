@@ -872,9 +872,9 @@ def abgleich_view(zeilen: list[dict], regeln: list[IgnorRegel], jahr: int, filte
             return f'<button class="klein btn-ghost" {vals("freigeben")} title="Wieder in die offene Liste aufnehmen">freigeben</button>'
         if st == "rueckfrage":
             opts = "".join(f'<option value="{b.id}">{d(b.datum)} · {h(b.lieferant)} · {eur_fmt(b.betrag_brutto)}{" · bestätigt" if b.status == "bestaetigt" else ""}</option>' for b in z["kandidaten"])
-            return (f'<form class="inline" hx-post="/api/abgleich/{k.id}/zuordnen" hx-target="#main"><input type="hidden" name="jahr" value="{jahr}"><select name="buchung_id">{opts}</select> <button class="klein btn-secondary">zuordnen</button></form> '
+            return (f'<form class="inline" hx-post="/api/abgleich/{k.id}/zuordnen" hx-target="#main"><input type="hidden" name="jahr" value="{jahr}"><input type="hidden" name="filter" value="{filter}"><select name="buchung_id">{opts}</select> <button class="klein btn-secondary">zuordnen</button></form> '
                     f'<button class="klein btn-ghost" {vals("ignorieren")}>ignorieren</button>')
-        return (f'<form class="inline beleg-upload" hx-post="/api/abgleich/{k.id}/beleg" hx-encoding="multipart/form-data" hx-target="#main" hx-trigger="change"><input type="hidden" name="jahr" value="{jahr}">'
+        return (f'<form class="inline beleg-upload" hx-post="/api/abgleich/{k.id}/beleg" hx-encoding="multipart/form-data" hx-target="#main" hx-trigger="change"><input type="hidden" name="jahr" value="{jahr}"><input type="hidden" name="filter" value="{filter}">'
                 f'<label class="klein btn-secondary button" title="Rechnung zu dieser Buchung hochladen">Beleg hochladen<input type="file" name="datei" accept=".pdf,.xml,.png,.jpg,.jpeg" hidden></label></form> '
                 f'<button class="klein btn-secondary" {vals("anlegen")} title="Buchungsvorschlag ohne Beleg anlegen">ohne Beleg buchen</button> '
                 f'<button class="klein btn-ghost" {vals("ignorieren")}>ignorieren</button> '
@@ -897,7 +897,7 @@ def abgleich_view(zeilen: list[dict], regeln: list[IgnorRegel], jahr: int, filte
         + f'</td><td>{status_zelle(z)}</td><td class="aktionen-zelle"><div class="aktionen-inline">{aktionen(z)}</div></td></tr>'
         for z in zeilen)
     regeln_html = "".join(f'<li><code>{h(r.muster)}</code> <span class="muted klein">{r.treffer} Treffer</span> '
-                          f'<button class="klein btn-ghost" hx-post="/api/ignorregel/{r.id}/loeschen" hx-vals=\'{{"jahr":"{jahr}"}}\' hx-target="#main">entfernen</button></li>' for r in regeln)
+                          f'<button class="klein btn-ghost" hx-post="/api/ignorregel/{r.id}/loeschen" hx-vals=\'{{"jahr":"{jahr}","filter":"{filter}"}}\' hx-target="#main">entfernen</button></li>' for r in regeln)
     return f"""
 <section class="abgleich">
   <p class="muted erkl">Jede Kontobewegung wird mit den importierten Rechnungen verglichen (Betrag exakt, Datum ±5 Tage). Was nicht sicher ist, wird hier nachgefragt. Privates ignorierst du einmal – oder dauerhaft per Regel.</p>
@@ -916,8 +916,8 @@ def abgleich_view(zeilen: list[dict], regeln: list[IgnorRegel], jahr: int, filte
     <div class="kpi"><div class="l">Ignoriert</div><div class="w">{zaehl["ignoriert"]}</div></div>
     <div class="kpi {"rot" if doppel else ""}"><div class="l">Evtl. doppelt</div><div class="w">{doppel}</div></div>
   </div>
-  <form class="auswahl-form" hx-post="/api/abgleich/aktion" hx-target="#main">
-    <input type="hidden" name="jahr" value="{jahr}">
+  <form class="auswahl-form" hx-post="/api/abgleich/aktion" hx-target="#main" data-ansicht="abgleich">
+    <input type="hidden" name="jahr" value="{jahr}"><input type="hidden" name="filter" value="{filter}">
     <div class="klebe-leiste">
     <div class="row zwischen"><div class="tabs reiter abgleich-tabs">{tabs}</div>
       <span class="row" style="margin:0;gap:.8rem"><input type="search" class="listen-suche" placeholder="in dieser Liste suchen …" aria-label="In der Liste suchen">
@@ -933,7 +933,7 @@ def abgleich_view(zeilen: list[dict], regeln: list[IgnorRegel], jahr: int, filte
   </form>
   <details class="karte" {"open" if regeln else ""}><summary><strong>Ignorier-Regeln</strong> <span class="muted">({len(regeln)}) – Bewegungen, die nie betrieblich sind</span></summary>
     <ul class="klein regeln-liste">{regeln_html or '<li class="muted">Noch keine Regeln. „immer ignorieren“ an einer Zeile legt eine an.</li>'}</ul>
-    <form class="row inline" hx-post="/api/ignorregel/neu" hx-target="#main"><input type="hidden" name="jahr" value="{jahr}">
+    <form class="row inline" hx-post="/api/ignorregel/neu" hx-target="#main"><input type="hidden" name="jahr" value="{jahr}"><input type="hidden" name="filter" value="{filter}">
       <input name="muster" placeholder="z. B. netflix oder Miete" required> <button class="klein btn-secondary">Regel anlegen</button></form>
   </details>
 </section>
@@ -953,16 +953,26 @@ def abgleich_view(zeilen: list[dict], regeln: list[IgnorRegel], jahr: int, filte
       zeilen().forEach(tr => {{ const ok = !q || tr.textContent.toLowerCase().includes(q); tr.hidden = !ok; if (ok) n++; }});
       zaehler.textContent = q ? n + ' von ' + zeilen().length : '';
     }}
-    if (suche) suche.addEventListener('input', filtern);
+    // Zustand (Suche, Sortierung) überlebt jede Aktion: die Liste wird vom Server neu aufgebaut, danach hier wiederhergestellt
+    const speicher = {{ lesen(){{ try {{ return JSON.parse(sessionStorage.getItem('abgleich-zustand') || '{{}}'); }} catch (e) {{ return {{}}; }} }},
+                       schreiben(z){{ try {{ sessionStorage.setItem('abgleich-zustand', JSON.stringify(z)); }} catch (e) {{}} }} }};
+    const zustand = speicher.lesen();
+    if (suche) suche.addEventListener('input', () => {{ filtern(); zustand.suche = suche.value; speicher.schreiben(zustand); }});
     // Sortieren per Klick auf Datum/Betrag/Abgleich (Status: Rückfrage → Dublette → kein Beleg → zugeordnet → ignoriert, gleiche Stufe nach Datum absteigend)
     let sortKey = null, sortDir = -1;
     const vgl = (a, b, key) => {{ const va = a.dataset[key], vb = b.dataset[key]; return (key === 'betrag' || key === 'status') ? (+va - +vb) : (va < vb ? -1 : va > vb ? 1 : 0); }};
-    f.querySelectorAll('th.sortierbar').forEach(th => th.addEventListener('click', () => {{
-      const key = th.dataset.sort; sortDir = (sortKey === key) ? -sortDir : (key === 'datum' ? -1 : 1); sortKey = key;
+    function sortieren(key, dir){{
+      sortKey = key; sortDir = dir;
       const rows = zeilen(); rows.sort((a, b) => {{ const r = vgl(a, b, key) * sortDir; return r || (key === 'status' ? -vgl(a, b, 'datum') : 0); }});
       rows.forEach(r => tbody.appendChild(r));
-      f.querySelectorAll('th.sortierbar').forEach(t => {{ t.classList.toggle('aktiv', t === th); t.querySelector('.pfeil').textContent = t === th ? (sortDir > 0 ? '▲' : '▼') : ''; }});
+      f.querySelectorAll('th.sortierbar').forEach(t => {{ const an = t.dataset.sort === key; t.classList.toggle('aktiv', an); t.querySelector('.pfeil').textContent = an ? (sortDir > 0 ? '▲' : '▼') : ''; }});
+    }}
+    f.querySelectorAll('th.sortierbar').forEach(th => th.addEventListener('click', () => {{
+      const key = th.dataset.sort; sortieren(key, (sortKey === key) ? -sortDir : (key === 'datum' ? -1 : 1));
+      zustand.sort = key; zustand.dir = sortDir; speicher.schreiben(zustand);
     }}));
+    if (suche && zustand.suche) {{ suche.value = zustand.suche; filtern(); }}
+    if (zustand.sort && f.querySelector('th[data-sort="' + zustand.sort + '"]')) sortieren(zustand.sort, zustand.dir || 1);
   }});
 }})();
 </script>"""

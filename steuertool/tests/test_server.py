@@ -233,8 +233,10 @@ def test_abgleich_rueckfrage_ignorregel_doppelt():
             assert k.ignoriert
             einnahme = s.exec(select(Kontobewegung).where(Kontobewegung.betrag == 1500.0)).first()
         # Buchung aus Einnahme anlegen → Vorschlag unter Prüfen (Einnahmen)
-        r = c.post("/api/abgleich/aktion", data={"aktion": "anlegen", "ids": [str(einnahme.id)], "jahr": "2025"})
+        r = c.post("/api/abgleich/aktion", data={"aktion": "anlegen", "ids": [str(einnahme.id)], "jahr": "2025", "filter": "alle"})
         assert "1 Buchungsvorschläge" in r.text
+        assert 'class="aktiv" hx-get="/ui/abgleich?filter=alle"' in r.text  # Reiter bleibt erhalten
+        assert 'name="filter" value="alle"' in r.text
         with Session(engine()) as s:
             b = s.exec(select(Buchung).where(Buchung.richtung == "einnahme")).first()
             assert b and b.status == "vorschlag" and b.betrag_brutto == 1500.0
