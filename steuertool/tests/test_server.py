@@ -380,7 +380,7 @@ def test_schnell_korrektur_in_tabelle():
         c.post(f"/api/buchung/{b.id}/bestaetigen", data={"datum": "2025-02-05", "richtung": "ausgabe", "lieferant": "Adobe", "betrag_netto": "50", "ust_satz": "19",
                                                         "ust_betrag": "9.5", "betrag_brutto": "59.5", "kategorie_id": str(kat.id), "waehrung": "EUR", "betrag_fremd": "0"})
         t = c.get("/ui/pruefen?jahr=2025").text
-        assert 'class="tabelle kompakt bz-tabelle"' in t and f'hx-post="/api/buchung/{b.id}/schnell"' in t and 'list="lieferanten"' in t and '<datalist id="lieferanten">' in t
+        assert 'class="tabelle kompakt bz-tabelle"' in t and f'hx-post="/api/buchung/{b.id}/schnell"' in t and 'class="kombi"' in t and 'data-liste="lieferanten"' in t and '<datalist id="lieferanten">' in t and 'hx-disinherit="*"' in t
         r = c.post(f"/api/buchung/{b.id}/schnell", data={"datum": "2025-02-07", "lieferant": "Adobe Inc.", "beschreibung": "Creative Cloud", "kategorie_id": str(kat.id), "betrag_brutto": "119.00"})
         assert r.status_code == 200 and 'class="bz gespeichert"' in r.text and 'value="Adobe Inc."' in r.text
         with Session(engine()) as s:

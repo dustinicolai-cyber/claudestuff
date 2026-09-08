@@ -242,6 +242,15 @@ details.frage[open] summary .btn-ghost{text-decoration:underline}
 .bz td.num input{text-align:right;font-variant-numeric:tabular-nums}
 .bz.gespeichert td{animation:gespeichert 1.4s ease-out} @keyframes gespeichert{0%{background:var(--gruen-hell)}100%{background:transparent}}
 .bz .badge{white-space:nowrap}
+.kombi{position:relative;display:flex;align-items:center;width:100%} .kombi input{flex:1;min-width:0;padding-right:2rem}
+.kombi-knopf,button.kombi-knopf{position:absolute;right:.3rem;top:50%;transform:translateY(-50%);background:transparent;border:0;box-shadow:none;color:var(--muted);cursor:pointer;padding:.15rem .4rem;font-size:.85em;line-height:1;filter:none}
+.kombi-knopf:hover,button.kombi-knopf:hover{color:var(--orange);background:transparent;filter:none;transform:translateY(-50%)}
+.kombi-liste{position:absolute;top:100%;left:0;right:0;z-index:30;max-height:16rem;overflow:auto;margin:.25rem 0 0;padding:.25rem;background:var(--card);border:1px solid var(--line);border-radius:10px;box-shadow:0 12px 30px rgba(0,0,0,.35);text-align:left;font-weight:400}
+.kombi-liste [role=option]{display:block;padding:.4rem .6rem;border-radius:7px;cursor:pointer;font-size:.9em;color:var(--fg);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.kombi-liste [role=option]:hover,.kombi-liste [role=option].aktiv{background:var(--orange-hell)} .kombi-liste .leer{display:block;padding:.4rem .6rem;color:var(--muted);font-size:.9em}
+.bz .kombi input{padding-right:1.6rem}
+#fehler-toast{position:fixed;left:50%;bottom:1.2rem;transform:translateX(-50%);z-index:100;max-width:min(90vw,720px);background:var(--rot);color:#fff;padding:.7rem 1rem;border-radius:12px;box-shadow:0 12px 30px rgba(0,0,0,.4);font-size:.9em;display:flex;gap:.8rem;align-items:flex-start}
+#fehler-toast button{background:rgba(255,255,255,.2);color:#fff;border:0;box-shadow:none;padding:.2rem .6rem;filter:none}
 .ust-hinweis{margin:.2rem 0 1rem} .ust-hinweis a{margin-left:.3rem}
 .stapel{display:flex;flex-direction:column;gap:.5rem;margin:.6rem 0 0} .stapel label.check{align-items:flex-start;gap:.6rem} .stapel label.check input{margin-top:.25em}
 a.btn-ghost svg,.aktionen-zelle a svg{width:1em;height:1em;vertical-align:-.12em;margin-right:.3em;stroke:currentColor;fill:none;stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round}
@@ -374,6 +383,50 @@ footer{color:var(--muted);font-size:.78em;padding:1.4rem 0 0}
   });
   themeAnzeigen();
   zaehler().then(() => htmx.ajax('GET', '/ui/pruefen', '#main').then(() => markiere('/ui/pruefen')));
+})();
+
+// ---- Auswahlliste (Kombi-Feld): tippen filtert, Pfeil zeigt alle Namen ----
+(function(){
+  const esc = t => t.replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+  function namen(inp){ const dl = document.getElementById(inp.dataset.liste || 'lieferanten'); return dl ? [...dl.options].map(o => o.value) : []; }
+  function schliessen(k){ k.classList.remove('offen'); const l = k.querySelector('.kombi-liste'); if (l) l.hidden = true; }
+  function oeffnen(k, filter){
+    const inp = k.querySelector('input'), ul = k.querySelector('.kombi-liste'); if (!inp || !ul) return;
+    const q = (filter || '').trim().toLowerCase(); const treffer = namen(inp).filter(n => !q || n.toLowerCase().includes(q));
+    ul.innerHTML = treffer.length ? treffer.map(n => '<span role="option">' + esc(n) + '</span>').join('') : '<span class="leer">' + (namen(inp).length ? 'keine Treffer' : 'noch keine Namen gespeichert') + '</span>';
+    ul.hidden = false; k.classList.add('offen');
+  }
+  function waehlen(k, opt){ const inp = k.querySelector('input'); inp.value = opt.textContent; schliessen(k); inp.dispatchEvent(new Event('input', {bubbles:true})); inp.dispatchEvent(new Event('change', {bubbles:true})); inp.focus(); }
+  document.addEventListener('click', e => {
+    const knopf = e.target.closest('.kombi-knopf');
+    if (knopf) { const k = knopf.closest('.kombi'); const war = k.classList.contains('offen'); document.querySelectorAll('.kombi.offen').forEach(schliessen); if (!war) { oeffnen(k, ''); k.querySelector('input').focus(); } return; }
+    if (!e.target.closest('.kombi')) document.querySelectorAll('.kombi.offen').forEach(schliessen);
+  });
+  document.addEventListener('mousedown', e => { const opt = e.target.closest('.kombi-liste [role=option]'); if (opt) { e.preventDefault(); waehlen(opt.closest('.kombi'), opt); } });
+  document.addEventListener('input', e => { const k = e.target.closest('.kombi'); if (k && e.target.tagName === 'INPUT') { if (e.target.value.trim()) oeffnen(k, e.target.value); else schliessen(k); } });
+  document.addEventListener('keydown', e => {
+    const k = e.target.closest('.kombi'); if (!k) return;
+    const offen = k.classList.contains('offen'), opts = [...k.querySelectorAll('.kombi-liste [role=option]')]; let i = opts.findIndex(o => o.classList.contains('aktiv'));
+    if (e.key === 'ArrowDown') { e.preventDefault(); if (!offen) { oeffnen(k, ''); return; } i = Math.min(i + 1, opts.length - 1); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); i = Math.max(i - 1, 0); }
+    else if (e.key === 'Escape' && offen) { e.preventDefault(); e.stopPropagation(); schliessen(k); return; }
+    else if (e.key === 'Enter' && offen && i >= 0) { e.preventDefault(); e.stopPropagation(); waehlen(k, opts[i]); return; }
+    else if (e.key === 'Tab') { schliessen(k); return; }
+    else return;
+    opts.forEach((o, n) => o.classList.toggle('aktiv', n === i)); if (opts[i]) opts[i].scrollIntoView({block:'nearest'});
+  }, true);
+})();
+// ---- Fehler sichtbar machen: Server-Fehler und fehlende Ziele erscheinen als roter Hinweis statt still zu verpuffen ----
+(function(){
+  function zeigen(text){
+    let t = document.getElementById('fehler-toast');
+    if (!t) { t = document.createElement('div'); t.id = 'fehler-toast'; t.innerHTML = '<span class="txt"></span><button type="button">schließen</button>'; document.body.appendChild(t); t.querySelector('button').addEventListener('click', () => t.remove()); }
+    t.querySelector('.txt').textContent = text;
+    clearTimeout(t._timer); t._timer = setTimeout(() => t.remove(), 12000);
+  }
+  document.body.addEventListener('htmx:responseError', e => { const x = e.detail.xhr; zeigen('Speichern fehlgeschlagen (' + x.status + '). ' + (x.responseText || '').replace(/<[^>]+>/g, ' ').slice(0, 300)); });
+  document.body.addEventListener('htmx:sendError', () => zeigen('Server nicht erreichbar – läuft Steuerfuchs noch? Seite neu laden oder App neu starten.'));
+  document.body.addEventListener('htmx:targetError', e => zeigen('Interner Anzeigefehler (Ziel ' + e.detail.target + ' fehlt) – bitte Seite neu laden (⌘R).'));
 })();
 </script>
 </body>

@@ -50,17 +50,35 @@ def regeln_path() -> Path:
     return p
 
 
+# Frühere Standardwerte, die eine neuere Version korrigiert hat: steht in der Nutzerdatei noch genau der alte Wert,
+# hat die Nutzerin ihn nicht bewusst geändert – dann gilt der neue Standard. Eigene Anpassungen bleiben erhalten.
+_ALTE_STANDARDWERTE = {"fahrtkosten": {"eur_zeile": 59}}
+
+
+def _kategorie_zusammenfuehren(standard: dict, nutzer: dict) -> dict:
+    out = dict(standard)
+    alt = _ALTE_STANDARDWERTE.get(standard.get("schluessel"), {})
+    for k, v in nutzer.items():
+        if k in alt and v == alt[k] and k in standard:
+            continue  # alter Standard, nicht bewusst geändert → neuer Standard gilt
+        out[k] = v
+    return out
+
+
 def _zusammenfuehren(standard, nutzer):
-    """Nutzerdatei gewinnt; was dort fehlt, kommt aus der mitgelieferten Datei (neue Schlüssel, neue Kategorien)."""
+    """Nutzerdatei gewinnt; was dort fehlt, kommt aus der mitgelieferten Datei (neue Schlüssel, neue Kategorien, Beispiele)."""
     if isinstance(standard, dict) and isinstance(nutzer, dict):
         out = dict(standard)
         for k, v in nutzer.items():
             out[k] = _zusammenfuehren(standard.get(k), v) if k in standard else v
         return out
     if isinstance(standard, list) and isinstance(nutzer, list) and standard and isinstance(standard[0], dict) and "schluessel" in standard[0]:
-        # Kategorien: Nutzer-Einträge überschreiben gleiche Schlüssel, fehlende Standard-Kategorien werden ergänzt
-        vorhanden = {d.get("schluessel") for d in nutzer if isinstance(d, dict)}
-        return list(nutzer) + [d for d in standard if d.get("schluessel") not in vorhanden]
+        # Kategorien: je Schlüssel zusammenführen (Nutzerwerte gewinnen, fehlende Felder wie „beispiele“ kommen aus dem Standard),
+        # Nutzer-eigene Kategorien bleiben, neue Standard-Kategorien werden ergänzt – Reihenfolge des Standards
+        nutzer_map = {d.get("schluessel"): d for d in nutzer if isinstance(d, dict)}
+        out = [_kategorie_zusammenfuehren(d, nutzer_map[d["schluessel"]]) if d.get("schluessel") in nutzer_map else d for d in standard]
+        std_keys = {d.get("schluessel") for d in standard}
+        return out + [d for d in nutzer if isinstance(d, dict) and d.get("schluessel") not in std_keys]
     return nutzer
 
 

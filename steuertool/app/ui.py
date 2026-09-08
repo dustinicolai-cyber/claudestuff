@@ -165,21 +165,28 @@ def lieferanten_datalist(namen: list[str]) -> str:
     return f'<datalist id="lieferanten">{optionen}</datalist>'
 
 
+def kombi_feld(name: str, wert: str, platzhalter: str, liste: str = "lieferanten") -> str:
+    """Eingabefeld mit aufklappbarer Auswahlliste (alle bisherigen Namen, alphabetisch) – tippen filtert, Pfeil zeigt alles."""
+    return (f'<span class="kombi"><input name="{name}" value="{h(wert)}" placeholder="{h(platzhalter)}" aria-label="{h(platzhalter)}" autocomplete="off" data-liste="{liste}">'
+            f'<button type="button" class="kombi-knopf" title="Alle bisherigen Namen anzeigen" aria-label="Liste öffnen">▾</button>'
+            f'<span class="kombi-liste" role="listbox" hidden></span></span>')
+
+
 def bestaetigt_zeile(b: Buchung, kategorien: list[Kategorie], mit_konto: set, gespeichert: bool = False) -> str:
     """Eine Zeile der Tabelle bestätigter Buchungen – die wichtigsten Felder direkt editierbar, Änderung speichert sofort."""
     opts = "".join(f'<option value="{k.id}" {"selected" if k.id == b.kategorie_id else ""}>{h(k.name)}</option>'
                    for k in kategorien if k.richtung == b.richtung)
     konto = '<span class="badge ok" title="Kontobewegung zugeordnet">Konto ✓</span>' if b.id in mit_konto else '<span class="muted klein">–</span>'
     return (f'<tr id="bz-{b.id}" class="bz {"gespeichert" if gespeichert else ""}" data-datum="{b.datum.isoformat()}" data-betrag="{b.betrag_brutto:.2f}" data-lieferant="{h((b.lieferant or "").lower())}" '
-            f'hx-post="/api/buchung/{b.id}/schnell" hx-trigger="change" hx-include="closest tr" hx-target="this" hx-swap="outerHTML">'
+            f'hx-post="/api/buchung/{b.id}/schnell" hx-trigger="change" hx-include="closest tr" hx-target="this" hx-swap="outerHTML" hx-disinherit="*">'
             f'<td><input type="date" name="datum" value="{b.datum.isoformat()}" aria-label="Datum"></td>'
             f'<td><span class="badge {"plus-b" if b.richtung == "einnahme" else "minus-b"}">{"Einnahme" if b.richtung == "einnahme" else "Ausgabe"}</span></td>'
-            f'<td><input name="lieferant" list="lieferanten" value="{h(b.lieferant)}" placeholder="Lieferant / Kunde" aria-label="Lieferant / Kunde"></td>'
+            f'<td>{kombi_feld("lieferant", b.lieferant, "Lieferant / Kunde")}</td>'
             f'<td><input name="beschreibung" value="{h(b.beschreibung)}" placeholder="–" aria-label="Beschreibung"></td>'
             f'<td><select name="kategorie_id" aria-label="Kategorie">{opts}</select></td>'
             f'<td class="num"><input type="number" step="0.01" name="betrag_brutto" value="{b.betrag_brutto:.2f}" aria-label="Brutto in Euro"></td>'
             f'<td>{konto}</td>'
-            f'<td class="aktionen-zelle"><a href="#" class="btn-ghost" hx-get="/ui/pruefen/{b.id}" hx-target="#main" title="Alle Felder mit Belegvorschau bearbeiten">{ICON["stift"]}Bearbeiten</a></td></tr>')
+            f'<td class="aktionen-zelle"><a href="#" class="btn-ghost" hx-get="/ui/pruefen/{b.id}" hx-target="#main" hx-swap="innerHTML" title="Alle Felder mit Belegvorschau bearbeiten">{ICON["stift"]}Bearbeiten</a></td></tr>')
 
 
 def bestaetigte_tabelle(buchungen: list[Buchung], kategorien: list[Kategorie], mit_konto: set, jahr: int | None, lieferanten: list[str], datalist: bool = True) -> str:
@@ -324,7 +331,7 @@ def buchung_formular(b: Buchung, kategorien: list[Kategorie], cfg: dict, action:
   <div class="grid2">
     <label>Datum <input type="date" name="datum" value="{b.datum.isoformat()}" required autofocus></label>
     <label>Richtung <select name="richtung"><option value="ausgabe" {"selected" if b.richtung == "ausgabe" else ""}>Ausgabe</option><option value="einnahme" {"selected" if b.richtung == "einnahme" else ""}>Einnahme</option></select></label>
-    <label class="breit">Lieferant / Kunde <input name="lieferant" list="lieferanten" value="{h(b.lieferant)}" placeholder="tippen oder aus der Liste wählen"></label>
+    <label class="breit">Lieferant / Kunde {kombi_feld("lieferant", b.lieferant, "tippen oder aus der Liste wählen")}</label>
     {lieferanten_datalist(lieferanten) if lieferanten is not None else ''}
     <label>Rechnungsnr. <input name="rechnungsnummer" value="{h(b.rechnungsnummer)}"></label>
     <label>USt-IdNr. Lieferant <input name="ust_idnr" value="{h(b.ust_idnr)}" placeholder="z. B. IE6364992H"></label>

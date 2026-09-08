@@ -163,3 +163,16 @@ def test_konfidenz_aus_feldern():
     voll = {"datum": date.today(), "betrag_brutto": 1.0, "lieferant": "x", "rechnungsnummer": "1", "ust_satz": 19.0, "ust_idnr": "DE1"}
     assert konfidenz_aus_feldern(voll) == 1.0
     assert konfidenz_aus_feldern({"datum": date.today(), "betrag_brutto": 1.0}) == 0.55
+
+
+def test_regeln_zusammenfuehren():
+    from app.config import _zusammenfuehren
+    standard = {"a": 1, "neu": 2, "kategorien": [{"schluessel": "fahrtkosten", "eur_zeile": 62, "beispiele": "km"}, {"schluessel": "zinsen", "eur_zeile": 56}], "eur_zeilen": {"1": "x", "2": "y"}}
+    nutzer = {"a": 5, "kategorien": [{"schluessel": "fahrtkosten", "eur_zeile": 59}, {"schluessel": "eigene", "eur_zeile": 50}], "eur_zeilen": {"1": "mein x"}}
+    m = _zusammenfuehren(standard, nutzer)
+    assert m["a"] == 5 and m["neu"] == 2 and m["eur_zeilen"] == {"1": "mein x", "2": "y"}
+    kats = {k["schluessel"]: k for k in m["kategorien"]}
+    assert kats["fahrtkosten"]["eur_zeile"] == 62 and kats["fahrtkosten"]["beispiele"] == "km"   # alter Standard 59 → neuer Standard
+    assert "zinsen" in kats and kats["eigene"]["eur_zeile"] == 50                                  # neu ergänzt, eigene bleibt
+    nutzer2 = {"kategorien": [{"schluessel": "fahrtkosten", "eur_zeile": 40}]}
+    assert {k["schluessel"]: k for k in _zusammenfuehren(standard, nutzer2)["kategorien"]}["fahrtkosten"]["eur_zeile"] == 40  # bewusst geändert bleibt

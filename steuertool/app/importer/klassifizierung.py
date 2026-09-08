@@ -28,9 +28,12 @@ def klassifiziere(s: Session, felder: dict, cfg: dict, text: str = "") -> tuple[
         k = next((k for k in kategorien if k.schluessel == "einnahmen"), None)
         return k, "richtung", 0.8
 
-    liste = "\n".join(f"- {k.schluessel}: {k.name}" for k in kategorien if k.richtung == "ausgabe")
+    beispiele = {d.get("schluessel"): d.get("beispiele", "") for d in cfg.get("kategorien", [])}
+    liste = "\n".join(f"- {k.schluessel}: {k.name}" + (f" (z. B. {beispiele[k.schluessel]})" if beispiele.get(k.schluessel) else "")
+                      for k in kategorien if k.richtung == "ausgabe" and k.sonderfall not in ("ust_zahlung", "afa"))
     system = (
-        "Du ordnest Belege eines freiberuflichen Designers (Kleinunternehmer, Deutschland) einer Kategorie zu. "
+        "Du ordnest Belege eines freiberuflichen Designers (Kleinunternehmer, Deutschland) genau einer Betriebsausgaben-Kategorie zu. "
+        "Wähle die spezifischste passende Kategorie; 'sonstige' nur, wenn wirklich nichts passt; 'privat' für erkennbar private Ausgaben. "
         "Antworte nur mit JSON: {\"kategorie\": \"<schluessel>\", \"begruendung\": \"<kurz>\"}. "
         "Erlaubte Schlüssel:\n" + liste
     )

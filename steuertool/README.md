@@ -75,6 +75,11 @@ Kontoauszüge (CSV deutscher Banken oder CAMT.053) unter Import einlesen; Matchi
   Betriebseinnahme in Zeile 17, Einkommensteuer/Soli/Kirchensteuer sind privat. Unter Einstellungen
   lässt sich alternativ die rechnerische §13b-Steuer je Rechnung als Zeile 48 wählen; die Zahlungen
   zählen dann nicht doppelt. Die Quartalsübersicht zeigt entstandene und gezahlte Steuer nebeneinander.
+- **Kategorien**: 40 Kategorien (Bankgebühren bis Zinsen) mit EÜR-Zeile und Beispielen in
+  `steuerregeln.json`. Die Kategorie einer Ausgabe bestimmt zuerst eine gelernte Regel, sonst die lokale
+  KI (Ollama, bekommt Kategorienliste samt Beispielen), sonst „Sonstige Betriebsausgaben“ mit niedriger
+  Konfidenz. Neue Standard-Kategorien und -Beispiele werden beim Start in die eigene Datei gemischt;
+  eigene Änderungen bleiben erhalten.
 - **Rückbuchungen**: Zahlung und Storno (gleicher Betrag, umgekehrtes Vorzeichen, gleicher Partner,
   ±14 Tage) werden im Abgleich als Paar markiert und lassen sich mit einem Klick beide ignorieren.
 - **Bewirtung** 70 %, Warnung bei fehlendem Anlass/Teilnehmern.
