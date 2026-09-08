@@ -327,3 +327,23 @@ Reverse charge: VAT to be accounted for by the recipient.
         a = c.get("/ui/abgleich?jahr=2025&filter=alle").text
         assert 'data-sort="betrag"' in a and 'data-sort="status"' in a and "listen-suche" in a
         assert 'data-status="3"' in a  # zugeordnete Bewegung trägt ihren Sortier-Rang
+
+
+def test_rueckfragen_gesammelt_zuordnen():
+    """Betrag passt, Datum 15 Tage daneben → Rückfrage; Sammelaktion ordnet die nächste Rechnung zu."""
+    with client() as c:
+        c.post("/api/import", files={"datei": ("adobe.pdf", erzeuge.text_pdf(erzeuge.ADOBE_TEXT), "application/pdf")}, data={"ki": "0"})
+        kopf = erzeuge.CSV_SPARKASSE.splitlines()[0]
+        csv = kopf + "\nDE00123;20.02.2025;20.02.2025;KARTENZAHLUNG;ADOBE SPAET;Adobe Systems Software Ireland;IE00;XXX;-59,49;EUR;Umsatz gebucht\n"
+        c.post("/api/konto/import", files={"datei": ("umsaetze.csv", csv.encode(), "text/csv")})
+        a = c.get("/ui/abgleich?jahr=2025&filter=rueckfrage").text
+        assert "Rückfrage" in a and 'data-status="0"' in a and "Rückfragen zuordnen" in a
+        from app.models import Kontobewegung
+        with Session(engine()) as s:
+            k = s.exec(select(Kontobewegung).where(Kontobewegung.verwendungszweck == "ADOBE SPAET")).first()
+            assert k and not k.buchung_id
+        r = c.post("/api/abgleich/aktion", data={"aktion": "zuordnen", "ids": [str(k.id)], "jahr": "2025", "filter": "rueckfrage"})
+        assert "1 Rückfragen zugeordnet" in r.text
+        with Session(engine()) as s:
+            k = s.get(Kontobewegung, k.id)
+            assert k.buchung_id and s.get(Buchung, k.buchung_id).betrag_brutto == 59.49

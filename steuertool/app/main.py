@@ -559,7 +559,7 @@ def _buchung_aus_konto(s: Session, k: Kontobewegung) -> Buchung:
     return b
 
 
-ABGLEICH_FILTER = ("offen", "zugeordnet", "ignoriert", "alle")
+ABGLEICH_FILTER = ("offen", "rueckfrage", "zugeordnet", "ignoriert", "alle")
 
 
 def _abgleich_filter(wert) -> str:
@@ -590,12 +590,23 @@ async def api_abgleich_aktion(request: Request, s: Session = Depends(get_session
     jahr = int(form["jahr"]) if str(form.get("jahr", "")).isdigit() else None
     filter = _abgleich_filter(form.get("filter"))
     n = 0
+    vergeben: set[int] = set()  # in diesem Durchlauf schon zugeordnete Buchungen
     for kid in ids:
         k = s.get(Kontobewegung, kid)
         if not k:
             continue
         if aktion == "anlegen" and not k.buchung_id and not k.ignoriert:
             _buchung_aus_konto(s, k); n += 1
+        elif aktion == "zuordnen" and not k.buchung_id and not k.ignoriert:
+            # Rückfragen gesammelt: je Bewegung die Rechnung mit gleichem Betrag und nächstem Datum
+            kand = [b for b in matching.kandidaten_fuer(s, k) if b.id not in vergeben]
+            if kand:
+                b = kand[0]
+                k.buchung_id = b.id
+                vergeben.add(b.id)
+                if matching.euro_uebernehmen(b, k):
+                    s.add(b)
+                s.add(k); n += 1
         elif aktion == "ignorieren":
             k.ignoriert = True; s.add(k); n += 1
         elif aktion == "freigeben":
@@ -611,6 +622,7 @@ async def api_abgleich_aktion(request: Request, s: Session = Depends(get_session
     if aktion == "regel":
         matching.ignorregeln_anwenden(s)
     text = {"anlegen": f"{n} Buchungsvorschläge angelegt – jetzt unter „Prüfen“.", "ignorieren": f"{n} ignoriert.",
+            "zuordnen": f"{n} Rückfragen zugeordnet – jeweils die Rechnung mit gleichem Betrag und nächstem Datum.",
             "freigeben": f"{n} wieder freigegeben.", "loesen": f"{n} Zuordnungen gelöst.", "regel": f"{n} ignoriert und als Regel gemerkt."}.get(aktion, "Nichts geändert.")
     return _html(ui.meldung_box(text) + ui_abgleich(jahr, filter, s).body.decode())
 

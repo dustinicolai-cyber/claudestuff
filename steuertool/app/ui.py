@@ -432,6 +432,7 @@ def offen_view(op: dict, kandidaten: dict[int, list[Buchung]], funde: list[MailF
         for b in op["ohne_konto"][:200])
     ohne_konto_html = f"""<p class="muted erkl">Bar bezahlt, privat verauslagt oder Kontoauszug fehlt noch. Bestätigte Buchungen werden nie gelöscht, nur storniert.</p>
   <form class="auswahl-form" hx-post="/api/ohnekonto/aktion" hx-target="#main">
+    {'<p class="muted klein hinweis-rueckfrage">Betrag passt, Datum liegt außerhalb der ±5 Tage. In der Auswahlliste steht die Rechnung mit dem nächsten Datum oben. Alle anhaken und „Rückfragen zuordnen“ übernimmt genau diese.</p>' if filter == "rueckfrage" else ''}
     <div class="auswahl-leiste" hidden><span class="anzahl"></span>
       <button type="submit" name="aktion" value="privat" class="btn-secondary klein">Privat verauslagt</button>
       <button type="submit" name="aktion" value="stornieren" class="btn-ghost klein" hx-confirm="Ausgewählte stornieren (bestätigte) bzw. löschen (Vorschläge)?">Stornieren / Löschen</button></div>
@@ -446,6 +447,7 @@ def offen_view(op: dict, kandidaten: dict[int, list[Buchung]], funde: list[MailF
         for a, b in op["doppel"])
     doppel_html = f"""<p class="muted erkl">Gleicher Betrag und gleiche Rechnungsnummer oder gleicher Lieferant innerhalb von drei Tagen.</p>
   <form class="auswahl-form" hx-target="#main">
+    {'<p class="muted klein hinweis-rueckfrage">Betrag passt, Datum liegt außerhalb der ±5 Tage. In der Auswahlliste steht die Rechnung mit dem nächsten Datum oben. Alle anhaken und „Rückfragen zuordnen“ übernimmt genau diese.</p>' if filter == "rueckfrage" else ''}
     <div class="auswahl-leiste" hidden><span class="anzahl"></span>
       <button type="button" class="btn-primary klein" hx-post="/api/doppel/zusammenfuehren" hx-include="closest form" hx-confirm="Ausgewählte Paare zusammenführen? Die ältere Buchung bleibt jeweils.">Zusammenführen</button>
       <button type="button" class="btn-ghost klein" hx-post="/api/doppel/unterschiedlich" hx-include="closest form">Sind unterschiedlich</button></div>
@@ -843,9 +845,12 @@ def abgleich_view(zeilen: list[dict], regeln: list[IgnorRegel], jahr: int, filte
         zeilen = [z for z in z_alle if z["status"] == "ignoriert"]
     elif filter == "zugeordnet":
         zeilen = [z for z in z_alle if z["status"] == "zugeordnet"]
+    elif filter == "rueckfrage":
+        zeilen = [z for z in z_alle if z["status"] == "rueckfrage"]
     tabs = "".join(
         f'<button type="button" class="{"aktiv" if filter == f else ""}" hx-get="/ui/abgleich?filter={f}" hx-target="#main">{name} <span class="z">{n}</span></button>'
-        for f, name, n in (("offen", "Offen", zaehl["rueckfrage"] + zaehl["kein_beleg"]), ("zugeordnet", "Zugeordnet", zaehl["zugeordnet"]),
+        for f, name, n in (("offen", "Offen", zaehl["rueckfrage"] + zaehl["kein_beleg"]), ("rueckfrage", "Rückfragen", zaehl["rueckfrage"]),
+                           ("zugeordnet", "Zugeordnet", zaehl["zugeordnet"]),
                            ("ignoriert", "Ignoriert", zaehl["ignoriert"]), ("alle", "Alle", len(z_alle))))
 
     def status_zelle(z: dict) -> str:
@@ -922,8 +927,10 @@ def abgleich_view(zeilen: list[dict], regeln: list[IgnorRegel], jahr: int, filte
     <div class="row zwischen"><div class="tabs reiter abgleich-tabs">{tabs}</div>
       <span class="row" style="margin:0;gap:.8rem"><input type="search" class="listen-suche" placeholder="in dieser Liste suchen …" aria-label="In der Liste suchen">
       <span class="muted klein listen-zaehler"></span><label class="check klein"><input type="checkbox" class="alle"> alle auswählen</label></span></div>
+    {'<p class="muted klein hinweis-rueckfrage">Betrag passt, Datum liegt außerhalb der ±5 Tage. In der Auswahlliste steht die Rechnung mit dem nächsten Datum oben. Alle anhaken und „Rückfragen zuordnen“ übernimmt genau diese.</p>' if filter == "rueckfrage" else ''}
     <div class="auswahl-leiste" hidden><span class="anzahl"></span>
-      <button type="submit" name="aktion" value="anlegen" class="btn-primary klein">Buchungen anlegen</button>
+      <button type="submit" name="aktion" value="zuordnen" class="btn-primary klein" title="Jede ausgewählte Rückfrage bekommt die Rechnung mit gleichem Betrag und dem nächsten Datum">Rückfragen zuordnen</button>
+      <button type="submit" name="aktion" value="anlegen" class="{"btn-secondary" if filter == "rueckfrage" else "btn-primary"} klein">Buchungen anlegen</button>
       <button type="submit" name="aktion" value="ignorieren" class="btn-secondary klein">Ignorieren</button>
       <button type="submit" name="aktion" value="regel" class="btn-ghost klein" hx-confirm="Für jede ausgewählte Bewegung eine Ignorier-Regel auf das Gegenkonto anlegen?">Immer ignorieren</button>
       <button type="submit" name="aktion" value="loesen" class="btn-ghost klein">Zuordnung lösen</button></div>
