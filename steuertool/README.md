@@ -5,8 +5,14 @@ in `~/Steuertool/` (SQLite + Belegordner). Keine Cloud, keine Telemetrie.
 
 ## Start
 
+Im Finder **„Steuerfuchs starten.command“** doppelklicken. Beim ersten Mal blockiert macOS
+eventuell („kann nicht geöffnet werden, da es von einem nicht verifizierten Entwickler stammt“):
+dann Rechtsklick → **Öffnen** → nochmals **Öffnen**. Ab dann reicht der Doppelklick.
+
+Oder im Terminal:
+
 ```bash
-cd steuertool
+cd steuerfuchs
 ./start.sh          # legt .venv an, installiert einmalig Abhängigkeiten, öffnet den Browser
 ```
 
