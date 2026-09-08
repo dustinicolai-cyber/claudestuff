@@ -347,3 +347,24 @@ def test_rueckfragen_gesammelt_zuordnen():
         with Session(engine()) as s:
             k = s.get(Kontobewegung, k.id)
             assert k.buchung_id and s.get(Buchung, k.buchung_id).betrag_brutto == 59.49
+
+
+def test_bestaetigte_korrigieren():
+    """Eingecheckte Buchung erscheint in der Liste „Bestätigte Buchungen“ und lässt sich in derselben Maske korrigieren."""
+    with client() as c:
+        c.post("/api/import", files={"datei": ("adobe.pdf", erzeuge.text_pdf(erzeuge.ADOBE_TEXT), "application/pdf")}, data={"ki": "0"})
+        with Session(engine()) as s:
+            b = s.exec(select(Buchung)).first()
+            kat = s.exec(select(Kategorie).where(Kategorie.schluessel == "software")).first()
+        daten = {"datum": "2025-02-05", "richtung": "ausgabe", "lieferant": "Adobe", "betrag_netto": "59.49", "ust_satz": "0", "ust_betrag": "0",
+                 "betrag_brutto": "59.49", "kategorie_id": str(kat.id), "waehrung": "EUR", "betrag_fremd": "0"}
+        c.post(f"/api/buchung/{b.id}/bestaetigen", data=daten)
+        t = c.get("/ui/pruefen").text
+        assert "Bestätigte Buchungen" in t and f'hx-get="/ui/pruefen/{b.id}"' in t
+        t = c.get(f"/ui/pruefen/{b.id}").text
+        assert "Korrektur speichern" in t and 'class="badge ok">bestätigt' in t and "Überspringen" not in t
+        r = c.post(f"/api/buchung/{b.id}/bestaetigen", data={**daten, "lieferant": "Adobe Systems (korrigiert)", "betrag_brutto": "60.00", "betrag_netto": "60.00"})
+        assert "Korrektur gespeichert" in r.text and "Adobe Systems (korrigiert)" in r.text
+        with Session(engine()) as s:
+            b = s.get(Buchung, b.id)
+            assert b.status == "bestaetigt" and b.betrag_brutto == 60.0 and b.lieferant == "Adobe Systems (korrigiert)"

@@ -19,6 +19,14 @@ ICON = {
     "plus": '<svg viewBox="0 0 24 24"><path d="M12 5v14m-7-7h14"/></svg>',
     "minus": '<svg viewBox="0 0 24 24"><path d="M5 12h14"/></svg>',
     "stift": '<svg viewBox="0 0 24 24"><path d="M4 20h4l10.5-10.5a2 2 0 0 0 0-2.8l-1.2-1.2a2 2 0 0 0-2.8 0L4 16v4z"/><path d="M13 7l4 4"/></svg>',
+    "upload": '<svg viewBox="0 0 24 24"><path d="M12 16V4m-5 5l5-5 5 5"/><path d="M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3"/></svg>',
+    "datei_plus": '<svg viewBox="0 0 24 24"><path d="M14 3H7a1 1 0 0 0-1 1v16a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1V8z"/><path d="M14 3v5h5"/><path d="M12 11v6m-3-3h6"/></svg>',
+    "auge_zu": '<svg viewBox="0 0 24 24"><path d="M3 3l18 18"/><path d="M10.6 10.6A2.5 2.5 0 0 0 13.4 13.4"/><path d="M9.9 5.2A10.4 10.4 0 0 1 12 5c5 0 8.5 4 9.5 7a13 13 0 0 1-2.8 3.9"/><path d="M6.6 6.6C4.6 8 3.2 10 2.5 12c1 3 4.5 7 9.5 7a9.7 9.7 0 0 0 4.1-.9"/></svg>',
+    "sperren": '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M5.6 5.6l12.8 12.8"/></svg>',
+    "link": '<svg viewBox="0 0 24 24"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1.5 1.5"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1.5-1.5"/></svg>',
+    "unlink": '<svg viewBox="0 0 24 24"><path d="M15.7 8.3l3-3a4 4 0 0 0-5.7-5.7" transform="translate(0 4)"/><path d="M8.3 15.7l-3 3a4 4 0 0 0 5.7 5.7" transform="translate(0 -4)"/><path d="M4 4l16 16"/></svg>',
+    "undo": '<svg viewBox="0 0 24 24"><path d="M4 10h11a5 5 0 0 1 0 10h-3"/><path d="M8 6l-4 4 4 4"/></svg>',
+    "oeffnen": '<svg viewBox="0 0 24 24"><path d="M14 4h6v6"/><path d="M20 4l-9 9"/><path d="M19 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h5"/></svg>',
 }
 
 STUFEN = {"zugferd": "E-Rechnung (XML)", "pdf": "PDF-Text", "ocr": "Vision-OCR", "manuell": "manuell", "keine": "keine", "kontoauszug": "Kontoauszug"}
@@ -151,24 +159,47 @@ def _reiter_html(reiter: str, zaehler: dict) -> str:
     return f'<div class="tabs reiter">{t("ausgabe", "Ausgaben", "minus-tab")}{t("einnahme", "Einnahmen", "plus-tab")}</div>'
 
 
-def pruefen_leer(reiter: str = "ausgabe", zaehler: dict | None = None) -> str:
+def bestaetigte_liste(buchungen: list[Buchung], aktuelle_id: int | None = None, limit: int = 300) -> str:
+    """Eingecheckte Buchungen zum Nachkorrigieren – öffnet dieselbe Maske wie beim Prüfen."""
+    eintraege = "".join(
+        f'<li class="{"aktiv" if x.id == aktuelle_id else ""}"><a href="#" hx-get="/ui/pruefen/{x.id}" hx-target="#main" title="Beleg korrigieren">'
+        f'<span class="txt">{h(d(x.datum))} · {h(x.lieferant or "?")} · {eur_fmt(x.betrag_brutto)}</span>{ICON["stift"]}</a></li>'
+        for x in buchungen[:limit])
+    mehr = f'<p class="mehr">{len(buchungen) - limit} weitere über die Suche oben.</p>' if len(buchungen) > limit else ""
+    return f"""<details class="bestaetigt-liste" id="bestaetigt-liste"><summary>Bestätigte Buchungen <span class="z">{len(buchungen)}</span></summary>
+      <p class="muted klein">Zum Korrigieren anklicken – Kunde, Betrag oder Kategorie ändern und „Korrektur speichern“.</p>
+      <input type="search" class="listen-suche" placeholder="Bestätigte durchsuchen …" aria-label="Bestätigte durchsuchen">
+      <ul class="liste">{eintraege or '<li class="muted klein">Noch nichts bestätigt.</li>'}</ul>{mehr}
+      <script>
+      (function(){{
+        const box = document.getElementById('bestaetigt-liste'), such = box.querySelector('.listen-suche');
+        such.addEventListener('input', () => {{ const q = such.value.trim().toLowerCase(); box.querySelectorAll('.liste li').forEach(li => li.hidden = q && !li.textContent.toLowerCase().includes(q)); }});
+        try {{ if (sessionStorage.getItem('bestaetigt-offen') === '1') box.open = true; box.addEventListener('toggle', () => sessionStorage.setItem('bestaetigt-offen', box.open ? '1' : '0')); }} catch (e) {{}}
+      }})();
+      </script></details>"""
+
+
+def pruefen_leer(reiter: str = "ausgabe", zaehler: dict | None = None, bestaetigte: list[Buchung] | None = None) -> str:
     zaehler = zaehler or {}
     andere = "einnahme" if reiter == "ausgabe" else "ausgabe"
     hinweis = (f'<p class="muted">Im Reiter {"Einnahmen" if andere == "einnahme" else "Ausgaben"} warten noch {zaehler.get(andere, 0)} Vorschläge.</p>'
                if zaehler.get(andere) else '<p class="muted">Alles bestätigt.</p>')
     return f"""<section><div class="row zwischen"><h2>Prüfen</h2>{_reiter_html(reiter, zaehler)}</div>
     <p class="ok-box"><span>Keine offenen {"Einnahmen" if reiter == "einnahme" else "Ausgaben"}-Vorschläge.</span></p>{hinweis}
-    <p><a href="#" hx-get="/ui/manuell" hx-target="#main">Buchung von Hand erfassen</a></p></section>"""
+    <p><a href="#" hx-get="/ui/manuell" hx-target="#main">Buchung von Hand erfassen</a></p>
+    <div class="karte" style="max-width:520px">{bestaetigte_liste(bestaetigte or [])}</div></section>"""
 
 
 def pruefen_view(b: Buchung, beleg: Beleg | None, kategorien: list[Kategorie], offene: list[Buchung],
-                 bw: Bewertung | None, extraktion: dict, cfg: dict, reiter: str = "ausgabe", zaehler: dict | None = None) -> str:
+                 bw: Bewertung | None, extraktion: dict, cfg: dict, reiter: str = "ausgabe", zaehler: dict | None = None,
+                 bestaetigte: list[Buchung] | None = None) -> str:
     zaehler = zaehler or {}
+    korrektur = b.status == "bestaetigt"
     liste = "".join(
         f'<li class="{"aktiv" if x.id == b.id else ""}"><input type="checkbox" name="ids" value="{x.id}" aria-label="auswählen">'
         f'<a href="#" hx-get="/ui/pruefen/{x.id}" hx-target="#main">'
         f'{konf_badge(x.konfidenz)} {h(d(x.datum))} · {h(x.lieferant or "?")} · {eur_fmt(x.betrag_brutto)}</a></li>'
-        for x in offene[:200])
+        for x in offene[:200] if x.status == "vorschlag")
     if beleg:
         if beleg.mime == "application/pdf" or beleg.dateipfad.lower().endswith(".pdf"):
             vorschau = f'<iframe class="vorschau" src="/beleg/{beleg.id}/datei#toolbar=0"></iframe>'
@@ -192,6 +223,7 @@ def pruefen_view(b: Buchung, beleg: Beleg | None, kategorien: list[Kategorie], o
       </div>
       <ul class="liste">{liste}</ul>
     </form>
+    {bestaetigte_liste(bestaetigte or [], b.id)}
     <script>
     (function(){{
       const f = document.getElementById('pruef-liste'), alle = document.getElementById('alle-waehlen'), knopf = document.getElementById('auswahl-loeschen');
@@ -212,7 +244,7 @@ def pruefen_view(b: Buchung, beleg: Beleg | None, kategorien: list[Kategorie], o
     <details><summary class="muted klein">Rohfelder der Extraktion</summary><pre class="klein">{h(json.dumps(extraktion, indent=1, ensure_ascii=False, default=str))}</pre></details>
   </div>
   <div class="formular-spalte">
-    {buchung_formular(b, kategorien, cfg, action=f"/api/buchung/{b.id}/bestaetigen", bw=bw, naechste=True)}
+    {buchung_formular(b, kategorien, cfg, action=f"/api/buchung/{b.id}/bestaetigen", bw=bw, naechste=not korrektur)}
   </div>
 </section>"""
 
@@ -222,7 +254,8 @@ def buchung_formular(b: Buchung, kategorien: list[Kategorie], cfg: dict, action:
     m = json.loads(b.meta_json or "{}")
     opts = "".join(f'<option value="{k.id}" data-sonderfall="{h(k.sonderfall or "")}" data-richtung="{k.richtung}" {"selected" if k.id == b.kategorie_id else ""}>'
                    f'{h(k.name)}{f" (Zeile {k.eur_zeile})" if k.eur_zeile else ""}</option>' for k in kategorien)
-    knopf = "Beleg OK" if naechste else "Speichern"
+    korrektur = bool(b.id) and b.status == "bestaetigt"
+    knopf = "Beleg OK" if naechste else ("Korrektur speichern" if korrektur else "Speichern")
     skip = f'<button type="button" class="outline-gelb" hx-get="/ui/pruefen?ueberspringen={b.id}&richtung={b.richtung}" hx-target="#main" title="Überspringen (Esc)">{ICON["pfeil"]}Überspringen</button>' if naechste and b.id else ""
     neu_erkennen = f'<button type="button" class="outline-orange" hx-post="/api/buchung/{b.id}/neu-erkennen" hx-target="#main" title="Felder aus der Belegdatei neu ziehen">{ICON["reload"]}Neu laden</button>' if b.id and b.beleg_id and b.status == "vorschlag" else ""
     loeschen = f'<button type="button" class="outline-rot" hx-post="/api/buchung/{b.id}/loeschen" hx-confirm="Buchung wirklich löschen? Die Belegdatei wandert nach Belege/Papierkorb." hx-target="#main">{ICON["x"]}Löschen</button>' if b.id else ""
@@ -239,11 +272,11 @@ def buchung_formular(b: Buchung, kategorien: list[Kategorie], cfg: dict, action:
 <form id="buchung-form" hx-post="{action}" hx-target="#main" class="formular" autocomplete="off">
   <div class="formular-kopf">
     <div class="kopf-titel">
-      <h2>{h(titel)} {konf_badge(b.konfidenz) if b.id else ""} {'<span class="badge rc">§13b</span>' if b.reverse_charge else ''}</h2>
+      <h2>{h(titel)} {'<span class="badge ok">bestätigt</span>' if korrektur else (konf_badge(b.konfidenz) if b.id else "")} {'<span class="badge rc">§13b</span>' if b.reverse_charge else ''}</h2>
       <div class="muted klein">{untertitel}</div>
       {beschreibung_kopf}
     </div>
-    <div class="aktionen aktionen-raster"><button type="submit" class="gruen" title="Bestätigen und weiter (⏎)">{ICON["check"]}{knopf}</button>{skip}{neu_erkennen}{loeschen}</div>
+    <div class="aktionen aktionen-raster {"zwei" if korrektur else ""}"><button type="submit" class="gruen" title="{"Korrektur speichern" if korrektur else "Bestätigen und weiter (⏎)"}">{ICON["check"]}{knopf}</button>{skip}{neu_erkennen}{loeschen}</div>
   </div>
   <div class="grid2">
     <label>Datum <input type="date" name="datum" value="{b.datum.isoformat()}" required autofocus></label>
@@ -426,7 +459,7 @@ def offen_view(op: dict, kandidaten: dict[int, list[Buchung]], funde: list[MailF
         f'<tr><td><input type="checkbox" name="ids" value="{b.id}"></td><td>{d(b.datum)}</td><td class="num">{eur_fmt(b.betrag_brutto)}</td>'
         f'<td>{h(b.lieferant)} <span class="muted klein">{h(b.beschreibung[:60])}</span></td>'
         f'<td>{h(kategorien[b.kategorie_id].name) if b.kategorie_id in kategorien else "–"}</td>'
-        f'<td class="aktionen-zelle"><a href="#" class="btn-ghost" hx-get="/ui/pruefen/{b.id}" hx-target="#main">Beleg öffnen</a> '
+        f'<td class="aktionen-zelle"><a href="#" class="btn-ghost" hx-get="/ui/pruefen/{b.id}" hx-target="#main" title="Beleg korrigieren">{ICON["stift"]}Korrigieren</a> '
         f'<button class="klein btn-secondary" hx-post="/api/ohnekonto/aktion" hx-vals=\'{{"aktion":"privat","ids":"{b.id}"}}\' hx-target="#main" title="bar oder privat bezahlt – braucht keine Kontobewegung">Privat verauslagt</button> '
         f'<button class="klein btn-ghost" hx-post="/api/ohnekonto/aktion" hx-vals=\'{{"aktion":"stornieren","ids":"{b.id}"}}\' hx-target="#main" hx-confirm="{"Bestätigte Buchung stornieren? Sie bleibt im Journal, zählt aber nicht mehr." if b.status == "bestaetigt" else "Unbestätigten Vorschlag löschen?"}">{"Stornieren" if b.status == "bestaetigt" else "Löschen"}</button></td></tr>'
         for b in op["ohne_konto"][:200])
@@ -871,19 +904,19 @@ def abgleich_view(zeilen: list[dict], regeln: list[IgnorRegel], jahr: int, filte
         vals = lambda aktion: f'hx-vals=\'{{"aktion":"{aktion}","ids":"{k.id}","jahr":"{jahr}"}}\' hx-post="/api/abgleich/aktion" hx-target="#main"'
         if st == "zugeordnet":
             b = z["buchung"]
-            oeffnen = f'<a href="#" class="klein btn-secondary button" hx-get="/ui/pruefen/{b.id}" hx-target="#main">Beleg öffnen</a> ' if b else ""
-            return oeffnen + f'<button class="klein btn-ghost" {vals("loesen")} title="Zuordnung zur Rechnung wieder aufheben">Zuordnung lösen</button>'
+            oeffnen = f'<a href="#" class="klein btn-secondary button" hx-get="/ui/pruefen/{b.id}" hx-target="#main">{ICON["oeffnen"]}Beleg öffnen</a> ' if b else ""
+            return oeffnen + f'<button class="klein btn-ghost" {vals("loesen")} title="Zuordnung zur Rechnung wieder aufheben">{ICON["unlink"]}Zuordnung lösen</button>'
         if st == "ignoriert":
-            return f'<button class="klein btn-ghost" {vals("freigeben")} title="Wieder in die offene Liste aufnehmen">freigeben</button>'
+            return f'<button class="klein btn-ghost" {vals("freigeben")} title="Wieder in die offene Liste aufnehmen">{ICON["undo"]}freigeben</button>'
         if st == "rueckfrage":
             opts = "".join(f'<option value="{b.id}">{d(b.datum)} · {h(b.lieferant)} · {eur_fmt(b.betrag_brutto)}{" · bestätigt" if b.status == "bestaetigt" else ""}</option>' for b in z["kandidaten"])
-            return (f'<form class="inline" hx-post="/api/abgleich/{k.id}/zuordnen" hx-target="#main"><input type="hidden" name="jahr" value="{jahr}"><input type="hidden" name="filter" value="{filter}"><select name="buchung_id">{opts}</select> <button class="klein btn-secondary">zuordnen</button></form> '
-                    f'<button class="klein btn-ghost" {vals("ignorieren")}>ignorieren</button>')
+            return (f'<form class="inline" hx-post="/api/abgleich/{k.id}/zuordnen" hx-target="#main"><input type="hidden" name="jahr" value="{jahr}"><input type="hidden" name="filter" value="{filter}"><select name="buchung_id">{opts}</select> <button class="klein btn-secondary">{ICON["link"]}zuordnen</button></form> '
+                    f'<button class="klein btn-ghost" {vals("ignorieren")}>{ICON["auge_zu"]}ignorieren</button>')
         return (f'<form class="inline beleg-upload" hx-post="/api/abgleich/{k.id}/beleg" hx-encoding="multipart/form-data" hx-target="#main" hx-trigger="change"><input type="hidden" name="jahr" value="{jahr}"><input type="hidden" name="filter" value="{filter}">'
-                f'<label class="klein btn-secondary button" title="Rechnung zu dieser Buchung hochladen">Beleg hochladen<input type="file" name="datei" accept=".pdf,.xml,.png,.jpg,.jpeg" hidden></label></form> '
-                f'<button class="klein btn-secondary" {vals("anlegen")} title="Buchungsvorschlag ohne Beleg anlegen">ohne Beleg buchen</button> '
-                f'<button class="klein btn-ghost" {vals("ignorieren")}>ignorieren</button> '
-                f'<button class="klein btn-ghost" {vals("regel")} title="Regel: „{h(k.gegenkonto or k.verwendungszweck[:40])}“ künftig immer ignorieren">immer ignorieren</button>')
+                f'<label class="klein btn-secondary button" title="Rechnung zu dieser Buchung hochladen">{ICON["upload"]}Beleg hochladen<input type="file" name="datei" accept=".pdf,.xml,.png,.jpg,.jpeg" hidden></label></form> '
+                f'<button class="klein btn-secondary" {vals("anlegen")} title="Buchungsvorschlag ohne Beleg anlegen">{ICON["datei_plus"]}ohne Beleg buchen</button> '
+                f'<button class="klein btn-ghost" {vals("ignorieren")}>{ICON["auge_zu"]}ignorieren</button> '
+                f'<button class="klein btn-ghost" {vals("regel")} title="Regel: „{h(k.gegenkonto or k.verwendungszweck[:40])}“ künftig immer ignorieren">{ICON["sperren"]}immer ignorieren</button>')
 
     def status_rang(z: dict) -> int:
         """Sortierreihenfolge der Abgleich-Spalte: erst Rückfragen, dann Dubletten, dann ohne Beleg, dann erledigt."""
@@ -1001,7 +1034,7 @@ def suche_view(q: str, treffer: list[Buchung], kategorien: dict[int, Kategorie],
         f'<td>{h(b.lieferant)}<div class="muted klein">{h(b.beschreibung[:80])}{(" · " + h(b.rechnungsnummer)) if b.rechnungsnummer else ""}</div></td>'
         f'<td class="num">{eur_fmt(b.betrag_brutto)}</td><td>{h(kategorien[b.kategorie_id].name) if b.kategorie_id in kategorien else "–"}</td>'
         f'<td>{status(b)} {konto_badge(b)}</td>'
-        f'<td><a href="#" hx-get="/ui/pruefen/{b.id}" hx-target="#main">öffnen</a></td></tr>'
+        f'<td class="aktionen-zelle"><a href="#" class="btn-ghost" hx-get="/ui/pruefen/{b.id}" hx-target="#main" title="Beleg öffnen und korrigieren">{ICON["stift"]}Korrigieren</a></td></tr>'
         for b in treffer)
     summe = sum(b.betrag_brutto for b in treffer)
     return f"""

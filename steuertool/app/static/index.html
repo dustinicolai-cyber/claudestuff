@@ -11,13 +11,13 @@
 /* Design-Tokens. Dark ist Standard, Light über den Toggle. */
 :root,:root[data-theme="dark"]{
   --bg:#0e0e13;--bg2:#15151c;--card:#1a1a22;--card2:#20202a;--fg:#f4f4f6;--muted:#9c9cad;--line:#262630;
-  --orange:#ff6a1f;--orange-hell:rgba(255,106,31,.14);--gruen:#22c55e;--gruen-hell:rgba(34,197,94,.14);
+  --orange:#ff6a1f;--orange-hell:rgba(255,106,31,.14);--orange-mittel:rgba(255,106,31,.26);--gruen:#22c55e;--gruen-hell:rgba(34,197,94,.14);
   --rot:#ef4444;--rot-hell:rgba(239,68,68,.14);--gelb:#facc15;--gelb-hell:rgba(250,204,21,.14);--blau:#60a5fa;--blau-hell:rgba(96,165,250,.14);
   --knopf-fg:#ffffff;--schatten:0 8px 30px rgba(0,0,0,.35);--vorschau-bg:#ffffff;color-scheme:dark
 }
 :root[data-theme="light"]{
   --bg:#f3f4f8;--bg2:#e9eaf0;--card:#ffffff;--card2:#f6f7fa;--fg:#14141b;--muted:#5f5f72;--line:#e2e3ea;
-  --orange:#ff6a1f;--orange-hell:rgba(255,106,31,.12);--gruen:#16a34a;--gruen-hell:rgba(22,163,74,.12);
+  --orange:#ff6a1f;--orange-hell:rgba(255,106,31,.12);--orange-mittel:rgba(255,106,31,.2);--gruen:#16a34a;--gruen-hell:rgba(22,163,74,.12);
   --rot:#dc2626;--rot-hell:rgba(220,38,38,.10);--gelb:#ca8a04;--gelb-hell:rgba(202,138,4,.14);--blau:#2563eb;--blau-hell:rgba(37,99,235,.12);
   --knopf-fg:#ffffff;--schatten:0 8px 24px rgba(20,20,40,.08);--vorschau-bg:#ffffff;color-scheme:light
 }
@@ -30,15 +30,15 @@ body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.5 "Outfit","Aveni
 /* Sidebar */
 .side{grid-area:side;align-self:start;background:var(--bg2);border-right:1px solid var(--line);display:flex;flex-direction:column;padding:1.2rem .9rem;gap:1.2rem;position:sticky;top:0;height:100vh}
 .logo{padding:.3rem .2rem .2rem}
-.logo .wortmarke{width:100%;height:auto;display:block;color:var(--fg)} .logo .wm{fill:currentColor}
+.logo .wortmarke{width:90%;height:auto;display:block;color:var(--fg)} .logo .wm{fill:currentColor}
 .logo .mark{width:44px;height:44px;border-radius:12px;background:var(--orange);display:grid;place-items:center;color:#fff;font-weight:800;font-size:1.2rem;box-shadow:0 6px 18px rgba(255,106,31,.35);flex:none}
 .logo-txt b{display:block;font-size:1.15rem;letter-spacing:.01em;line-height:1.1}
 .logo-txt small{color:var(--orange);font-size:.7rem;letter-spacing:.12em;text-transform:uppercase;font-weight:600}
 .side nav{display:flex;flex-direction:column;gap:.25rem}
-.side nav button{box-shadow:none;display:flex;align-items:center;gap:.8rem;width:100%;background:transparent;border:0;border-left:3px solid transparent;color:var(--muted);padding:.7rem .8rem;border-radius:10px;cursor:pointer;font:inherit;font-size:.98rem;text-align:left;font-weight:500}
+.side nav button{box-shadow:none;display:flex;align-items:center;gap:.8rem;width:100%;background:transparent;border:0;color:var(--muted);padding:.7rem .8rem .7rem calc(.8rem + 3px);border-radius:10px;cursor:pointer;font:inherit;font-size:.98rem;text-align:left;font-weight:500}
 .side nav button svg{width:20px;height:20px;flex:none;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
 .side nav button:hover{background:var(--card);color:var(--fg)}
-.side nav button.aktiv{background:linear-gradient(90deg,var(--orange-hell),transparent);color:var(--fg);border-left-color:var(--orange)}
+.side nav button.aktiv{background:linear-gradient(90deg,var(--orange) 0,var(--orange) 3px,var(--orange-mittel) 3px,var(--orange-mittel) 25%,var(--orange-hell) 60%,transparent 100%);color:var(--fg);box-shadow:none}
 .side nav button.aktiv svg{color:var(--orange)}
 .side nav button{justify-content:space-between}
 .side nav button .txt{flex:1}
@@ -167,6 +167,7 @@ button:disabled:hover{background:transparent;color:inherit;box-shadow:none}
 .formular-kopf h2{margin:0;font-size:1.25rem;display:flex;align-items:center;gap:.5rem;flex-wrap:wrap}
 .formular-kopf .aktionen-raster{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:.4rem;margin:.7rem 0 0}
 @media (max-width:1400px){.formular-kopf .aktionen-raster{grid-template-columns:1fr 1fr}}
+.formular-kopf .aktionen-raster.zwei{display:flex;flex-wrap:wrap;gap:.4rem} .formular-kopf .aktionen-raster.zwei button{flex:0 0 auto;padding:.4rem .9rem}
 .formular-kopf .aktionen-raster button{padding:.4rem .5rem;font-size:.86em;font-weight:600;letter-spacing:0;justify-self:stretch;text-align:center;white-space:nowrap}
 .kopf-beschreibung{display:flex;align-items:center;gap:.4rem;margin-top:.35rem;font-size:.95em}
 .kopf-beschreibung .txt{cursor:text} .kopf-beschreibung .txt.leer{color:var(--muted);font-style:italic}
@@ -224,6 +225,19 @@ details.frage[open] summary .btn-ghost{text-decoration:underline}
 .abgleich-tabelle .aktionen-inline{display:flex;gap:.35rem .5rem;align-items:center;flex-wrap:wrap} .abgleich-tabelle .aktionen-inline button,.abgleich-tabelle .aktionen-inline .button{white-space:nowrap}
 .abgleich-tabelle .aktionen-inline form{display:inline-flex;gap:.35rem;align-items:center;max-width:100%} .abgleich-tabelle .aktionen-inline select{max-width:16em;font-size:.85em;padding:.25rem .4rem}
 .abgleich-tabelle td{vertical-align:top}
+.aktionen-inline svg{width:1em;height:1em;vertical-align:-.12em;margin-right:.3em;stroke-width:2.2}
+.aktionen-inline .btn-secondary,.aktionen-inline .button.btn-secondary{transition:border-color .15s,color .15s,background .15s,transform .15s}
+.aktionen-inline .btn-secondary:hover,.aktionen-inline .button.btn-secondary:hover{border-color:var(--orange);color:var(--orange);background:var(--orange-hell);transform:translateY(-1px)}
+.aktionen-inline .btn-ghost{border-radius:8px;transition:background .15s,color .15s}
+.aktionen-inline .btn-ghost:hover{background:var(--card2);color:var(--fg);text-decoration:none}
+.aktionen-inline .btn-ghost.gefahr:hover{background:var(--rot-hell,rgba(239,68,68,.14));color:var(--rot)}
+.bestaetigt-liste{margin-top:1rem} .bestaetigt-liste summary{cursor:pointer;font-weight:700;display:flex;align-items:center;gap:.5rem;list-style:none}
+.bestaetigt-liste summary::-webkit-details-marker{display:none} .bestaetigt-liste summary::before{content:"▸";color:var(--muted);font-size:.9em} .bestaetigt-liste[open] summary::before{content:"▾"}
+.bestaetigt-liste summary .z{min-width:1.5em;padding:.05em .45em;border-radius:9px;font-size:.75em;background:var(--card);color:var(--muted)}
+.bestaetigt-liste .listen-suche{width:100%;margin:.5rem 0;font-size:.86em}
+.bestaetigt-liste .liste li a{display:flex;align-items:center;gap:.4rem} .bestaetigt-liste .liste li a .txt{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bestaetigt-liste .liste li a svg{width:14px;height:14px;flex:none;stroke:var(--muted);fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round} .bestaetigt-liste .liste li a:hover svg{stroke:var(--orange)}
+.bestaetigt-liste .mehr{color:var(--muted);font-size:.8em;margin:.4rem 0 0}
 .klebe-leiste{position:sticky;top:0;z-index:4;background:var(--bg);padding:.3rem 0 .4rem;margin-bottom:.3rem}
 .klebe-leiste .row{margin:.2rem 0}
 /* Nach oben */

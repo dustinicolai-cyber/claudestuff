@@ -60,6 +60,11 @@ def _offene(s: Session) -> list[Buchung]:
     return s.exec(select(Buchung).where(Buchung.status == "vorschlag").order_by(Buchung.konfidenz, Buchung.datum)).all()
 
 
+def _bestaetigte(s: Session) -> list[Buchung]:
+    """Eingecheckte, nicht stornierte Buchungen – neueste zuerst – zum Nachkorrigieren."""
+    return [b for b in s.exec(select(Buchung).where(Buchung.status == "bestaetigt").order_by(Buchung.datum.desc(), Buchung.id.desc())).all() if not b.storniert]
+
+
 def _html(inhalt: str) -> HTMLResponse:
     return HTMLResponse(inhalt)
 
@@ -266,7 +271,7 @@ def ui_pruefen(ueberspringen: Optional[int] = None, richtung: Optional[str] = No
     im_reiter = [x for x in offene if x.richtung == reiter]
     if not im_reiter:
         zaehler = {"einnahme": sum(1 for x in offene if x.richtung == "einnahme"), "ausgabe": sum(1 for x in offene if x.richtung == "ausgabe")}
-        return _html(ui.pruefen_leer(reiter, zaehler))
+        return _html(ui.pruefen_leer(reiter, zaehler, _bestaetigte(s)))
     b = next((x for x in im_reiter if x.id != ueberspringen), im_reiter[0])
     return _pruefen_detail(s, b, reiter)
 
@@ -289,9 +294,9 @@ def _pruefen_detail(s: Session, b: Buchung, reiter: Optional[str] = None) -> HTM
     reiter = reiter or b.richtung
     zaehler = {"einnahme": sum(1 for x in offene if x.richtung == "einnahme"), "ausgabe": sum(1 for x in offene if x.richtung == "ausgabe")}
     liste = [x for x in offene if x.richtung == reiter]
-    if b.status != "vorschlag" or b.id not in {x.id for x in liste}:
+    if b.status == "vorschlag" and b.id not in {x.id for x in liste}:
         liste = [b] + liste
-    return _html(ui.pruefen_view(b, beleg, _kat_liste(s), liste, _bewertung(s, b), extraktion, config.regeln(), reiter, zaehler))
+    return _html(ui.pruefen_view(b, beleg, _kat_liste(s), liste, _bewertung(s, b), extraktion, config.regeln(), reiter, zaehler, _bestaetigte(s)))
 
 
 @app.get("/ui/manuell", response_class=HTMLResponse)
@@ -307,12 +312,17 @@ async def api_bestaetigen(buchung_id: int, request: Request, s: Session = Depend
         raise HTTPException(404)
     form = await request.form()
     vorher_kat, vorher_weg = b.kategorie_id, b.klassifizierung_weg or ""
+    korrektur = b.status == "bestaetigt"
     _buchung_aus_form(b, form)
     if not b.kategorie_id:
         return _pruefen_detail(s, b)
     reiter = b.richtung
     _bestaetigen(s, b, vorher_kat, vorher_weg)
     matching.matche(s)
+    if korrektur:
+        _protokoll(s, "korrektur", f"Buchung #{b.id} nachträglich korrigiert: {b.lieferant} {export.eur_fmt(b.betrag_brutto)}", b.id)
+        s.commit()
+        return _html(ui.meldung_box(f"Korrektur gespeichert: {b.lieferant} · {export.eur_fmt(b.betrag_brutto)} · {ui.d(b.datum)}.") + ui_pruefen(None, reiter, s).body.decode())
     return ui_pruefen(None, reiter, s)
 
 
