@@ -100,7 +100,7 @@ input[type=checkbox]:checked{background:var(--orange);border-color:var(--orange)
 input[type=checkbox]:focus-visible{outline:2px solid var(--orange);outline-offset:2px}
 input[type=radio]{accent-color:var(--orange)}
 label{display:flex;flex-direction:column;gap:.25rem;font-size:.85em;color:var(--muted)} label input,label select{color:var(--fg)}
-label.check{flex-direction:row;align-items:center;gap:.5rem;color:var(--fg);font-size:.95em}
+label.check{flex-direction:row;align-items:center;gap:.5rem;color:var(--fg);font-size:.95em} label.check input[type=checkbox]{width:16px;height:16px;flex:none}
 .link{color:var(--orange);cursor:pointer;text-decoration:underline}
 a{color:var(--orange)}
 .tabelle{width:100%;border-collapse:separate;border-spacing:0;background:var(--card);border:1px solid var(--line);border-radius:14px;overflow:hidden}
@@ -190,7 +190,7 @@ button:disabled:hover{background:transparent;color:inherit;box-shadow:none}
 pre.vorschau{overflow:auto;padding:.8rem;font-size:.8em;background:var(--card);color:var(--fg)}
 .vorschau-spalte,.formular-spalte{min-width:0}
 .formular{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:1.2rem 1.3rem;box-shadow:var(--schatten)}
-.grid2{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:.7rem .9rem} .grid2 .breit{grid-column:1/-1} .grid2 input,.grid2 select,.grid2 textarea{width:100%;min-width:0;box-sizing:border-box}
+.grid2{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:.7rem .9rem} .grid2 .breit{grid-column:1/-1} .grid2 input:not([type=checkbox]),.grid2 select,.grid2 textarea{width:100%;min-width:0;box-sizing:border-box}
 fieldset.sonderfall{border:1px solid var(--line);border-radius:12px;margin:.9rem 0 0;padding:.6rem .9rem .8rem;display:flex;gap:.9rem;flex-wrap:wrap;align-items:end;background:var(--card2)}
 fieldset legend{color:var(--orange);font-size:.82em;font-weight:600;padding:0 .4rem}
 .hinweise{margin:.9rem 0 0;padding-left:1.2rem;font-size:.9em} .hinweise li{margin:.2rem 0} .hinweise .warn{color:var(--gelb)}
