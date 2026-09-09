@@ -96,6 +96,9 @@ def _meta_aus_form(form) -> dict:
         v = form.get(f"meta_{k}")
         if v not in (None, ""):
             m[k] = v
+    if "meta_ksk_kuenstler" in form or form.get("datum"):
+        # Haken „selbständiger Künstler“: gesetzt = "1", nicht gesetzt = "0" (nur wenn das volle Formular kam)
+        m["ksk_kuenstler"] = "1" if str(form.get("meta_ksk_kuenstler", "")) == "1" else "0"
     return m
 
 
@@ -744,6 +747,9 @@ def _buchung_aus_konto(s: Session, k: Kontobewegung) -> Buchung:
     if not fa_schluessel and steuerlogik.erkenne_kapitalanlage(k.gegenkonto, k.verwendungszweck, cfg):
         fa_schluessel = "privat" if richtung == "ausgabe" else "privat_einnahme"
         fa_grund = "Wertpapier/Depot: privates Kapitalvermögen – Gewinne und Verluste laufen über die Anlage KAP der Einkommensteuer, nicht über die EÜR."
+    if not fa_schluessel and richtung == "ausgabe" and steuerlogik.erkenne_vorsorge(k.gegenkonto, k.verwendungszweck, cfg):
+        fa_schluessel = "vorsorge"
+        fa_grund = "KSK/Krankenkasse/Rentenversicherung: Sonderausgabe (Anlage Vorsorgeaufwand), keine Betriebsausgabe – wird im Jahresabschluss aufsummiert."
     if fa_schluessel:
         kat = next((x for x in _kats(s).values() if x.schluessel == fa_schluessel), None)
         if kat:
@@ -793,6 +799,8 @@ def ui_abgleich(jahr: Optional[int] = None, filter: str = "offen", s: Session = 
                     vorschlag[z["k"].id] = grund
                 elif steuerlogik.erkenne_kapitalanlage(z["k"].gegenkonto, z["k"].verwendungszweck, config.regeln()):
                     vorschlag[z["k"].id] = "Privat: Wertpapiere/Depot – gehört nicht in die EÜR (Anlage KAP), ignorieren"
+                elif z["k"].betrag < 0 and steuerlogik.erkenne_vorsorge(z["k"].gegenkonto, z["k"].verwendungszweck, config.regeln()):
+                    vorschlag[z["k"].id] = "Vorsorge (KSK/Krankenkasse/Rente): Sonderausgabe, keine Betriebsausgabe – „ohne Beleg buchen“ sammelt sie für die Anlage Vorsorgeaufwand"
     return _html(ui.abgleich_view(zeilen, regeln_, jahr, filter, vorschlag))
 
 
@@ -1059,7 +1067,8 @@ def ui_jahresabschluss(jahr: Optional[int] = None, s: Session = Depends(get_sess
         if b.datum.year == jahr and b.kategorie_id in kats:
             sk = kats[b.kategorie_id].schluessel
             summen[sk] = summen.get(sk, 0.0) + b.betrag_brutto
-    return _html(ui.jahresabschluss_view(jahr, cfg["jahresabschluss_fragen"], status, list(kats.values()), summen, cfg))
+    ksk = steuerlogik.ksk_uebersicht(_aktive(s), kats, s.exec(select(Anlagegut)).all(), jahr, cfg)
+    return _html(ui.jahresabschluss_view(jahr, cfg["jahresabschluss_fragen"], status, list(kats.values()), summen, cfg, ksk))
 
 
 @app.post("/api/fragebogen/{jahr}/{key}/toggle", response_class=HTMLResponse)

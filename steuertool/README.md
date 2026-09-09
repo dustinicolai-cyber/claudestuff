@@ -80,6 +80,11 @@ Kontoauszüge (CSV deutscher Banken oder CAMT.053) unter Import einlesen; Matchi
   KI (Ollama, bekommt Kategorienliste samt Beispielen), sonst „Sonstige Betriebsausgaben“ mit niedriger
   Konfidenz. Neue Standard-Kategorien und -Beispiele werden beim Start in die eigene Datei gemischt;
   eigene Änderungen bleiben erhalten.
+- **Künstlersozialkasse**: Beiträge an KSK, Krankenkasse, Rentenversicherung werden im Kontoauszug erkannt und in
+  der Kategorie „Vorsorge“ gesammelt – Sonderausgaben (Anlage Vorsorgeaufwand), nie Betriebsausgabe. Bei
+  Fremdleistungen markiert ein Haken selbständige Künstler/Publizisten; der Jahresabschluss zeigt das
+  Arbeitseinkommen für die KSK-Meldung (= Gewinn), die Vorsorgesumme, die abgabepflichtigen Entgelte und die
+  voraussichtliche Künstlersozialabgabe (Satz und Bagatellgrenze in `steuerregeln.json`).
 - **Zuordnungen (Name → Kategorie)**: eigene Seite in der Seitenleiste. Jeder bekannte Lieferant/Kunde
   steht dort mit seiner festen Kategorie; das Dropdown ändert sie sofort. Beim ersten Bestätigen eines
   Belegs wird die Zuordnung automatisch gelernt, im Formular wird die Kategorie beim Wählen des Namens

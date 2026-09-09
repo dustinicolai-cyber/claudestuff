@@ -174,6 +174,9 @@ def test_regeln_zusammenfuehren():
     kats = {k["schluessel"]: k for k in m["kategorien"]}
     assert kats["fahrtkosten"]["eur_zeile"] == 62 and kats["fahrtkosten"]["beispiele"] == "km"   # alter Standard 59 → neuer Standard
     assert "zinsen" in kats and kats["eigene"]["eur_zeile"] == 50                                  # neu ergänzt, eigene bleibt
+    std2 = {"kategorien": [{"schluessel": "fremdleistungen", "eur_zeile": 26, "sonderfall": "fremdleistung"}]}
+    alt_kopie = {"kategorien": [{"schluessel": "fremdleistungen", "eur_zeile": 26, "sonderfall": None}]}
+    assert _zusammenfuehren(std2, alt_kopie)["kategorien"][0]["sonderfall"] == "fremdleistung"   # alte Kopie ohne Sonderfall bekommt den neuen
     nutzer2 = {"kategorien": [{"schluessel": "fahrtkosten", "eur_zeile": 40}]}
     assert {k["schluessel"]: k for k in _zusammenfuehren(standard, nutzer2)["kategorien"]}["fahrtkosten"]["eur_zeile"] == 40  # bewusst geändert bleibt
 
@@ -193,3 +196,24 @@ def test_betriebsausstattung_wie_gwg(cfg, kats):
     gross = b(kategorie_id=kats["betriebsausstattung"].id, betrag_netto=1500.0, ust_betrag=285.0, betrag_brutto=1785.0)
     bw = bewerte(gross, kats["betriebsausstattung"], cfg)
     assert bw.umwandeln_in == "anlagevermoegen" and bw.abzugsfaehig == 0.0 and bw.afa_vorschlag
+
+
+def test_ksk_uebersicht_und_vorsorge(cfg, kats):
+    from app.steuerlogik import erkenne_vorsorge, ksk_uebersicht
+    assert erkenne_vorsorge("Kuenstlersozialkasse", "Beitrag 09/2025", cfg) and erkenne_vorsorge("Techniker Krankenkasse", "Beitrag", cfg)
+    assert not erkenne_vorsorge("Kreissparkasse Koeln", "Kontofuehrung", cfg) and not erkenne_vorsorge("Adobe", "Abo", cfg)
+    kd = {k.id: k for k in kats.values()}
+    buchungen = [
+        b(kategorie_id=kats["einnahmen"].id, richtung="einnahme", datum=date(2025, 3, 1), betrag_netto=9000, ust_satz=0, ust_betrag=0, betrag_brutto=9000),
+        b(kategorie_id=kats["vorsorge"].id, datum=date(2025, 1, 5), betrag_netto=310.0, ust_satz=0, ust_betrag=0, betrag_brutto=310.0),
+        b(kategorie_id=kats["vorsorge"].id, datum=date(2025, 2, 5), betrag_netto=310.0, ust_satz=0, ust_betrag=0, betrag_brutto=310.0),
+        b(kategorie_id=kats["fremdleistungen"].id, datum=date(2025, 4, 1), betrag_netto=1500.0, ust_betrag=285.0, betrag_brutto=1785.0, meta_json='{"ksk_kuenstler": "1"}'),
+        b(kategorie_id=kats["fremdleistungen"].id, datum=date(2025, 5, 1), betrag_netto=800.0, ust_betrag=152.0, betrag_brutto=952.0),  # Agentur, kein Haken
+    ]
+    bw = bewerte(buchungen[1], kats["vorsorge"], cfg)
+    assert bw.abzugsfaehig == 0.0 and bw.eur_zeile is None and "Vorsorgeaufwand" in bw.hinweise[0]
+    k = ksk_uebersicht(buchungen, kd, [], 2025, cfg)
+    assert k["vorsorge"] == 620.0 and k["entgelte_kuenstler"] == 1500.0 and k["abgabe"] == 75.0
+    assert k["arbeitseinkommen"] == round(9000 - 1785 - 952, 2)      # Vorsorge zählt nicht als Betriebsausgabe
+    klein = ksk_uebersicht(buchungen[:4], kd, [], 2025, {**cfg, "ksk_bagatellgrenze": 2000}) 
+    assert klein["abgabe"] == 0.0

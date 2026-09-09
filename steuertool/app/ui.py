@@ -381,6 +381,9 @@ def buchung_formular(b: Buchung, kategorien: list[Kategorie], cfg: dict, action:
     <label>Privatanteil % <input type="number" step="1" name="meta_privatanteil_prozent" value="{h(str(m.get("privatanteil_prozent", cfg["privatanteil_standard_prozent"])))}"></label></fieldset>
   <fieldset class="sonderfall" data-fuer="geschenk"><legend>Geschenk</legend>
     <label>Empfänger <input name="meta_empfaenger" value="{h(str(m.get("empfaenger", "")))}"></label> <span class="muted">Grenze {cfg["geschenk_grenze_je_empfaenger"]:.0f} € je Empfänger und Jahr</span></fieldset>
+  <fieldset class="sonderfall" data-fuer="fremdleistung"><legend>Fremdleistung</legend>
+    <label class="check"><input type="checkbox" name="meta_ksk_kuenstler" value="1" {"checked" if str(m.get("ksk_kuenstler", "")) == "1" else ""}> Selbständiger Künstler oder Publizist (natürliche Person) – zählt für die Künstlersozialabgabe</label>
+    <span class="muted klein">Nicht bei GmbH, UG, AG oder Agenturen. Summe und Abgabe stehen im Jahresabschluss.</span></fieldset>
   <fieldset class="sonderfall" data-fuer="gwg afa"><legend>Wirtschaftsgut</legend>
     <label>Nutzungsdauer (Jahre) <input type="number" step="1" name="meta_nutzungsdauer_jahre" value="{h(str(m.get("nutzungsdauer_jahre", cfg["afa_nutzungsdauer_standard_jahre"])))}"></label>
     <span class="muted">GWG-Grenze {cfg["gwg_grenze_netto"]:.0f} € netto – darüber automatisch AfA</span></fieldset>
@@ -636,7 +639,35 @@ def offen_view(op: dict, kandidaten: dict[int, list[Buchung]], funde: list[MailF
 
 # -------------------------------------------------------- Jahresabschluss
 
-def jahresabschluss_view(jahr: int, fragen: list[dict], status: dict[str, dict], kategorien: list[Kategorie], summen: dict[str, float], cfg: dict) -> str:
+def ksk_block(jahr: int, ksk: dict | None) -> str:
+    """Künstlersozialkasse und Einkommensteuer: die drei Zahlen, die außerhalb der EÜR gebraucht werden."""
+    if not ksk:
+        return ""
+    mind = ksk["mindestverdienst"]
+    einkommen_hinweis = (f"liegt unter der Mindestgrenze von {eur_fmt(mind)} – Versicherungspflicht in der KSK prüfen (Berufsanfänger ausgenommen)."
+                         if ksk["arbeitseinkommen"] < mind else "Grundlage für die Beitragsberechnung; Meldung des voraussichtlichen Einkommens bis 1. Dezember fürs Folgejahr.")
+    if ksk["entgelte_kuenstler"] <= 0:
+        abgabe_txt = "Keine Fremdleistung als „selbständiger Künstler“ markiert. Haken beim Prüfen einer Fremdleistung setzen, dann wird hier gerechnet."
+    elif ksk["abgabe"] <= 0:
+        abgabe_txt = f"Unter der Bagatellgrenze von {eur_fmt(ksk['bagatell'])} – keine Abgabe, keine Meldung nötig."
+    else:
+        abgabe_txt = f"{ksk['satz']:g} % auf die Nettoentgelte, Meldung an die KSK bis 31. März des Folgejahres. Die gezahlte Abgabe ist Betriebsausgabe (Soziale Abgaben)."
+    return f"""
+  <details class="karte frage" open>
+    <summary><span class="fett">Künstlersozialkasse &amp; Einkommensteuer {jahr}</span> <span class="rechts muted klein">außerhalb der EÜR</span></summary>
+    <div class="inhalt">
+      <table class="tabelle kompakt ksk-tabelle"><tbody>
+        <tr><td><b>Arbeitseinkommen für die KSK</b><div class="muted klein">= steuerlicher Gewinn aus der EÜR. {einkommen_hinweis}</div></td><td class="num fett">{eur_fmt(ksk['arbeitseinkommen'])}</td></tr>
+        <tr><td><b>Gezahlte Vorsorgebeiträge</b> (KSK, Krankenkasse, Rentenversicherung)<div class="muted klein">Sonderausgaben → Anlage Vorsorgeaufwand. Zum Abgleich mit der Beitragsbescheinigung der KSK. Kategorie „Vorsorge“ im Kontoauszug.</div></td><td class="num fett">{eur_fmt(ksk['vorsorge'])}</td></tr>
+        <tr><td><b>Entgelte an selbständige Künstler/Publizisten</b> (netto)<div class="muted klein">{abgabe_txt}</div></td><td class="num fett">{eur_fmt(ksk['entgelte_kuenstler'])}</td></tr>
+        <tr><td><b>Voraussichtliche Künstlersozialabgabe</b></td><td class="num fett {"warn" if ksk['abgabe'] else ""}">{eur_fmt(ksk['abgabe']) if ksk['abgabe'] else "–"}</td></tr>
+      </tbody></table>
+    </div>
+  </details>"""
+
+
+def jahresabschluss_view(jahr: int, fragen: list[dict], status: dict[str, dict], kategorien: list[Kategorie], summen: dict[str, float], cfg: dict,
+                         ksk: dict | None = None) -> str:
     bloecke = []
     for fr in fragen:
         st = status.get(fr["key"], {})
@@ -680,6 +711,7 @@ def jahresabschluss_view(jahr: int, fragen: list[dict], status: dict[str, dict],
   </div>
   <p class="muted erkl">Typische vergessene Posten. Haken setzen, wenn geprüft – auch wenn es nichts zu erfassen gab. Datum ist das Zahlungsdatum (Abflussprinzip).</p>
   {''.join(bloecke)}
+  {ksk_block(jahr, ksk)}
   <div class="row aktionen"><a class="button btn-primary" href="#" hx-get="/ui/export?jahr={jahr}" hx-target="#main">Jahresabschluss abschließen → Exporte für Elster</a></div>
 </section>"""
 

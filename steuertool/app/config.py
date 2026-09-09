@@ -52,7 +52,7 @@ def regeln_path() -> Path:
 
 # Frühere Standardwerte, die eine neuere Version korrigiert hat: steht in der Nutzerdatei noch genau der alte Wert,
 # hat die Nutzerin ihn nicht bewusst geändert – dann gilt der neue Standard. Eigene Anpassungen bleiben erhalten.
-_ALTE_STANDARDWERTE = {"fahrtkosten": {"eur_zeile": 59}}
+_ALTE_STANDARDWERTE = {"fahrtkosten": {"eur_zeile": 59}, "fremdleistungen": {"sonderfall": None}}
 
 
 def _kategorie_zusammenfuehren(standard: dict, nutzer: dict) -> dict:

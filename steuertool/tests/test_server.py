@@ -515,3 +515,30 @@ def test_positionen_loeschen_konto_und_tabelle():
         assert "2 Positionen gelöscht" in r.text
         with Session(engine()) as s:
             assert s.get(Buchung, b1id).storniert is True and s.get(Buchung, b2id) is None
+
+
+def test_ksk_im_jahresabschluss_und_kontoauszug():
+    with client() as c:
+        kopf = erzeuge.CSV_SPARKASSE.splitlines()[0]
+        csv = kopf + "\nDE00123;05.03.2025;05.03.2025;LASTSCHRIFT;Beitrag 03/2025 Vers.Nr. 123;Kuenstlersozialkasse;DE55;XXX;-310,00;EUR;Umsatz gebucht\n"
+        c.post("/api/konto/import", files={"datei": ("umsaetze.csv", csv.encode(), "text/csv")})
+        a = c.get("/ui/abgleich?jahr=2025&filter=alle").text
+        assert "Vorsorge (KSK/Krankenkasse/Rente)" in a
+        from app.models import Kontobewegung
+        with Session(engine()) as s:
+            k = s.exec(select(Kontobewegung).where(Kontobewegung.gegenkonto == "Kuenstlersozialkasse")).first()
+        c.post("/api/abgleich/aktion", data={"aktion": "anlegen", "ids": [str(k.id)], "jahr": "2025"})
+        with Session(engine()) as s:
+            b = s.exec(select(Buchung).where(Buchung.lieferant == "Kuenstlersozialkasse")).first()
+            kat = s.get(Kategorie, b.kategorie_id); assert kat.schluessel == "vorsorge"
+            fremd = s.exec(select(Kategorie).where(Kategorie.schluessel == "fremdleistungen")).first()
+            kat_id, fremd_id = kat.id, fremd.id
+        c.post(f"/api/buchung/{b.id}/bestaetigen", data={"datum": "2025-03-05", "richtung": "ausgabe", "lieferant": "Kuenstlersozialkasse", "betrag_netto": "310", "ust_satz": "0",
+                                                        "ust_betrag": "0", "betrag_brutto": "310", "kategorie_id": str(kat_id), "waehrung": "EUR", "betrag_fremd": "0"})
+        # Fremdleistung mit Künstler-Haken
+        c.post("/api/buchung/neu", data={"datum": "2025-04-01", "richtung": "ausgabe", "lieferant": "Illustratorin Muster", "betrag_netto": "1500", "ust_satz": "19", "ust_betrag": "285",
+                                         "betrag_brutto": "1785", "kategorie_id": str(fremd_id), "waehrung": "EUR", "meta_ksk_kuenstler": "1"})
+        j = c.get("/ui/jahresabschluss?jahr=2025").text
+        assert "Künstlersozialkasse &amp; Einkommensteuer 2025" in j and "310,00" in j and "1.500,00" in j and "75,00" in j
+        z = {e["zeile"]: e["betrag"] for e in c.get("/export/eur.json?jahr=2025").json()["zeilen"] if e["zeile"]}
+        assert 26 in z and all(v != 310.0 for v in z.values())   # Vorsorge taucht in keiner EÜR-Zeile auf

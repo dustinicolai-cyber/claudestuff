@@ -119,6 +119,34 @@ def erkenne_finanzamt(gegenkonto: str, zweck: str, richtung: str, cfg: dict) -> 
     return None, "Zahlung vom/ans Finanzamt – Steuerart aus dem Verwendungszweck nicht erkennbar, bitte Kategorie wählen."
 
 
+def erkenne_vorsorge(gegenkonto: str, zweck: str, cfg: dict) -> bool:
+    """Beiträge an KSK, Krankenkasse, Rentenversicherung: Sonderausgaben, nicht EÜR."""
+    return _enthaelt(f"{gegenkonto} {zweck}", cfg.get("vorsorge_muster") or [])
+
+
+def ksk_uebersicht(buchungen: Iterable[Buchung], kategorien: dict[int, Kategorie], anlagegueter: list[Anlagegut], jahr: int, cfg: dict) -> dict:
+    """Zahlen für Künstlersozialkasse und Einkommensteuer: Arbeitseinkommen (= Gewinn), gezahlte Vorsorgebeiträge,
+    abgabepflichtige Entgelte an selbständige Künstler und die daraus folgende Künstlersozialabgabe."""
+    buchungen = list(buchungen)
+    gewinn = next((z["betrag"] for z in eur_zeilen(buchungen, kategorien, anlagegueter, jahr, cfg) if z["bezeichnung"].startswith("Gewinn")), 0.0)
+    vorsorge = entgelte = 0.0
+    for b in buchungen:
+        if b.datum.year != jahr or b.status != "bestaetigt" or getattr(b, "storniert", False):
+            continue
+        k = kategorien.get(b.kategorie_id or -1)
+        if not k:
+            continue
+        if k.sonderfall == "vorsorge":
+            vorsorge += b.betrag_brutto
+        elif k.sonderfall == "fremdleistung" and str(meta(b).get("ksk_kuenstler", "")) in ("1", "true", "True"):
+            entgelte += b.betrag_netto if b.betrag_netto else b.betrag_brutto
+    satz = float(cfg.get("ksk_abgabesatz_prozent", 5.0))
+    bagatell = float(cfg.get("ksk_bagatellgrenze", 1000.0))
+    return {"arbeitseinkommen": runde(gewinn), "vorsorge": runde(vorsorge), "entgelte_kuenstler": runde(entgelte),
+            "abgabe": runde(entgelte * satz / 100) if entgelte > bagatell else 0.0, "satz": satz, "bagatell": bagatell,
+            "mindestverdienst": float(cfg.get("ksk_mindestverdienst", 3900.0))}
+
+
 def erkenne_kapitalanlage(gegenkonto: str, zweck: str, cfg: dict) -> bool:
     """Wertpapier-, Depot- und Dividendenbuchungen: privates Kapitalvermögen (Anlage KAP), gehört nicht in die EÜR."""
     return _enthaelt(f"{gegenkonto} {zweck}", cfg.get("kapitalanlage_muster") or [])
@@ -208,6 +236,18 @@ def bewerte(b: Buchung, k: Kategorie | None, cfg: dict,
     if sonderfall == "privat":
         bw.abzugsfaehig = 0.0
         bw.eur_zeile = None
+        return bw
+
+    if sonderfall == "vorsorge":
+        bw.abzugsfaehig = 0.0
+        bw.eur_zeile = None
+        bw.hinweise.append("Vorsorgebeitrag (KSK, Kranken-/Rentenversicherung): keine Betriebsausgabe, sondern Sonderausgabe – Anlage Vorsorgeaufwand der Einkommensteuer.")
+        return bw
+
+    if sonderfall == "fremdleistung":
+        if str(m.get("ksk_kuenstler", "")) in ("1", "true", "True"):
+            satz = float(cfg.get("ksk_abgabesatz_prozent", 5.0))
+            bw.hinweise.append(f"Entgelt an selbständigen Künstler/Publizisten: zählt für die Künstlersozialabgabe ({satz:g} % auf {b.betrag_netto:.2f} € netto, Meldung bis 31. März).")
         return bw
 
     if sonderfall == "ust_zahlung":
