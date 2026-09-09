@@ -178,7 +178,8 @@ def bestaetigt_zeile(b: Buchung, kategorien: list[Kategorie], mit_konto: set, ge
                    for k in kategorien if k.richtung == b.richtung)
     konto = '<span class="badge ok" title="Kontobewegung zugeordnet">Konto ✓</span>' if b.id in mit_konto else '<span class="muted klein">–</span>'
     return (f'<tr id="bz-{b.id}" class="bz {"gespeichert" if gespeichert else ""}" data-datum="{b.datum.isoformat()}" data-betrag="{b.betrag_brutto:.2f}" data-lieferant="{h((b.lieferant or "").lower())}" '
-            f'hx-post="/api/buchung/{b.id}/schnell" hx-trigger="change" hx-include="closest tr" hx-target="this" hx-swap="outerHTML" hx-disinherit="*">'
+            f'hx-post="/api/buchung/{b.id}/schnell" hx-trigger="change[target.name!=\'ids\']" hx-include="closest tr" hx-target="this" hx-swap="outerHTML" hx-disinherit="*">'
+            f'<td><input type="checkbox" name="ids" value="{b.id}" class="bz-wahl" aria-label="auswählen"></td>'
             f'<td><input type="date" name="datum" value="{b.datum.isoformat()}" aria-label="Datum"></td>'
             f'<td><span class="badge {"plus-b" if b.richtung == "einnahme" else "minus-b"}">{"Einnahme" if b.richtung == "einnahme" else "Ausgabe"}</span></td>'
             f'<td>{kombi_feld("lieferant", b.lieferant, "Lieferant / Kunde")}</td>'
@@ -189,18 +190,30 @@ def bestaetigt_zeile(b: Buchung, kategorien: list[Kategorie], mit_konto: set, ge
             f'<td class="aktionen-zelle"><a href="#" class="btn-ghost" hx-get="/ui/pruefen/{b.id}" hx-target="#main" hx-swap="innerHTML" title="Alle Felder mit Belegvorschau bearbeiten">{ICON["stift"]}Bearbeiten</a></td></tr>')
 
 
-def bestaetigte_tabelle(buchungen: list[Buchung], kategorien: list[Kategorie], mit_konto: set, jahr: int | None, lieferanten: list[str], datalist: bool = True) -> str:
-    """Volle Breite: alle eingecheckten Buchungen des Jahres, Kernfelder direkt in der Zeile änderbar, Stift für die komplette Maske."""
+def bestaetigte_tabelle(buchungen: list[Buchung], kategorien: list[Kategorie], mit_konto: set, jahr: int | None, lieferanten: list[str],
+                        datalist: bool = True, meldung: str = "") -> str:
+    """Volle Breite: alle eingecheckten Buchungen des Jahres, Kernfelder direkt in der Zeile änderbar, Stift für die komplette Maske,
+    Mehrfachauswahl für eine gemeinsame Kategorie."""
     rows = "".join(bestaetigt_zeile(b, kategorien, mit_konto) for b in buchungen)
+    kat_opts = (f'<optgroup label="Ausgaben">{"".join(f"<option value={k.id}>{h(k.name)}</option>" for k in kategorien if k.richtung == "ausgabe")}</optgroup>'
+                f'<optgroup label="Einnahmen">{"".join(f"<option value={k.id}>{h(k.name)}</option>" for k in kategorien if k.richtung == "einnahme")}</optgroup>')
     return f"""
 <section class="bestaetigt-tabelle" id="bestaetigt-tabelle">
+  {meldung}
   <div class="row zwischen"><h3>Bestätigte Buchungen <span class="z">{len(buchungen)}</span>{f' <span class="muted klein">{jahr}</span>' if jahr else ''}</h3>
     <span class="row" style="margin:0;gap:.8rem"><input type="search" class="listen-suche" placeholder="in der Liste suchen …" aria-label="Bestätigte durchsuchen"><span class="muted klein listen-zaehler"></span></span></div>
   <p class="muted klein">Datum, Kunde, Beschreibung, Kategorie und Brutto direkt in der Zeile ändern – wird beim Verlassen des Felds gespeichert. Der Stift öffnet die komplette Maske mit Belegvorschau.</p>
   {lieferanten_datalist(lieferanten) if datalist else ''}
-  <div class="scroll"><table class="tabelle kompakt bz-tabelle"><colgroup><col class="c-datum"><col class="c-art"><col class="c-lief"><col class="c-besch"><col class="c-kat"><col class="c-brutto"><col class="c-konto"><col class="c-aktion"></colgroup>
-    <thead><tr><th class="sortierbar" data-sort="datum" title="nach Datum sortieren">Datum <span class="pfeil"></span></th><th>Art</th><th class="sortierbar" data-sort="lieferant" title="alphabetisch sortieren">Lieferant / Kunde <span class="pfeil"></span></th><th>Beschreibung</th><th>Kategorie</th><th class="num sortierbar" data-sort="betrag" title="nach Betrag sortieren">Brutto € <span class="pfeil"></span></th><th>Konto</th><th></th></tr></thead>
-    <tbody>{rows or '<tr><td colspan=8 class="muted">Noch nichts bestätigt.</td></tr>'}</tbody></table></div>
+  <form class="auswahl-leiste bz-aktion" hidden hx-post="/api/buchungen/kategorie" hx-target="#bestaetigt-tabelle" hx-swap="outerHTML" hx-include="#bestaetigt-tabelle .bz-wahl:checked">
+    <span class="anzahl"></span>
+    <label class="klein" style="display:flex;align-items:center;gap:.4rem">Kategorie für die Auswahl <select name="kategorie_id" required><option value="">– wählen –</option>{kat_opts}</select></label>
+    <button type="submit" class="btn-primary klein">Kategorie setzen</button>
+    <button type="button" class="btn-ghost klein bz-abwaehlen">Auswahl aufheben</button>
+    <span class="muted klein">Zuordnung Name → Kategorie wird dabei mitgelernt.</span>
+  </form>
+  <div class="scroll"><table class="tabelle kompakt bz-tabelle"><colgroup><col class="c-wahl"><col class="c-datum"><col class="c-art"><col class="c-lief"><col class="c-besch"><col class="c-kat"><col class="c-brutto"><col class="c-konto"><col class="c-aktion"></colgroup>
+    <thead><tr><th><input type="checkbox" class="bz-alle" title="alle sichtbaren auswählen" aria-label="alle auswählen"></th><th class="sortierbar" data-sort="datum" title="nach Datum sortieren">Datum <span class="pfeil"></span></th><th>Art</th><th class="sortierbar" data-sort="lieferant" title="alphabetisch sortieren">Lieferant / Kunde <span class="pfeil"></span></th><th>Beschreibung</th><th>Kategorie</th><th class="num sortierbar" data-sort="betrag" title="nach Betrag sortieren">Brutto € <span class="pfeil"></span></th><th>Konto</th><th></th></tr></thead>
+    <tbody>{rows or '<tr><td colspan=9 class="muted">Noch nichts bestätigt.</td></tr>'}</tbody></table></div>
   <script>
   (function(){{
     const box = document.getElementById('bestaetigt-tabelle'), tbody = box.querySelector('tbody'), suche = box.querySelector('.listen-suche'), zaehler = box.querySelector('.listen-zaehler');
@@ -221,7 +234,17 @@ def bestaetigte_tabelle(buchungen: list[Buchung], kategorien: list[Kategorie], m
     if (zustand.suche) {{ suche.value = zustand.suche; filtern(); }}
     if (zustand.sort) sortieren(zustand.sort, zustand.dir || 1);
     // Enter im Feld = speichern (change) statt Formular-Submit
-    box.addEventListener('keydown', e => {{ if (e.key === 'Enter' && e.target.matches('input')) {{ e.preventDefault(); e.target.blur(); }} }});
+    box.addEventListener('keydown', e => {{ if (e.key === 'Enter' && e.target.matches('input:not(.bz-wahl)')) {{ e.preventDefault(); e.target.blur(); }} }});
+    // Mehrfachauswahl → Aktionsleiste „Kategorie setzen“
+    const leiste = box.querySelector('.bz-aktion'), alle = box.querySelector('.bz-alle');
+    const wahl = () => [...box.querySelectorAll('.bz-wahl')];
+    function zaehlen(){{ const n = wahl().filter(b => b.checked).length; leiste.hidden = !n; leiste.querySelector('.anzahl').textContent = n + ' ausgewählt ·'; if (alle) alle.checked = n > 0 && n === wahl().filter(b => !b.closest('tr').hidden).length; }}
+    box.addEventListener('change', e => {{ if (e.target.classList.contains('bz-wahl')) zaehlen(); }});
+    if (alle) alle.addEventListener('change', () => {{ wahl().filter(b => !b.closest('tr').hidden).forEach(b => b.checked = alle.checked); zaehlen(); }});
+    leiste.querySelector('.bz-abwaehlen').addEventListener('click', () => {{ wahl().forEach(b => b.checked = false); zaehlen(); }});
+    let letzte = null;
+    box.addEventListener('click', e => {{ if (!e.target.classList.contains('bz-wahl')) return; const b = wahl(), i = b.indexOf(e.target);
+      if (e.shiftKey && letzte !== null) {{ const [a, z] = [Math.min(i, letzte), Math.max(i, letzte)]; for (let k = a; k <= z; k++) if (!b[k].closest('tr').hidden) b[k].checked = e.target.checked; zaehlen(); }} letzte = i; }});
   }})();
   </script>
 </section>"""

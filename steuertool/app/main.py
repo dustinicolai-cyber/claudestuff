@@ -451,6 +451,37 @@ async def api_buchung_schnell(buchung_id: int, request: Request, s: Session = De
     return _html(ui.bestaetigt_zeile(b, _kat_liste(s), _mit_konto(s), gespeichert=True))
 
 
+@app.post("/api/buchungen/kategorie", response_class=HTMLResponse)
+async def api_buchungen_kategorie(request: Request, s: Session = Depends(get_session)) -> HTMLResponse:
+    """Sammelaktion aus der Tabelle bestätigter Buchungen: eine Kategorie für alle ausgewählten Zeilen."""
+    form = await request.form()
+    ids = [int(t) for x in form.getlist("ids") for t in str(x).split(",") if t.strip().isdigit()]
+    kat = s.get(Kategorie, int(form["kategorie_id"])) if str(form.get("kategorie_id", "")).isdigit() else None
+    jahr = int(form["jahr"]) if str(form.get("jahr", "")).isdigit() else _standardjahr(s)
+    n = uebersprungen = 0
+    if kat:
+        for bid in ids:
+            b = s.get(Buchung, bid)
+            if not b or b.storniert:
+                continue
+            if b.richtung != kat.richtung:
+                uebersprungen += 1
+                continue
+            vorher_kat, vorher_weg = b.kategorie_id, b.klassifizierung_weg or ""
+            b.kategorie_id = kat.id
+            if b.status == "bestaetigt":
+                _bestaetigen(s, b, vorher_kat, vorher_weg)
+            s.add(b); n += 1
+        if n:
+            _protokoll(s, "korrektur", f"{n} Buchungen gemeinsam auf „{kat.name}“ gesetzt")
+        s.commit()
+    text = f"{n} Buchungen auf „{kat.name}“ gesetzt." if kat else "Keine Kategorie gewählt."
+    if uebersprungen:
+        text += f" {uebersprungen} übersprungen, weil Richtung (Einnahme/Ausgabe) nicht zur Kategorie passt."
+    return _html(ui.bestaetigte_tabelle(_bestaetigte(s, jahr), _kat_liste(s), _mit_konto(s), jahr, _lieferanten(s), datalist=False,
+                                        meldung=ui.meldung_box(text, "ok-box" if n else "warn-box")))
+
+
 @app.post("/api/buchung/neu", response_class=HTMLResponse)
 async def api_buchung_neu(request: Request, s: Session = Depends(get_session)) -> HTMLResponse:
     form = await request.form()

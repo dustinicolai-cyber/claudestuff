@@ -463,3 +463,25 @@ def test_zuordnungen_name_zu_kategorie():
         with Session(engine()) as s:
             f = s.exec(select(Buchung).where(Buchung.lieferant == "Figma, Inc")).first()
             assert f.kategorie_id == software.id and f.klassifizierung_weg.startswith("regel:")
+
+
+def test_kategorie_fuer_mehrere_buchungen():
+    """Mehrfachauswahl in der Tabelle: eine Kategorie für mehrere bestätigte Buchungen, Richtung wird geprüft."""
+    with client() as c:
+        with Session(engine()) as s:
+            software = s.exec(select(Kategorie).where(Kategorie.schluessel == "software")).first()
+            werbung = s.exec(select(Kategorie).where(Kategorie.schluessel == "werbekosten")).first()
+            einnahmen = s.exec(select(Kategorie).where(Kategorie.schluessel == "einnahmen")).first()
+            a = Buchung(datum=date(2025, 2, 1), richtung="ausgabe", lieferant="Adobe", betrag_brutto=10, betrag_netto=10, status="bestaetigt", kategorie_id=software.id)
+            b = Buchung(datum=date(2025, 2, 2), richtung="ausgabe", lieferant="Adobe", betrag_brutto=20, betrag_netto=20, status="bestaetigt", kategorie_id=software.id)
+            e = Buchung(datum=date(2025, 2, 3), richtung="einnahme", lieferant="Kunde", betrag_brutto=100, betrag_netto=100, status="bestaetigt", kategorie_id=einnahmen.id)
+            s.add(a); s.add(b); s.add(e); s.commit(); ids = [a.id, b.id, e.id]
+            werbung_zeile, werbung_id, einnahmen_id = werbung.eur_zeile, werbung.id, einnahmen.id
+        t = c.get("/ui/pruefen?jahr=2025").text
+        assert 'class="bz-wahl"' in t and 'hx-post="/api/buchungen/kategorie"' in t and "Kategorie setzen" in t
+        r = c.post("/api/buchungen/kategorie", data={"ids": [str(i) for i in ids], "kategorie_id": str(werbung_id), "jahr": "2025"})
+        assert "2 Buchungen auf „Werbekosten“ gesetzt" in r.text and "1 übersprungen" in r.text and 'id="bestaetigt-tabelle"' in r.text
+        with Session(engine()) as s:
+            assert s.get(Buchung, ids[0]).kategorie_id == werbung_id and s.get(Buchung, ids[1]).kategorie_id == werbung_id
+            assert s.get(Buchung, ids[2]).kategorie_id == einnahmen_id and s.get(Buchung, ids[0]).eur_zeile == werbung_zeile
+        assert c.get("/api/zuordnung/fuer", params={"lieferant": "Adobe"}).json()["kategorie_id"] == werbung_id  # mitgelernt
