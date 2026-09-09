@@ -249,6 +249,12 @@ details.frage[open] summary .btn-ghost{text-decoration:underline}
 .bz td.num input{text-align:right;font-variant-numeric:tabular-nums}
 .bz.gespeichert td{animation:gespeichert 1.4s ease-out} @keyframes gespeichert{0%{background:var(--gruen-hell)}100%{background:transparent}}
 .bz .badge{white-space:nowrap}
+.gefahr-text,button.gefahr-text{color:var(--rot)} .aktionen-inline .btn-ghost.gefahr-text:hover,button.gefahr-text:hover{background:rgba(239,68,68,.14);color:var(--rot)}
+.bz-aktion .loesch-knopf{margin-left:1.2rem}
+dialog.frage{border:1px solid var(--line);border-radius:12px;background:var(--card);color:var(--fg);padding:1.3rem 1.5rem;max-width:min(92vw,460px);box-shadow:0 24px 60px rgba(0,0,0,.5)}
+dialog.frage::backdrop{background:rgba(0,0,0,.55);backdrop-filter:blur(2px)}
+dialog.frage h3{margin:0 0 .5rem;font-size:1.1rem} dialog.frage p{margin:0 0 1.1rem;color:var(--muted);line-height:1.5}
+dialog.frage .knoepfe{display:flex;justify-content:flex-end;gap:.6rem} dialog.frage button.gefahr{background:var(--rot);color:#fff}
 .zo-tabelle{table-layout:fixed;min-width:820px} .zo-tabelle col.c-art{width:96px} .zo-tabelle col.c-anzahl{width:110px} .zo-tabelle col.c-kat{width:300px} .zo-tabelle col.c-quelle{width:260px}
 .zo-tabelle td{vertical-align:middle} .zo select{width:100%;min-width:0;padding:.35rem .5rem;font-size:.9em;background:transparent;border:1px solid transparent;border-radius:8px;color:var(--fg)}
 .zo select:hover{border-color:var(--line);background:var(--card2)} .zo select:focus{border-color:var(--orange);background:var(--card2);box-shadow:none;outline:none}
@@ -439,6 +445,26 @@ footer{color:var(--muted);font-size:.78em;padding:1.4rem 0 0}
   document.body.addEventListener('htmx:responseError', e => { const x = e.detail.xhr; zeigen('Speichern fehlgeschlagen (' + x.status + '). ' + (x.responseText || '').replace(/<[^>]+>/g, ' ').slice(0, 300)); });
   document.body.addEventListener('htmx:sendError', () => zeigen('Server nicht erreichbar – läuft Steuerfuchs noch? Seite neu laden oder App neu starten.'));
   document.body.addEventListener('htmx:targetError', e => zeigen('Interner Anzeigefehler (Ziel ' + e.detail.target + ' fehlt) – bitte Seite neu laden (⌘R).'));
+})();
+
+// ---- Rückfrage als Overlay statt Browser-Dialog: greift für jedes hx-confirm ----
+(function(){
+  let dlg = null;
+  function frage(text, gefahr){
+    if (!dlg) { dlg = document.createElement('dialog'); dlg.className = 'frage'; dlg.innerHTML = '<h3></h3><p></p><div class="knoepfe"><button type="button" class="btn-secondary abbrechen">Abbrechen</button><button type="button" class="ok">OK</button></div>'; document.body.appendChild(dlg); }
+    const teile = text.split(/(?<=\?)\s+/); dlg.querySelector('h3').textContent = teile[0]; dlg.querySelector('p').textContent = teile.slice(1).join(' ');
+    const ok = dlg.querySelector('.ok'); ok.textContent = gefahr ? 'Löschen' : 'Ja, weiter'; ok.classList.toggle('gefahr', gefahr);
+    return new Promise(res => { const fertig = v => { dlg.close(); res(v); }; ok.onclick = () => fertig(true); dlg.querySelector('.abbrechen').onclick = () => fertig(false); dlg.oncancel = e => { e.preventDefault(); fertig(false); }; dlg.showModal(); ok.focus(); });
+  }
+  document.body.addEventListener('htmx:confirm', e => {
+    // Frage vom Element selbst oder – bei Formularen – vom geklickten Submit-Knopf (htmx liest dort kein hx-confirm)
+    const sub = e.detail.triggeringEvent && e.detail.triggeringEvent.submitter;
+    const q = e.detail.question || (sub && (sub.getAttribute('hx-confirm') || sub.getAttribute('data-hx-confirm')));
+    if (!q) return;
+    e.preventDefault();
+    const gefahr = /l[öo]sch|storn|entfern|beenden/i.test(q);
+    frage(q, gefahr).then(ja => { if (ja) e.detail.issueRequest(true); });
+  });
 })();
 </script>
 </body>

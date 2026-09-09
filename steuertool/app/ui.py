@@ -208,6 +208,8 @@ def bestaetigte_tabelle(buchungen: list[Buchung], kategorien: list[Kategorie], m
     <label for="bz-kat">Kategorie für die Auswahl <span class="anzahl muted"></span></label>
     <select name="kategorie_id" id="bz-kat" required><option value="">– wählen –</option>{kat_opts}</select>
     <button type="submit" class="btn-primary klein">Anwenden</button>
+    <button type="button" class="btn-ghost klein gefahr-text loesch-knopf" hx-post="/api/buchungen/loeschen-tabelle" hx-target="#bestaetigt-tabelle" hx-swap="outerHTML" hx-include="#bestaetigt-tabelle .bz-wahl:checked"
+      hx-confirm="Ausgewählte Positionen wirklich löschen?" data-confirm-vorlage="{{n}} Positionen wirklich löschen? Bestätigte Buchungen werden storniert und zählen nicht mehr, Belegdateien bleiben im Belegordner.">{ICON["x"]}Positionen löschen</button>
   </form>
   <div class="scroll"><table class="tabelle kompakt bz-tabelle"><colgroup><col class="c-wahl"><col class="c-datum"><col class="c-art"><col class="c-lief"><col class="c-besch"><col class="c-kat"><col class="c-brutto"><col class="c-konto"><col class="c-aktion"></colgroup>
     <thead><tr><th><input type="checkbox" class="bz-alle" title="alle sichtbaren auswählen" aria-label="alle auswählen"></th><th class="sortierbar" data-sort="datum" title="nach Datum sortieren">Datum <span class="pfeil"></span></th><th>Art</th><th class="sortierbar" data-sort="lieferant" title="alphabetisch sortieren">Lieferant / Kunde <span class="pfeil"></span></th><th>Beschreibung</th><th>Kategorie</th><th class="num sortierbar" data-sort="betrag" title="nach Betrag sortieren">Brutto € <span class="pfeil"></span></th><th>Konto</th><th></th></tr></thead>
@@ -237,7 +239,8 @@ def bestaetigte_tabelle(buchungen: list[Buchung], kategorien: list[Kategorie], m
     const leiste = box.querySelector('.bz-aktion'), alle = box.querySelector('.bz-alle');
     const wahl = () => [...box.querySelectorAll('.bz-wahl')];
     function zaehlen(){{ const n = wahl().filter(b => b.checked).length; leiste.classList.toggle('aktiv', n > 0); leiste.setAttribute('aria-hidden', n ? 'false' : 'true');
-      leiste.querySelector('.anzahl').textContent = n ? '(' + n + ')' : ''; if (alle) alle.checked = n > 0 && n === wahl().filter(b => !b.closest('tr').hidden).length; }}
+      leiste.querySelector('.anzahl').textContent = n ? '(' + n + ')' : ''; if (alle) alle.checked = n > 0 && n === wahl().filter(b => !b.closest('tr').hidden).length;
+      leiste.querySelectorAll('[data-confirm-vorlage]').forEach(k => k.setAttribute('hx-confirm', k.dataset.confirmVorlage.replace('{{n}}', n))); }}
     box.addEventListener('change', e => {{ if (e.target.classList.contains('bz-wahl')) zaehlen(); }});
     if (alle) alle.addEventListener('change', () => {{ wahl().filter(b => !b.closest('tr').hidden).forEach(b => b.checked = alle.checked); zaehlen(); }});
     let letzte = null;
@@ -605,7 +608,8 @@ def offen_view(op: dict, kandidaten: dict[int, list[Buchung]], funde: list[MailF
   document.querySelectorAll('.auswahl-form').forEach(f => {{
     const leiste = f.querySelector('.auswahl-leiste'), alle = f.querySelector('input.alle');
     const boxen = () => [...f.querySelectorAll('tbody input[type=checkbox]')];
-    function zaehlen(){{ const n = boxen().filter(b => b.checked).length; leiste.hidden = !n; leiste.querySelector('.anzahl').textContent = n + ' ausgewählt ·'; }}
+    function zaehlen(){{ const n = boxen().filter(b => b.checked).length; leiste.hidden = !n; leiste.querySelector('.anzahl').textContent = n + ' ausgewählt ·';
+      leiste.querySelectorAll('[data-confirm-vorlage]').forEach(k => k.setAttribute('hx-confirm', k.dataset.confirmVorlage.replace('{{n}}', n))); }}
     if (alle) alle.addEventListener('change', () => {{ boxen().filter(b => !b.closest('tr').hidden).forEach(b => b.checked = alle.checked); zaehlen(); }});
     f.addEventListener('change', e => {{ if (e.target.type === 'checkbox' && e.target !== alle) zaehlen(); }});
     // Suche innerhalb der Liste
@@ -1132,7 +1136,8 @@ def abgleich_view(zeilen: list[dict], regeln: list[IgnorRegel], jahr: int, filte
       <button type="submit" name="aktion" value="anlegen" class="{"btn-secondary" if filter == "rueckfrage" else "btn-primary"} klein">Buchungen anlegen</button>
       <button type="submit" name="aktion" value="ignorieren" class="btn-secondary klein">Ignorieren</button>
       <button type="submit" name="aktion" value="regel" class="btn-ghost klein" hx-confirm="Für jede ausgewählte Bewegung eine Ignorier-Regel auf das Gegenkonto anlegen?">Immer ignorieren</button>
-      <button type="submit" name="aktion" value="loesen" class="btn-ghost klein">Zuordnung lösen</button></div>
+      <button type="submit" name="aktion" value="loesen" class="btn-ghost klein">Zuordnung lösen</button>
+      <button type="submit" name="aktion" value="loeschen" class="btn-ghost klein gefahr-text loesch-knopf" hx-confirm="Ausgewählte Positionen wirklich löschen?" data-confirm-vorlage="{{n}} Positionen wirklich löschen? Die Kontobewegungen werden entfernt; ein erneuter Import desselben Auszugs bringt sie nicht zurück.">{ICON["x"]}Positionen löschen</button></div>
     </div>
     <div class="scroll"><table class="tabelle kompakt abgleich-tabelle"><colgroup><col class="c-wahl"><col class="c-datum"><col class="c-betrag"><col class="c-zweck"><col class="c-status"><col class="c-aktion"></colgroup><thead><tr><th></th><th class="sortierbar" data-sort="datum" title="nach Datum sortieren">Datum <span class="pfeil"></span></th><th class="num sortierbar" data-sort="betrag" title="nach Betrag sortieren">Betrag <span class="pfeil"></span></th><th>Gegenkonto / Zweck</th><th class="sortierbar" data-sort="status" title="nach Status sortieren: Rückfragen, Dubletten, ohne Beleg, zugeordnet, ignoriert">Abgleich <span class="pfeil"></span></th><th class="aktion-kopf">Aktion</th></tr></thead>
     <tbody>{rows or '<tr><td colspan=6 class="muted">Nichts in dieser Liste.</td></tr>'}</tbody></table></div>
@@ -1148,7 +1153,8 @@ def abgleich_view(zeilen: list[dict], regeln: list[IgnorRegel], jahr: int, filte
   document.querySelectorAll('.auswahl-form').forEach(f => {{
     const leiste = f.querySelector('.auswahl-leiste'), alle = f.querySelector('input.alle');
     const boxen = () => [...f.querySelectorAll('tbody input[type=checkbox]')];
-    function zaehlen(){{ const n = boxen().filter(b => b.checked).length; leiste.hidden = !n; leiste.querySelector('.anzahl').textContent = n + ' ausgewählt ·'; }}
+    function zaehlen(){{ const n = boxen().filter(b => b.checked).length; leiste.hidden = !n; leiste.querySelector('.anzahl').textContent = n + ' ausgewählt ·';
+      leiste.querySelectorAll('[data-confirm-vorlage]').forEach(k => k.setAttribute('hx-confirm', k.dataset.confirmVorlage.replace('{{n}}', n))); }}
     if (alle) alle.addEventListener('change', () => {{ boxen().filter(b => !b.closest('tr').hidden).forEach(b => b.checked = alle.checked); zaehlen(); }});
     f.addEventListener('change', e => {{ if (e.target.type === 'checkbox' && e.target !== alle) zaehlen(); }});
     // Suche innerhalb der Liste

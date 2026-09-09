@@ -485,3 +485,33 @@ def test_kategorie_fuer_mehrere_buchungen():
             assert s.get(Buchung, ids[0]).kategorie_id == werbung_id and s.get(Buchung, ids[1]).kategorie_id == werbung_id
             assert s.get(Buchung, ids[2]).kategorie_id == einnahmen_id and s.get(Buchung, ids[0]).eur_zeile == werbung_zeile
         assert c.get("/api/zuordnung/fuer", params={"lieferant": "Adobe"}).json()["kategorie_id"] == werbung_id  # mitgelernt
+
+
+def test_positionen_loeschen_konto_und_tabelle():
+    """Sammel-Löschen: Kontobewegungen verschwinden und kommen beim Re-Import nicht zurück; Buchungen werden storniert bzw. gelöscht."""
+    with client() as c:
+        r = c.post("/api/konto/import", files={"datei": ("umsaetze.csv", erzeuge.CSV_SPARKASSE.encode(), "text/csv")})
+        assert "4 neue Kontobewegungen" in r.text
+        from app.models import Kontobewegung
+        with Session(engine()) as s:
+            ks = s.exec(select(Kontobewegung)).all(); ids = [k.id for k in ks[:2]]
+        a = c.get("/ui/abgleich?jahr=2025&filter=alle").text
+        assert 'value="loeschen"' in a and "Positionen löschen" in a and "data-confirm-vorlage" in a
+        r = c.post("/api/abgleich/aktion", data={"aktion": "loeschen", "ids": [str(i) for i in ids], "jahr": "2025", "filter": "alle"})
+        assert "2 Kontobewegungen gelöscht" in r.text
+        with Session(engine()) as s:
+            assert len(s.exec(select(Kontobewegung)).all()) == 2
+        r = c.post("/api/konto/import", files={"datei": ("umsaetze.csv", erzeuge.CSV_SPARKASSE.encode(), "text/csv")})
+        assert "0 neue Kontobewegungen" in r.text          # gelöschte kommen nicht zurück
+        # Tabelle: bestätigte Buchung stornieren, Vorschlag löschen
+        with Session(engine()) as s:
+            kat = s.exec(select(Kategorie).where(Kategorie.schluessel == "software")).first()
+            b1 = Buchung(datum=date(2025, 2, 1), richtung="ausgabe", lieferant="A", betrag_brutto=10, betrag_netto=10, status="bestaetigt", kategorie_id=kat.id)
+            b2 = Buchung(datum=date(2025, 2, 2), richtung="ausgabe", lieferant="B", betrag_brutto=20, betrag_netto=20, status="vorschlag", kategorie_id=kat.id)
+            s.add(b1); s.add(b2); s.commit(); b1id, b2id = b1.id, b2.id
+        t = c.get("/ui/pruefen?jahr=2025").text
+        assert 'hx-post="/api/buchungen/loeschen-tabelle"' in t
+        r = c.post("/api/buchungen/loeschen-tabelle", data={"ids": [str(b1id), str(b2id)], "jahr": "2025"})
+        assert "2 Positionen gelöscht" in r.text
+        with Session(engine()) as s:
+            assert s.get(Buchung, b1id).storniert is True and s.get(Buchung, b2id) is None

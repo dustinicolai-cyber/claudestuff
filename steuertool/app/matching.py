@@ -7,7 +7,7 @@ from sqlmodel import Session, select
 
 from . import config
 from .importer.kontoauszug import Bewegung
-from .models import Buchung, DedupIgnoriert, IgnorRegel, Kontobewegung
+from .models import Buchung, DedupIgnoriert, IgnorRegel, Kontobewegung, KontoGeloescht
 
 
 def kontobewegungen_speichern(s: Session, bewegungen: list[Bewegung], quelle: str) -> tuple[int, int]:
@@ -15,7 +15,8 @@ def kontobewegungen_speichern(s: Session, bewegungen: list[Bewegung], quelle: st
     neu = dup = 0
     for bw in bewegungen:
         fp = bw.fingerprint()
-        if s.exec(select(Kontobewegung).where(Kontobewegung.fingerprint == fp)).first():
+        if s.exec(select(Kontobewegung).where(Kontobewegung.fingerprint == fp)).first() or \
+                s.exec(select(KontoGeloescht).where(KontoGeloescht.fingerprint == fp)).first():
             dup += 1
             continue
         s.add(Kontobewegung(datum=bw.datum, betrag=bw.betrag, verwendungszweck=bw.verwendungszweck,

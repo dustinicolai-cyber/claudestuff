@@ -159,6 +159,13 @@ class Protokoll(SQLModel, table=True):
     buchung_id: Optional[int] = None
 
 
+class KontoGeloescht(SQLModel, table=True):
+    """Fingerabdrücke gelöschter Kontobewegungen – ein erneuter Import desselben Auszugs bringt sie nicht zurück."""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    fingerprint: str = Field(index=True)
+    geloescht_am: datetime = Field(default_factory=datetime.now)
+
+
 class IgnorRegel(SQLModel, table=True):
     """Kontobewegungen, die nie betrieblich sind (Miete privat, Netflix …): Muster auf Gegenkonto/Zweck."""
     id: Optional[int] = Field(default=None, primary_key=True)

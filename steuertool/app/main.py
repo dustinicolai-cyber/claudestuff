@@ -16,7 +16,7 @@ from sqlmodel import Session, select
 from . import config, export, matching, ollama, regeln as regelwerk, steuerlogik, ui
 from .db import get_session, init_db, kategorien_synchronisieren
 from .importer import klassifizierung, kontoauszug, mail, pipeline
-from .models import Anlagegut, Beleg, Buchung, DedupIgnoriert, Fragebogen, IgnorRegel, Kategorie, Kontobewegung, MailFund, Protokoll, Regel
+from .models import Anlagegut, Beleg, Buchung, DedupIgnoriert, Fragebogen, IgnorRegel, Kategorie, Kontobewegung, KontoGeloescht, MailFund, Protokoll, Regel
 
 @asynccontextmanager
 async def _lebenszyklus(_: FastAPI):
@@ -482,6 +482,34 @@ async def api_buchungen_kategorie(request: Request, s: Session = Depends(get_ses
                                         meldung=ui.meldung_box(text, "ok-box" if n else "warn-box")))
 
 
+@app.post("/api/buchungen/loeschen-tabelle", response_class=HTMLResponse)
+async def api_buchungen_loeschen_tabelle(request: Request, s: Session = Depends(get_session)) -> HTMLResponse:
+    """Sammelaktion aus der Tabelle bestätigter Buchungen: Vorschläge werden gelöscht (Datei in den Papierkorb),
+    bestätigte Buchungen storniert – sie verschwinden aus Listen und Auswertung, bleiben aber im Protokoll."""
+    form = await request.form()
+    ids = [int(t) for x in form.getlist("ids") for t in str(x).split(",") if t.strip().isdigit()]
+    jahr = int(form["jahr"]) if str(form.get("jahr", "")).isdigit() else _standardjahr(s)
+    n = 0
+    for bid in ids:
+        b = s.get(Buchung, bid)
+        if not b or b.storniert:
+            continue
+        for k in s.exec(select(Kontobewegung).where(Kontobewegung.buchung_id == b.id)).all():
+            k.buchung_id = None
+            s.add(k)
+        if b.status == "bestaetigt":
+            b.storniert = True
+            s.add(b)
+            _protokoll(s, "storniert", f"{b.datum} {b.lieferant} {b.betrag_brutto:.2f} (aus Tabelle gelöscht)", b.id)
+        else:
+            _protokoll(s, "geloescht", f"Vorschlag {b.datum} {b.lieferant} {b.betrag_brutto:.2f}", b.id)
+            _buchung_loeschen(s, b)
+        n += 1
+    s.commit()
+    return _html(ui.bestaetigte_tabelle(_bestaetigte(s, jahr), _kat_liste(s), _mit_konto(s), jahr, _lieferanten(s), datalist=False,
+                                        meldung=ui.meldung_box(f"{n} Positionen gelöscht. Zugehörige Kontobewegungen stehen wieder im Abgleich.")))
+
+
 @app.post("/api/buchung/neu", response_class=HTMLResponse)
 async def api_buchung_neu(request: Request, s: Session = Depends(get_session)) -> HTMLResponse:
     form = await request.form()
@@ -800,6 +828,12 @@ async def api_abgleich_aktion(request: Request, s: Session = Depends(get_session
             k.ignoriert = False; s.add(k); n += 1
         elif aktion == "loesen":
             k.buchung_id = None; s.add(k); n += 1
+        elif aktion == "loeschen":
+            # Kontobewegung entfernen; Fingerabdruck merken, damit derselbe Auszug sie nicht wieder einliest
+            if k.fingerprint and not s.exec(select(KontoGeloescht).where(KontoGeloescht.fingerprint == k.fingerprint)).first():
+                s.add(KontoGeloescht(fingerprint=k.fingerprint))
+            _protokoll(s, "konto_geloescht", f"Kontobewegung {k.datum} {k.gegenkonto} {k.betrag:.2f} gelöscht")
+            s.delete(k); n += 1
         elif aktion == "regel":
             muster = (k.gegenkonto or k.verwendungszweck[:40]).strip().lower()
             if muster and not s.exec(select(IgnorRegel).where(IgnorRegel.muster == muster)).first():
@@ -810,6 +844,7 @@ async def api_abgleich_aktion(request: Request, s: Session = Depends(get_session
         matching.ignorregeln_anwenden(s)
     text = {"anlegen": f"{n} Buchungsvorschläge angelegt – jetzt unter „Prüfen“.", "ignorieren": f"{n} ignoriert.",
             "zuordnen": f"{n} Rückfragen zugeordnet – jeweils die Rechnung mit gleichem Betrag und nächstem Datum.",
+            "loeschen": f"{n} Kontobewegungen gelöscht – ein erneuter Import desselben Auszugs bringt sie nicht zurück.",
             "freigeben": f"{n} wieder freigegeben.", "loesen": f"{n} Zuordnungen gelöst.", "regel": f"{n} ignoriert und als Regel gemerkt."}.get(aktion, "Nichts geändert.")
     return _html(ui.meldung_box(text) + ui_abgleich(jahr, filter, s).body.decode())
 
