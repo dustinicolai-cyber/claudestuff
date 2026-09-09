@@ -183,3 +183,13 @@ def test_kapitalanlage_erkennung(cfg):
     assert erkenne_kapitalanlage("Trade Republic Bank GmbH", "Kauf WKN A0RPWH ISIN IE00B4L5Y983", cfg)
     assert erkenne_kapitalanlage("ING", "Dividende Allianz SE", cfg)
     assert not erkenne_kapitalanlage("Adobe Systems", "Creative Cloud Abo", cfg)
+
+
+def test_betriebsausstattung_wie_gwg(cfg, kats):
+    """Betriebsausstattung: bis 800 € netto Sofortabzug (Zeile 33), darüber Anlagevermögen mit AfA."""
+    klein = b(kategorie_id=kats["betriebsausstattung"].id, betrag_netto=249.0, ust_betrag=47.31, betrag_brutto=296.31)
+    bw = bewerte(klein, kats["betriebsausstattung"], cfg)
+    assert bw.eur_zeile == 33 and bw.abzugsfaehig == 296.31 and bw.umwandeln_in is None
+    gross = b(kategorie_id=kats["betriebsausstattung"].id, betrag_netto=1500.0, ust_betrag=285.0, betrag_brutto=1785.0)
+    bw = bewerte(gross, kats["betriebsausstattung"], cfg)
+    assert bw.umwandeln_in == "anlagevermoegen" and bw.abzugsfaehig == 0.0 and bw.afa_vorschlag

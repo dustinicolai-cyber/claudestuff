@@ -96,6 +96,7 @@
     {"schluessel": "bankgebuehren", "name": "Bankgebühren", "richtung": "ausgabe", "eur_zeile": 50, "sonderfall": null, "beispiele": "Kontoführung, Buchungsposten, Kartengebühr, PayPal-Gebühr"},
     {"schluessel": "miete", "name": "Miete Geschäftsräume", "richtung": "ausgabe", "eur_zeile": 36, "sonderfall": null, "beispiele": "Büro, Atelier, Coworking, Lagerraum"},
     {"schluessel": "arbeitszimmer", "name": "Homeoffice-Tagespauschale", "richtung": "ausgabe", "eur_zeile": 54, "sonderfall": "homeoffice", "beispiele": "Homeoffice-Tage"},
+    {"schluessel": "betriebsausstattung", "name": "Betriebsausstattung", "richtung": "ausgabe", "eur_zeile": 33, "sonderfall": "gwg", "beispiele": "Schreibtisch, Bürostuhl, Regal, Lampe, Werkzeug, Kleingeräte, Deko fürs Büro – bis 800 € netto Sofortabzug, darüber automatisch Anlagevermögen mit AfA"},
     {"schluessel": "gwg", "name": "Geringwertige Wirtschaftsgüter", "richtung": "ausgabe", "eur_zeile": 33, "sonderfall": "gwg", "beispiele": "Monitor, Tastatur, Stuhl, Gerät bis 800 € netto"},
     {"schluessel": "anlagevermoegen", "name": "Anlagevermögen (wird abgeschrieben)", "richtung": "ausgabe", "eur_zeile": null, "sonderfall": "afa", "beispiele": "Laptop, Kamera, Möbel über 800 € netto"},
     {"schluessel": "afa", "name": "Abschreibungen (AfA)", "richtung": "ausgabe", "eur_zeile": 30, "sonderfall": null},
