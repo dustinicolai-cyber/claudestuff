@@ -713,6 +713,9 @@ def _buchung_aus_konto(s: Session, k: Kontobewegung) -> Buchung:
                 hinweise_json=json.dumps(["Aus Kontobewegung angelegt – Beleg fehlt. USt-Satz ist eine Annahme."], ensure_ascii=False),
                 extraktion_json=json.dumps({"kontobewegung_id": k.id, "verwendungszweck": k.verwendungszweck}, ensure_ascii=False))
     fa_schluessel, fa_grund = steuerlogik.erkenne_finanzamt(k.gegenkonto, k.verwendungszweck, richtung, cfg)
+    if not fa_schluessel and steuerlogik.erkenne_kapitalanlage(k.gegenkonto, k.verwendungszweck, cfg):
+        fa_schluessel = "privat" if richtung == "ausgabe" else "privat_einnahme"
+        fa_grund = "Wertpapier/Depot: privates Kapitalvermögen – Gewinne und Verluste laufen über die Anlage KAP der Einkommensteuer, nicht über die EÜR."
     if fa_schluessel:
         kat = next((x for x in _kats(s).values() if x.schluessel == fa_schluessel), None)
         if kat:
@@ -760,6 +763,8 @@ def ui_abgleich(jahr: Optional[int] = None, filter: str = "offen", s: Session = 
                     vorschlag[z["k"].id] = next((x.name for x in kats.values() if x.schluessel == fa), "") or grund
                 elif grund:
                     vorschlag[z["k"].id] = grund
+                elif steuerlogik.erkenne_kapitalanlage(z["k"].gegenkonto, z["k"].verwendungszweck, config.regeln()):
+                    vorschlag[z["k"].id] = "Privat: Wertpapiere/Depot – gehört nicht in die EÜR (Anlage KAP), ignorieren"
     return _html(ui.abgleich_view(zeilen, regeln_, jahr, filter, vorschlag))
 
 

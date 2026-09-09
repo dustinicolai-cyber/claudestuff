@@ -19,6 +19,8 @@
 
   "ust_zeile48_basis": "zahlung",
   "_ust_zeile48_basis_hinweis": "zahlung = Zeile 48 aus den tatsächlichen Zahlungen an das Finanzamt (Abflussprinzip, Standard). rechnung = Zeile 48 aus der §13b-Steuer je Rechnung; Zahlungen ans Finanzamt zählen dann nicht doppelt.",
+  "kapitalanlage_muster": ["depot", "wertpapier", "wpabrechnung", "wp-abrechnung", "kauf wkn", "verkauf wkn", "isin", "wkn ", "dividende", "aktien", "etf", "fonds", "sparplan",
+                           "trade republic", "scalable", "smartbroker", "flatex", "comdirect depot", "consorsbank", "degiro", "justtrade", "onvista", "bison", "kapitalertrag", "kapst", "kapitalertragsteuer"],
   "finanzamt_muster": {
     "gegenkonto": ["finanzamt", "finanzkasse", "landeshauptkasse", "landeskasse", "bundeskasse", "kasse.hamburg", "oberfinanzdirektion", "zentralkasse"],
     "umsatzsteuer": ["umsatzsteuer", "umsatzst", "ums.st", "ums st", "umsst", "ust", "umst", "usteuer", "u-steuer", "ustva", "vorauszahlung ust"],
@@ -104,6 +106,7 @@
     {"schluessel": "ust_zahlung", "name": "Umsatzsteuer ans Finanzamt gezahlt (§13b-Abführung)", "richtung": "ausgabe", "eur_zeile": 48, "sonderfall": "ust_zahlung"},
     {"schluessel": "ust_erstattung", "name": "Umsatzsteuer vom Finanzamt erstattet", "richtung": "einnahme", "eur_zeile": 17, "sonderfall": "ust_erstattung"},
     {"schluessel": "einkommensteuer", "name": "Einkommensteuer / Soli / Kirchensteuer (privat)", "richtung": "ausgabe", "eur_zeile": null, "sonderfall": "privat"},
+    {"schluessel": "privat_einnahme", "name": "Privat (Einnahme, nicht betrieblich)", "richtung": "einnahme", "eur_zeile": null, "sonderfall": "privat", "beispiele": "Wertpapierverkauf, Dividende, private Überweisung, Rückzahlung von Freunden"},
     {"schluessel": "steuererstattung_privat", "name": "Steuererstattung Einkommensteuer (privat)", "richtung": "einnahme", "eur_zeile": null, "sonderfall": "privat"},
     {"schluessel": "kfz_betrieblich", "name": "Betriebliches Kfz (laufende Kosten)", "richtung": "ausgabe", "eur_zeile": 61, "sonderfall": null, "beispiele": "Tanken, Reparatur, Reifen, Kfz-Steuer, Kfz-Versicherung für den Firmenwagen"},
     {"schluessel": "energie", "name": "Energie und Nebenkosten", "richtung": "ausgabe", "eur_zeile": 50, "sonderfall": null, "beispiele": "Strom, Gas, Wasser, Heizung, Nebenkostenabrechnung Büro"},

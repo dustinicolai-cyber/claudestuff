@@ -176,3 +176,10 @@ def test_regeln_zusammenfuehren():
     assert "zinsen" in kats and kats["eigene"]["eur_zeile"] == 50                                  # neu ergänzt, eigene bleibt
     nutzer2 = {"kategorien": [{"schluessel": "fahrtkosten", "eur_zeile": 40}]}
     assert {k["schluessel"]: k for k in _zusammenfuehren(standard, nutzer2)["kategorien"]}["fahrtkosten"]["eur_zeile"] == 40  # bewusst geändert bleibt
+
+
+def test_kapitalanlage_erkennung(cfg):
+    from app.steuerlogik import erkenne_kapitalanlage
+    assert erkenne_kapitalanlage("Trade Republic Bank GmbH", "Kauf WKN A0RPWH ISIN IE00B4L5Y983", cfg)
+    assert erkenne_kapitalanlage("ING", "Dividende Allianz SE", cfg)
+    assert not erkenne_kapitalanlage("Adobe Systems", "Creative Cloud Abo", cfg)

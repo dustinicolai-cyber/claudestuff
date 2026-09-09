@@ -119,6 +119,11 @@ def erkenne_finanzamt(gegenkonto: str, zweck: str, richtung: str, cfg: dict) -> 
     return None, "Zahlung vom/ans Finanzamt – Steuerart aus dem Verwendungszweck nicht erkennbar, bitte Kategorie wählen."
 
 
+def erkenne_kapitalanlage(gegenkonto: str, zweck: str, cfg: dict) -> bool:
+    """Wertpapier-, Depot- und Dividendenbuchungen: privates Kapitalvermögen (Anlage KAP), gehört nicht in die EÜR."""
+    return _enthaelt(f"{gegenkonto} {zweck}", cfg.get("kapitalanlage_muster") or [])
+
+
 def ust_abgleich(buchungen: Iterable[Buchung], kategorien: dict[int, Kategorie], jahr: int, cfg: dict) -> dict:
     """§13b-Steuer, die im Jahr entstanden ist, gegen das, was tatsächlich ans Finanzamt floss."""
     entstanden = gezahlt = erstattet = 0.0

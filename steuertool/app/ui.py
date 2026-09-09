@@ -925,12 +925,13 @@ def auswertung_view(jahr: int, jahre: list[int]) -> str:
     svg.appendChild(el('path', {{d: pfad, fill: 'none', stroke: farbe, 'stroke-width': 2.5, 'stroke-linejoin': 'round', 'stroke-linecap': 'round'}}));
     m.forEach((z, i) => {{
       svg.appendChild(el('text', {{x: x(i), y: B + 20, class: 'tick', 'text-anchor': 'middle'}}, MON[i]));
-      const c = el('circle', {{cx: x(i), cy: y(w[i]), r: 4.5, fill: w[i] > 0 ? css('--gruen') : (w[i] < 0 ? css('--rot') : css('--orange')), stroke: css('--card'), 'stroke-width': 2}}); svg.appendChild(c);
+      const c = el('circle', {{cx: x(i), cy: y(w[i]), r: 4.5, fill: '#fff', stroke: w[i] > 0 ? css('--gruen') : (w[i] < 0 ? css('--rot') : css('--orange')), 'stroke-width': 2}}); svg.appendChild(c);
       const hit = el('rect', {{x: x(i) - (R - L) / 22, y: T, width: (R - L) / 11, height: B - T, fill: 'transparent'}});
       hit.addEventListener('mousemove', ev => zeigeTip(ev, `<b>${{MON[i]}} ${{jahr}}</b><br>Einnahmen: ${{eur(z.einnahmen)}}<br>Ausgaben: ${{eur(z.ausgaben)}}<br>Gewinn kumuliert: ${{eur(z.gewinn_kumuliert)}}`));
       hit.addEventListener('mouseleave', hideTip); svg.appendChild(hit);
     }});
-    const ende = w[11]; const t = el('text', {{x: x(11) + 10, y: y(ende) + 4, class: 'wert'}}, eur(ende)); svg.appendChild(t);
+    // Endwert rechtsbündig über dem letzten Punkt, damit er nicht am Rand abgeschnitten wird
+    const ende = w[11]; const t = el('text', {{x: x(11), y: y(ende) - 12, class: 'wert', 'text-anchor': 'end'}}, eur(ende)); svg.appendChild(t);
     legendeSetzen([{{name: 'Gewinn kumuliert', farbe: ende >= 0 ? css('--gruen') : css('--rot'), wert: eur(ende)}}]);
     erkl.textContent = 'Kumulierter Gewinn über das Jahr (Einnahmen minus abzugsfähige Ausgaben, AfA gleichmäßig verteilt). Nulllinie hervorgehoben.';
   }}
