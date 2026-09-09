@@ -747,9 +747,10 @@ def _buchung_aus_konto(s: Session, k: Kontobewegung) -> Buchung:
     if not fa_schluessel and steuerlogik.erkenne_kapitalanlage(k.gegenkonto, k.verwendungszweck, cfg):
         fa_schluessel = "privat" if richtung == "ausgabe" else "privat_einnahme"
         fa_grund = "Wertpapier/Depot: privates Kapitalvermögen – Gewinne und Verluste laufen über die Anlage KAP der Einkommensteuer, nicht über die EÜR."
-    if not fa_schluessel and richtung == "ausgabe" and steuerlogik.erkenne_vorsorge(k.gegenkonto, k.verwendungszweck, cfg):
-        fa_schluessel = "vorsorge"
-        fa_grund = "KSK/Krankenkasse/Rentenversicherung: Sonderausgabe (Anlage Vorsorgeaufwand), keine Betriebsausgabe – wird im Jahresabschluss aufsummiert."
+    if not fa_schluessel and steuerlogik.erkenne_vorsorge(k.gegenkonto, k.verwendungszweck, cfg):
+        fa_schluessel = "vorsorge" if richtung == "ausgabe" else "vorsorge_erstattung"
+        fa_grund = ("KSK/Krankenkasse/Rentenversicherung: Sonderausgabe (Anlage Vorsorgeaufwand), keine Betriebsausgabe – wird im Jahresabschluss aufsummiert."
+                    if richtung == "ausgabe" else "Erstattung von KSK/Krankenkasse/Rente: keine Betriebseinnahme, mindert die Sonderausgaben – wird im Jahresabschluss verrechnet.")
     if fa_schluessel:
         kat = next((x for x in _kats(s).values() if x.schluessel == fa_schluessel), None)
         if kat:
@@ -799,8 +800,9 @@ def ui_abgleich(jahr: Optional[int] = None, filter: str = "offen", s: Session = 
                     vorschlag[z["k"].id] = grund
                 elif steuerlogik.erkenne_kapitalanlage(z["k"].gegenkonto, z["k"].verwendungszweck, config.regeln()):
                     vorschlag[z["k"].id] = "Privat: Wertpapiere/Depot – gehört nicht in die EÜR (Anlage KAP), ignorieren"
-                elif z["k"].betrag < 0 and steuerlogik.erkenne_vorsorge(z["k"].gegenkonto, z["k"].verwendungszweck, config.regeln()):
-                    vorschlag[z["k"].id] = "Vorsorge (KSK/Krankenkasse/Rente): Sonderausgabe, keine Betriebsausgabe – „ohne Beleg buchen“ sammelt sie für die Anlage Vorsorgeaufwand"
+                elif steuerlogik.erkenne_vorsorge(z["k"].gegenkonto, z["k"].verwendungszweck, config.regeln()):
+                    vorschlag[z["k"].id] = ("Vorsorge (KSK/Krankenkasse/Rente): Sonderausgabe, keine Betriebsausgabe – „ohne Beleg buchen“ sammelt sie für die Anlage Vorsorgeaufwand"
+                                            if z["k"].betrag < 0 else "Vorsorge-Erstattung (KSK/Krankenkasse/Rente): keine Betriebseinnahme – „ohne Beleg buchen“ verrechnet sie im Jahresabschluss")
     return _html(ui.abgleich_view(zeilen, regeln_, jahr, filter, vorschlag))
 
 

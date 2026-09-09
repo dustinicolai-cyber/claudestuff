@@ -20,8 +20,8 @@ def klassifiziere(s: Session, felder: dict, cfg: dict, text: str = "") -> tuple[
 
     kategorien = s.exec(select(Kategorie).where(Kategorie.aktiv == True)).all()  # noqa: E712
     fa_schluessel, _ = steuerlogik.erkenne_finanzamt(lieferant, felder.get("beschreibung") or "", felder.get("richtung") or "ausgabe", cfg)
-    if not fa_schluessel and felder.get("richtung") != "einnahme" and steuerlogik.erkenne_vorsorge(lieferant, felder.get("beschreibung") or "", cfg):
-        fa_schluessel = "vorsorge"
+    if not fa_schluessel and steuerlogik.erkenne_vorsorge(lieferant, felder.get("beschreibung") or "", cfg):
+        fa_schluessel = "vorsorge_erstattung" if felder.get("richtung") == "einnahme" else "vorsorge"
     if fa_schluessel:
         k = next((k for k in kategorien if k.schluessel == fa_schluessel), None)
         if k:

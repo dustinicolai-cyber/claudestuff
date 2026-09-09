@@ -129,7 +129,7 @@ def ksk_uebersicht(buchungen: Iterable[Buchung], kategorien: dict[int, Kategorie
     abgabepflichtige Entgelte an selbständige Künstler und die daraus folgende Künstlersozialabgabe."""
     buchungen = list(buchungen)
     gewinn = next((z["betrag"] for z in eur_zeilen(buchungen, kategorien, anlagegueter, jahr, cfg) if z["bezeichnung"].startswith("Gewinn")), 0.0)
-    vorsorge = entgelte = 0.0
+    vorsorge = erstattet = entgelte = 0.0
     for b in buchungen:
         if b.datum.year != jahr or b.status != "bestaetigt" or getattr(b, "storniert", False):
             continue
@@ -138,11 +138,14 @@ def ksk_uebersicht(buchungen: Iterable[Buchung], kategorien: dict[int, Kategorie
             continue
         if k.sonderfall == "vorsorge":
             vorsorge += b.betrag_brutto
+        elif k.sonderfall == "vorsorge_erstattung":
+            erstattet += b.betrag_brutto
         elif k.sonderfall == "fremdleistung" and str(meta(b).get("ksk_kuenstler", "")) in ("1", "true", "True"):
             entgelte += b.betrag_netto if b.betrag_netto else b.betrag_brutto
     satz = float(cfg.get("ksk_abgabesatz_prozent", 5.0))
     bagatell = float(cfg.get("ksk_bagatellgrenze", 1000.0))
-    return {"arbeitseinkommen": runde(gewinn), "vorsorge": runde(vorsorge), "entgelte_kuenstler": runde(entgelte),
+    return {"arbeitseinkommen": runde(gewinn), "vorsorge": runde(vorsorge - erstattet), "vorsorge_gezahlt": runde(vorsorge), "vorsorge_erstattet": runde(erstattet),
+            "entgelte_kuenstler": runde(entgelte),
             "abgabe": runde(entgelte * satz / 100) if entgelte > bagatell else 0.0, "satz": satz, "bagatell": bagatell,
             "mindestverdienst": float(cfg.get("ksk_mindestverdienst", 3900.0))}
 
@@ -222,6 +225,11 @@ def bewerte(b: Buchung, k: Kategorie | None, cfg: dict,
             return bw
         if sonderfall == "ust_erstattung":
             bw.hinweise.append("Vom Finanzamt erstattete Umsatzsteuer ist Betriebseinnahme (Zeile 17).")
+            return bw
+        if sonderfall == "vorsorge_erstattung":
+            bw.abzugsfaehig = 0.0
+            bw.eur_zeile = None
+            bw.hinweise.append("Erstattung von KSK/Krankenkasse/Rentenversicherung: keine Betriebseinnahme – mindert die Sonderausgaben in der Anlage Vorsorgeaufwand.")
             return bw
         if b.ust_betrag:
             bw.warnungen.append("Einnahme mit USt-Ausweis – als Kleinunternehmer darf keine USt ausgewiesen werden (§19 UStG).")

@@ -542,3 +542,28 @@ def test_ksk_im_jahresabschluss_und_kontoauszug():
         assert "Künstlersozialkasse &amp; Einkommensteuer 2025" in j and "310,00" in j and "1.500,00" in j and "75,00" in j
         z = {e["zeile"]: e["betrag"] for e in c.get("/export/eur.json?jahr=2025").json()["zeilen"] if e["zeile"]}
         assert 26 in z and all(v != 310.0 for v in z.values())   # Vorsorge taucht in keiner EÜR-Zeile auf
+
+
+def test_ksk_erstattung_ist_keine_betriebseinnahme():
+    with client() as c:
+        kopf = erzeuge.CSV_SPARKASSE.splitlines()[0]
+        csv = kopf + "\nDE00123;20.06.2025;20.06.2025;GUTSCHRIFT;Beitragsrueckzahlung 2024;Kuenstlersozialkasse;DE55;XXX;95,00;EUR;Umsatz gebucht\n"
+        c.post("/api/konto/import", files={"datei": ("umsaetze.csv", csv.encode(), "text/csv")})
+        a = c.get("/ui/abgleich?jahr=2025&filter=alle").text
+        assert "Vorsorge-Erstattung" in a
+        from app.models import Kontobewegung
+        with Session(engine()) as s:
+            k = s.exec(select(Kontobewegung).where(Kontobewegung.betrag == 95.0)).first()
+        c.post("/api/abgleich/aktion", data={"aktion": "anlegen", "ids": [str(k.id)], "jahr": "2025"})
+        with Session(engine()) as s:
+            b = s.exec(select(Buchung).where(Buchung.betrag_brutto == 95.0)).first()
+            kat = s.get(Kategorie, b.kategorie_id); assert kat.schluessel == "vorsorge_erstattung" and b.richtung == "einnahme"
+            kat_id = kat.id
+        c.post(f"/api/buchung/{b.id}/bestaetigen", data={"datum": "2025-06-20", "richtung": "einnahme", "lieferant": "Kuenstlersozialkasse", "betrag_netto": "95", "ust_satz": "0",
+                                                        "ust_betrag": "0", "betrag_brutto": "95", "kategorie_id": str(kat_id), "waehrung": "EUR", "betrag_fremd": "0"})
+        eur = c.get("/export/eur.json?jahr=2025").json()["zeilen"]
+        assert next(z["betrag"] for z in eur if z["bezeichnung"] == "Summe Betriebseinnahmen") == 0.0
+        q = c.get("/ui/quartale?jahr=2025").text
+        assert "erstattet 95,00" not in q  # erscheint nicht in den Quartalen als Einnahme
+        j = c.get("/ui/jahresabschluss?jahr=2025").text
+        assert "erstattet 95,00" in j and "-95,00" in j

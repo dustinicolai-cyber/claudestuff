@@ -658,7 +658,7 @@ def ksk_block(jahr: int, ksk: dict | None) -> str:
     <div class="inhalt">
       <table class="tabelle kompakt ksk-tabelle"><tbody>
         <tr><td><b>Arbeitseinkommen für die KSK</b><div class="muted klein">= steuerlicher Gewinn aus der EÜR. {einkommen_hinweis}</div></td><td class="num fett">{eur_fmt(ksk['arbeitseinkommen'])}</td></tr>
-        <tr><td><b>Gezahlte Vorsorgebeiträge</b> (KSK, Krankenkasse, Rentenversicherung)<div class="muted klein">Sonderausgaben → Anlage Vorsorgeaufwand. Zum Abgleich mit der Beitragsbescheinigung der KSK. Kategorie „Vorsorge“ im Kontoauszug.</div></td><td class="num fett">{eur_fmt(ksk['vorsorge'])}</td></tr>
+        <tr><td><b>Vorsorgebeiträge</b> (KSK, Krankenkasse, Rentenversicherung)<div class="muted klein">Sonderausgaben → Anlage Vorsorgeaufwand. Gezahlt {eur_fmt(ksk.get('vorsorge_gezahlt', ksk['vorsorge']))}{f", erstattet {eur_fmt(ksk['vorsorge_erstattet'])}" if ksk.get('vorsorge_erstattet') else ""}. Zum Abgleich mit der Beitragsbescheinigung der KSK.</div></td><td class="num fett">{eur_fmt(ksk['vorsorge'])}</td></tr>
         <tr><td><b>Entgelte an selbständige Künstler/Publizisten</b> (netto)<div class="muted klein">{abgabe_txt}</div></td><td class="num fett">{eur_fmt(ksk['entgelte_kuenstler'])}</td></tr>
         <tr><td><b>Voraussichtliche Künstlersozialabgabe</b></td><td class="num fett {"warn" if ksk['abgabe'] else ""}">{eur_fmt(ksk['abgabe']) if ksk['abgabe'] else "–"}</td></tr>
       </tbody></table>
