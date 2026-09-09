@@ -191,14 +191,25 @@ body:not(.editmode) .stepbtns{display:none}
 body:not(.editmode) .pagetools{display:none}
 
 /* In-Page "Inhalt hinzufügen" – direkt im Seiteninhalt (native) */
-.addhere{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-top:4mm;padding:6px 9px;
-  border:1px dashed var(--line);border-radius:8px;opacity:.55;transition:.15s}
-.addhere:hover{opacity:1;border-color:var(--accent);background:#fbfdfe}
-.addhere .ah-plus{color:var(--accent);font-weight:700;font-size:15px;line-height:1}
-.addhere .ah-lbl{font-size:11px;color:var(--grey);font-weight:600;margin-right:2px}
-.addhere button{font-family:var(--ui);font-size:10.5px;border:1px solid var(--line);background:#fff;color:var(--grey);border-radius:6px;padding:3px 9px;cursor:pointer}
-.addhere button:hover{border-color:var(--accent);color:var(--accent)}
-body:not(.editmode) .addhere{display:none}
+/* Einfüge-Stelle zwischen Blöcken (unter jedem Kapitel): "+" beim Hovern, ohne Layout-Höhe */
+.gapadd{position:relative;height:0}
+.gapadd:not(.empty)::before{content:"";position:absolute;left:0;right:0;top:-7px;height:14px}  /* Hover-Trefferzone */
+.gapadd .g-plus{position:absolute;left:14mm;top:-11px;width:20px;height:20px;border-radius:50%;
+  background:var(--accent);color:#fff;border:none;display:none;align-items:center;justify-content:center;
+  font-size:16px;line-height:1;cursor:pointer;z-index:11;box-shadow:0 1px 4px rgba(0,40,80,.3)}
+.gapadd:hover .g-plus,.gapadd.open .g-plus{display:flex}
+.gapadd .g-menu{position:absolute;left:14mm;top:13px;display:none;gap:4px;background:#fff;border:1px solid var(--line);
+  border-radius:8px;padding:5px 6px;box-shadow:0 6px 18px rgba(20,40,50,.18);z-index:12;white-space:nowrap}
+.gapadd.open .g-menu{display:flex}
+.gapadd .g-menu button{font-family:var(--ui);font-size:10.5px;border:1px solid var(--line);background:#fff;color:var(--grey);border-radius:6px;padding:3px 9px;cursor:pointer}
+.gapadd .g-menu button:hover{border-color:var(--accent);color:var(--accent)}
+/* leere Seite: sichtbarer Hinweis + Buttons */
+.gapadd.empty{position:static;height:auto;display:flex;align-items:center;flex-wrap:wrap;gap:6px;
+  margin-top:2mm;padding:6px 9px;border:1px dashed var(--line);border-radius:8px;opacity:.7}
+.gapadd.empty::after{content:"Inhalt hinzufügen";font-size:11px;color:var(--grey);font-weight:600;order:-1}
+.gapadd.empty .g-plus{display:none}
+.gapadd.empty .g-menu{display:flex;position:static;border:none;box-shadow:none;padding:0}
+body:not(.editmode) .gapadd{display:none}
 
 .ublock{position:relative}
 .ublock>.uctrl{position:absolute;top:-8px;right:-4px;display:none;gap:3px;z-index:8}
@@ -232,7 +243,7 @@ body.editmode .ibimg .repl{display:flex}
 @page p3mm {size:210mm 297mm;margin:0;bleed:3mm}   /* 3 mm Beschnittzugabe */
 @media print{
   html,body{margin:0!important;padding:0!important}
-  .topbar,.sidebar,.pagelabel,.zoom,.tbtns,.stepbtns,.pagetools,.addhere,.uctrl,.repl,.menubtn,.overlay,#flashNote{display:none!important}
+  .topbar,.sidebar,.pagelabel,.zoom,.tbtns,.stepbtns,.pagetools,.gapadd,.uctrl,.repl,.menubtn,.overlay,#flashNote{display:none!important}
   body{background:#fff}.shell{padding-top:0}
   .canvas{padding:0;gap:0;display:block;overflow:visible;height:auto}
   .pagewrap{transform:none!important;margin:0!important;position:relative;background:#fff;
@@ -729,20 +740,40 @@ function contentPages(){ return [...document.querySelectorAll('.page .content')]
 
 // In-Page "Inhalt hinzufügen"-Zeile am Ende jedes Seiteninhalts (native, direkt auf der Seite).
 // Auf einer leeren (neuen) Seite steht sie oben -> man fuegt direkt auf der Seite hinzu.
-function ensureAddHere(){
+// Einfüge-Stellen zwischen ALLEN Bloecken (und unter jedem Kapitel): dezentes "+"
+// beim Hovern -> Menue (Text / Bild+Text / Kapitel / Unterkapitel). Null Layout-Hoehe.
+function gapMenuHTML(){
+  return '<button type="button" class="g-plus" title="Hier Inhalt einfügen" onmousedown="event.preventDefault()" onclick="gapToggle(this)">+</button>'+
+    '<div class="g-menu">'+
+      '<button type="button" onclick="gapInsert(this,\'text\')">Text</button>'+
+      '<button type="button" onclick="gapInsert(this,\'img\')">Bild + Text</button>'+
+      '<button type="button" onclick="gapInsert(this,\'chapter\')">Kapitel</button>'+
+      '<button type="button" onclick="gapInsert(this,\'sub\')">Unterkapitel</button>'+
+    '</div>';
+}
+function makeGap(empty){ const g=el('<div class="gapadd'+(empty?' empty':'')+'" contenteditable="false">'+gapMenuHTML()+'</div>'); return g; }
+function ensureGaps(){
   contentPages().forEach(c=>{
-    let ah=[...c.children].find(x=>x.classList&&x.classList.contains('addhere'));
-    if(!ah){
-      ah=el('<div class="addhere" contenteditable="false">'+
-        '<span class="ah-plus">＋</span><span class="ah-lbl">Inhalt hinzufügen:</span>'+
-        '<button type="button" onclick="addBlock(this,\'text\')">Text</button>'+
-        '<button type="button" onclick="addBlock(this,\'img\')">Bild + Text</button>'+
-        '<button type="button" onclick="addBlock(this,\'chapter\')">Kapitel</button>'+
-        '<button type="button" onclick="addBlock(this,\'sub\')">Unterkapitel</button>'+
-        '</div>');
-      c.appendChild(ah);
-    } else { c.appendChild(ah); }   // immer als letztes Element
+    c.querySelectorAll(':scope > .gapadd').forEach(g=>g.remove());   // neu aufbauen
+    const blocks=blockList(c);
+    if(blocks.length===0){ c.appendChild(makeGap(true)); return; }  // leere Seite: sichtbarer Hinweis
+    c.insertBefore(makeGap(false), blocks[0]);       // vor dem ersten Block
+    blocks.forEach(b=> b.after(makeGap(false)));      // nach jedem Block (auch unter jedem Kapitel)
   });
+}
+function gapToggle(btn){
+  const g=btn.closest('.gapadd'); const open=g.classList.contains('open');
+  document.querySelectorAll('.gapadd.open').forEach(x=>x.classList.remove('open'));
+  if(!open) g.classList.add('open');
+}
+function gapInsert(btn,kind){
+  const g=btn.closest('.gapadd'); if(!g) return;
+  const node = kind==='chapter'?blkChapter() : kind==='sub'?blkSub() : kind==='img'?blkImg() : blkText();
+  node.appendChild(el(UCTRL));
+  g.classList.remove('open');
+  g.after(node);                                    // genau an dieser Stelle einfuegen
+  afterStructureChange();
+  const t=node.querySelector('[contenteditable="true"]'); if(t) t.focus();
 }
 // Schlanke Leiste UNTER der Seite -> nur Seiten-Aktionen (immer erreichbar, auch bei voller Seite)
 function ensurePageTools(){
@@ -829,7 +860,7 @@ function refreshChrome(){
    wortgenau geteilt bzw. der letzte Block auf die naechste Seite verschoben.
    Beim Loeschen fliesst der Inhalt zurueck (Fortsetzungen werden gemergt). */
 let _reflowing=false, _reflowT=null;
-function blockList(c){ return [...c.children].filter(x=>x.nodeType===1 && !x.classList.contains('addhere')); }
+function blockList(c){ return [...c.children].filter(x=>x.nodeType===1 && !x.classList.contains('addhere') && !x.classList.contains('gapadd')); }
 function paraOf(block){ if(!block||block.nodeType!==1) return null; return block.matches('p.body')?block:block.querySelector(':scope > p.body'); }
 function footerTop(page){ const f=page.querySelector('.ftr'); return f?f.getBoundingClientRect().top:Infinity; }
 
@@ -853,7 +884,7 @@ function makeAutoPageAtEnd(){
   const wraps=[...document.querySelectorAll('.pagewrap')]; const lastWrap=wraps[wraps.length-1];
   let anchor=lastWrap; const nx=lastWrap.nextElementSibling; if(nx&&nx.classList.contains('pagetools')) anchor=nx;
   const label=el('<div class="pagelabel"></div>'); anchor.after(nw); nw.before(label);
-  refreshChrome(); ensurePageTools(); ensureAddHere();
+  refreshChrome(); ensurePageTools();
 }
 function splitParaToNext(block, para, limit, nextContent){
   const words=para.textContent.trim().split(/\s+/);
@@ -936,11 +967,12 @@ function reflowAll(){
   if(_reflowing) return; _reflowing=true;
   const caret=saveCaret();
   try{
-    ensurePageTools(); ensureAddHere(); ensureBlockCtrls(); ensureStepUI();
+    document.querySelectorAll(".gapadd").forEach(g=>g.remove());
+    ensurePageTools(); ensureBlockCtrls(); ensureStepUI();
     mergeContinuations();
     pushDown();
     removeEmptyAutoPages();
-    ensurePageTools(); ensureAddHere();
+    ensurePageTools(); ensureGaps();
     renumber(); pageNumbers(); labelPages();
     document.querySelectorAll('.editable').forEach(e=>e.contentEditable=editing);
     applyZoom();
@@ -951,6 +983,8 @@ function scheduleReflow(){ clearTimeout(_reflowT); _reflowT=setTimeout(reflowAll
 function afterStructureChange(){ reflowAll(); }
 // Beim Tippen automatisch umbrechen (leicht verzoegert)
 document.addEventListener('input',e=>{ if(editing && e.target.closest && e.target.closest('.page .content')) scheduleReflow(); });
+// offenes Einfüge-Menü schliessen, wenn ausserhalb geklickt wird
+document.addEventListener('click',e=>{ if(!e.target.closest || !e.target.closest('.gapadd')) document.querySelectorAll('.gapadd.open').forEach(x=>x.classList.remove('open')); });
 
 /* Drag & Drop von Bildern auf Bild-Bereiche */
 (function(){
@@ -972,7 +1006,7 @@ function gatherProject(){
   document.querySelectorAll('[data-bind]').forEach(i=>inputs[i.getAttribute('data-bind')]=i.value);
   const pages=[...document.querySelectorAll('.page .content')].map(c=>{
     const clone=c.cloneNode(true);
-    clone.querySelectorAll('.addhere,.stepbtns,.stepno,.uctrl').forEach(x=>x.remove());
+    clone.querySelectorAll('.gapadd,.addhere,.stepbtns,.stepno,.uctrl').forEach(x=>x.remove());
     return clone.innerHTML;
   });
   const prod=document.getElementById('prodImgWrap');
@@ -1053,7 +1087,7 @@ function applyProject(p){
   });
   // 6) Editier-Status, Kapitelnummern, Deckblatt-Form auffrischen
   document.querySelectorAll('.editable').forEach(e=>e.contentEditable=editing);
-  renumber(); ensureStepUI(); ensurePageTools(); ensureAddHere(); ensureBlockCtrls(); pageNumbers(); labelPages(); reflowAll(); resizeBlob();
+  renumber(); ensureStepUI(); ensurePageTools(); ensureBlockCtrls(); pageNumbers(); labelPages(); reflowAll(); resizeBlob();
   // 7) Schalter (ältere Dateien ohne toggles -> sinnvolle Defaults)
   const tg=p.toggles||{};
   setChk('chromeLock', tg.chrome!==false, toggleChrome);
@@ -1308,7 +1342,7 @@ window.addEventListener('DOMContentLoaded',()=>{
   zoom(0);
   renumber();
   ensureStepUI();
-  ensurePageTools(); ensureAddHere(); ensureBlockCtrls(); labelPages();
+  ensurePageTools(); ensureGaps(); ensureBlockCtrls(); labelPages();
   reflowAll();
   fitIfNeeded();
   restoreFolder();   // zuletzt verbundenen gemeinsamen Ordner wieder anbieten
