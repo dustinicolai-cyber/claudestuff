@@ -35,10 +35,10 @@ body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.5 "Outfit","Aveni
 .logo-txt b{display:block;font-size:1.15rem;letter-spacing:.01em;line-height:1.1}
 .logo-txt small{color:var(--orange);font-size:.7rem;letter-spacing:.12em;text-transform:uppercase;font-weight:600}
 .side nav{display:flex;flex-direction:column;gap:.25rem}
-.side nav button{box-shadow:none;display:flex;align-items:center;gap:.8rem;width:100%;background:transparent;border:0;color:var(--muted);padding:.7rem .8rem .7rem calc(.8rem + 3px);border-radius:10px;cursor:pointer;font:inherit;font-size:.98rem;text-align:left;font-weight:500}
+.side nav button{box-shadow:none;display:flex;align-items:center;gap:.8rem;width:100%;background:transparent;border:0;color:var(--muted);padding:.7rem .8rem;border-radius:4px;cursor:pointer;font:inherit;font-size:.98rem;text-align:left;font-weight:500}
 .side nav button svg{width:20px;height:20px;flex:none;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
 .side nav button:hover{background:var(--card);color:var(--fg)}
-.side nav button.aktiv{background:linear-gradient(90deg,var(--orange) 0,var(--orange) 3px,var(--orange-mittel) 3px,var(--orange-mittel) 25%,var(--orange-hell) 60%,transparent 100%);color:var(--fg);box-shadow:none}
+.side nav button.aktiv{background:linear-gradient(90deg,var(--orange-mittel) 0,var(--orange-mittel) 25%,var(--orange-hell) 60%,transparent 100%);color:var(--fg);box-shadow:none}
 .side nav button.aktiv svg{color:var(--orange)}
 .side nav button{justify-content:space-between}
 .side nav button .txt{flex:1}
@@ -144,7 +144,7 @@ button:disabled:hover{background:transparent;color:inherit;box-shadow:none}
 .karte{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:1.1rem 1.3rem;margin:.9rem 0;box-shadow:var(--schatten)}
 .karten{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:.9rem}
 /* Alerts: Erfolg grün ✓, Warnung gelb !, Fehler rot ! – Icon immer dabei, nie Farbe allein */
-.ok-box,.warn-box,.fehler-box{display:flex;align-items:flex-start;gap:.7rem;padding:.7rem 1rem;border-radius:10px;border-left:4px solid;margin:.6rem 0}
+.ok-box,.warn-box,.fehler-box{display:flex;align-items:flex-start;gap:.7rem;padding:.7rem 1rem;border-radius:4px;margin:.6rem 0}
 .ok-box::before,.warn-box::before,.fehler-box::before{content:"!";flex:none;width:20px;height:20px;border-radius:50%;display:grid;place-items:center;font-weight:700;font-size:.85em;color:#fff;margin-top:.05em}
 .ok-box{background:var(--gruen-hell);border-color:var(--gruen)} .ok-box::before{content:"✓";background:var(--gruen)}
 .warn-box{background:var(--gelb-hell);border-color:var(--gelb)} .warn-box::before{background:var(--gelb);color:#1a1a22}
