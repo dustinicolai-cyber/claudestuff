@@ -204,12 +204,10 @@ def bestaetigte_tabelle(buchungen: list[Buchung], kategorien: list[Kategorie], m
     <span class="row" style="margin:0;gap:.8rem"><input type="search" class="listen-suche" placeholder="in der Liste suchen …" aria-label="Bestätigte durchsuchen"><span class="muted klein listen-zaehler"></span></span></div>
   <p class="muted klein">Datum, Kunde, Beschreibung, Kategorie und Brutto direkt in der Zeile ändern – wird beim Verlassen des Felds gespeichert. Der Stift öffnet die komplette Maske mit Belegvorschau.</p>
   {lieferanten_datalist(lieferanten) if datalist else ''}
-  <form class="auswahl-leiste bz-aktion" hidden hx-post="/api/buchungen/kategorie" hx-target="#bestaetigt-tabelle" hx-swap="outerHTML" hx-include="#bestaetigt-tabelle .bz-wahl:checked">
-    <span class="anzahl"></span>
-    <label class="klein" style="display:flex;align-items:center;gap:.4rem">Kategorie für die Auswahl <select name="kategorie_id" required><option value="">– wählen –</option>{kat_opts}</select></label>
-    <button type="submit" class="btn-primary klein">Kategorie setzen</button>
-    <button type="button" class="btn-ghost klein bz-abwaehlen">Auswahl aufheben</button>
-    <span class="muted klein">Zuordnung Name → Kategorie wird dabei mitgelernt.</span>
+  <form class="bz-aktion" hx-post="/api/buchungen/kategorie" hx-target="#bestaetigt-tabelle" hx-swap="outerHTML" hx-include="#bestaetigt-tabelle .bz-wahl:checked" aria-hidden="true">
+    <label for="bz-kat">Kategorie für die Auswahl <span class="anzahl muted"></span></label>
+    <select name="kategorie_id" id="bz-kat" required><option value="">– wählen –</option>{kat_opts}</select>
+    <button type="submit" class="btn-primary klein">Anwenden</button>
   </form>
   <div class="scroll"><table class="tabelle kompakt bz-tabelle"><colgroup><col class="c-wahl"><col class="c-datum"><col class="c-art"><col class="c-lief"><col class="c-besch"><col class="c-kat"><col class="c-brutto"><col class="c-konto"><col class="c-aktion"></colgroup>
     <thead><tr><th><input type="checkbox" class="bz-alle" title="alle sichtbaren auswählen" aria-label="alle auswählen"></th><th class="sortierbar" data-sort="datum" title="nach Datum sortieren">Datum <span class="pfeil"></span></th><th>Art</th><th class="sortierbar" data-sort="lieferant" title="alphabetisch sortieren">Lieferant / Kunde <span class="pfeil"></span></th><th>Beschreibung</th><th>Kategorie</th><th class="num sortierbar" data-sort="betrag" title="nach Betrag sortieren">Brutto € <span class="pfeil"></span></th><th>Konto</th><th></th></tr></thead>
@@ -238,10 +236,10 @@ def bestaetigte_tabelle(buchungen: list[Buchung], kategorien: list[Kategorie], m
     // Mehrfachauswahl → Aktionsleiste „Kategorie setzen“
     const leiste = box.querySelector('.bz-aktion'), alle = box.querySelector('.bz-alle');
     const wahl = () => [...box.querySelectorAll('.bz-wahl')];
-    function zaehlen(){{ const n = wahl().filter(b => b.checked).length; leiste.hidden = !n; leiste.querySelector('.anzahl').textContent = n + ' ausgewählt ·'; if (alle) alle.checked = n > 0 && n === wahl().filter(b => !b.closest('tr').hidden).length; }}
+    function zaehlen(){{ const n = wahl().filter(b => b.checked).length; leiste.classList.toggle('aktiv', n > 0); leiste.setAttribute('aria-hidden', n ? 'false' : 'true');
+      leiste.querySelector('.anzahl').textContent = n ? '(' + n + ')' : ''; if (alle) alle.checked = n > 0 && n === wahl().filter(b => !b.closest('tr').hidden).length; }}
     box.addEventListener('change', e => {{ if (e.target.classList.contains('bz-wahl')) zaehlen(); }});
     if (alle) alle.addEventListener('change', () => {{ wahl().filter(b => !b.closest('tr').hidden).forEach(b => b.checked = alle.checked); zaehlen(); }});
-    leiste.querySelector('.bz-abwaehlen').addEventListener('click', () => {{ wahl().forEach(b => b.checked = false); zaehlen(); }});
     let letzte = null;
     box.addEventListener('click', e => {{ if (!e.target.classList.contains('bz-wahl')) return; const b = wahl(), i = b.indexOf(e.target);
       if (e.shiftKey && letzte !== null) {{ const [a, z] = [Math.min(i, letzte), Math.max(i, letzte)]; for (let k = a; k <= z; k++) if (!b[k].closest('tr').hidden) b[k].checked = e.target.checked; zaehlen(); }} letzte = i; }});
