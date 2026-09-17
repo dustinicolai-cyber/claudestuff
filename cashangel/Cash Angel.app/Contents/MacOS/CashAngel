@@ -1,0 +1,38 @@
+#!/bin/bash
+# Dock-Starter für Cash Angel (gleiche Mechanik wie Steuerfuchs, eigener Port 8351).
+if [ "$1" != "--worker" ]; then
+  nohup "$0" --worker >/dev/null 2>&1 &
+  disown 2>/dev/null
+  exit 0
+fi
+PROJEKT="$(cd "$(dirname "$0")/../../.." && pwd)"
+PORT="${PORT:-8351}"
+URL="http://127.0.0.1:$PORT"
+export CASHANGEL_HOME="${CASHANGEL_HOME:-$HOME/CashAngel}"
+mkdir -p "$CASHANGEL_HOME"
+LOG="$CASHANGEL_HOME/app.log"
+export PATH="/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
+log(){ echo "$(date '+%Y-%m-%d %H:%M:%S') $*" >> "$LOG"; }
+alarm(){ log "FEHLER: $1"; osascript -e "display alert \"Cash Angel\" message \"$1\"" >/dev/null 2>&1; }
+lebt(){ curl -s --max-time 1 "$URL/gesund" >/dev/null 2>&1; }
+
+log "Start aus $PROJEKT"
+LOKAL="$(cat "$PROJEKT/VERSION" 2>/dev/null || echo dev)"
+if lebt; then
+  LAUFEND="$(curl -s --max-time 1 "$URL/api/version" 2>/dev/null | sed -E 's/.*"version": *"([^"]*)".*/\1/')"
+  log "Server läuft (Version '${LAUFEND:-unbekannt}'), lokal '$LOKAL'"
+  if [ -n "$LAUFEND" ] && [ "$LAUFEND" = "$LOKAL" ]; then open "$URL"; exit 0; fi
+  log "Andere Version – beende laufenden Server"
+  curl -s -X POST --max-time 2 "$URL/api/beenden" >/dev/null 2>&1
+  for i in $(seq 1 15); do sleep 0.3; lebt || break; done
+  if lebt; then PIDS="$(lsof -ti tcp:"$PORT" 2>/dev/null)"; [ -n "$PIDS" ] && kill $PIDS 2>/dev/null; for i in $(seq 1 15); do sleep 0.3; lebt || break; done; fi
+  if lebt; then alarm "Ein anderer Cash Angel auf Port $PORT lässt sich nicht beenden. Bitte im Terminal: pkill -f 'uvicorn app.main'"; exit 1; fi
+fi
+cd "$PROJEKT" || { alarm "Programmordner nicht gefunden: $PROJEKT"; exit 1; }
+if ! command -v python3 >/dev/null 2>&1; then alarm "python3 wurde nicht gefunden. Bitte Python 3.12 installieren (brew install python@3.12)."; exit 1; fi
+chmod +x start.sh 2>/dev/null
+log "Starte Server"
+CASHANGEL_KEIN_BROWSER=1 nohup ./start.sh >> "$CASHANGEL_HOME/server.log" 2>&1 &
+for i in $(seq 1 240); do sleep 0.5; if lebt; then log "Server antwortet – öffne Browser"; open "$URL"; exit 0; fi; done
+alarm "Cash Angel konnte nicht starten. Details stehen in $CASHANGEL_HOME/server.log"
+exit 1

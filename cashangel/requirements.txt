@@ -1,0 +1,6 @@
+# Laufzeit – Versionen gepinnt, damit das Tool auch in zwei Jahren startet.
+fastapi==0.115.12
+uvicorn==0.34.2
+sqlmodel==0.0.24
+python-multipart==0.0.20
+pdfplumber==0.11.6
