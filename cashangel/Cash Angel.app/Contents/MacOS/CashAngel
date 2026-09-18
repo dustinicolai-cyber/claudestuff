@@ -1,5 +1,11 @@
 #!/bin/bash
 # Dock-Starter für Cash Angel (gleiche Mechanik wie Steuerfuchs, eigener Port 8351).
+#  - läuft schon dieselbe Version: nur den Browser öffnen
+#  - läuft eine andere Version (alter Ordner): sauber beenden, notfalls über den Port stoppen, neu starten
+#  - läuft nichts: Server im Hintergrund starten, Browser öffnen, sobald er antwortet
+# Schritte stehen in ~/CashAngel/app.log, die Ausgabe des Servers in ~/CashAngel/server.log.
+# macOS erwartet, dass eine App sofort „antwortet“, deshalb löst sich das Skript sofort in einen
+# Hintergrundprozess auf.
 if [ "$1" != "--worker" ]; then
   nohup "$0" --worker >/dev/null 2>&1 &
   disown 2>/dev/null
@@ -11,10 +17,15 @@ URL="http://127.0.0.1:$PORT"
 export CASHANGEL_HOME="${CASHANGEL_HOME:-$HOME/CashAngel}"
 mkdir -p "$CASHANGEL_HOME"
 LOG="$CASHANGEL_HOME/app.log"
-export PATH="/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
+SERVERLOG="$CASHANGEL_HOME/server.log"
+export PATH="/usr/local/bin:/opt/homebrew/bin:/Library/Frameworks/Python.framework/Versions/3.12/bin:/Library/Frameworks/Python.framework/Versions/3.13/bin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
 log(){ echo "$(date '+%Y-%m-%d %H:%M:%S') $*" >> "$LOG"; }
-alarm(){ log "FEHLER: $1"; osascript -e "display alert \"Cash Angel\" message \"$1\"" >/dev/null 2>&1; }
+# Anführungszeichen und Backslashes raus, damit der Text sicher in das AppleScript passt.
+sauber(){ tr -d '"\\' | tr '\r' ' '; }
+alarm(){ log "FEHLER: $1"; osascript -e "display alert \"Cash Angel\" message \"$(printf '%s' "$1" | sauber)\" as critical" >/dev/null 2>&1; }
+hinweis(){ log "$1"; osascript -e "display notification \"$(printf '%s' "$1" | sauber)\" with title \"Cash Angel\"" >/dev/null 2>&1; }
 lebt(){ curl -s --max-time 1 "$URL/gesund" >/dev/null 2>&1; }
+log_ende(){ tail -n 6 "$SERVERLOG" 2>/dev/null | grep -v '^[[:space:]]*$' | tail -n 4; }
 
 log "Start aus $PROJEKT"
 LOKAL="$(cat "$PROJEKT/VERSION" 2>/dev/null || echo dev)"
@@ -25,14 +36,43 @@ if lebt; then
   log "Andere Version – beende laufenden Server"
   curl -s -X POST --max-time 2 "$URL/api/beenden" >/dev/null 2>&1
   for i in $(seq 1 15); do sleep 0.3; lebt || break; done
-  if lebt; then PIDS="$(lsof -ti tcp:"$PORT" 2>/dev/null)"; [ -n "$PIDS" ] && kill $PIDS 2>/dev/null; for i in $(seq 1 15); do sleep 0.3; lebt || break; done; fi
+  if lebt; then
+    log "Server reagiert nicht auf Beenden – stoppe über Port $PORT"
+    PIDS="$(lsof -ti tcp:"$PORT" 2>/dev/null)"
+    [ -n "$PIDS" ] && kill $PIDS 2>/dev/null
+    for i in $(seq 1 15); do sleep 0.3; lebt || break; done
+  fi
   if lebt; then alarm "Ein anderer Cash Angel auf Port $PORT lässt sich nicht beenden. Bitte im Terminal: pkill -f 'uvicorn app.main'"; exit 1; fi
 fi
+
 cd "$PROJEKT" || { alarm "Programmordner nicht gefunden: $PROJEKT"; exit 1; }
-if ! command -v python3 >/dev/null 2>&1; then alarm "python3 wurde nicht gefunden. Bitte Python 3.12 installieren (brew install python@3.12)."; exit 1; fi
+[ -f start.sh ] || { alarm "start.sh fehlt im Ordner $PROJEKT. Bitte das ZIP komplett entpacken."; exit 1; }
 chmod +x start.sh 2>/dev/null
-log "Starte Server"
-CASHANGEL_KEIN_BROWSER=1 nohup ./start.sh >> "$CASHANGEL_HOME/server.log" 2>&1 &
-for i in $(seq 1 240); do sleep 0.5; if lebt; then log "Server antwortet – öffne Browser"; open "$URL"; exit 0; fi; done
-alarm "Cash Angel konnte nicht starten. Details stehen in $CASHANGEL_HOME/server.log"
+
+# Erster Start (noch keine .venv) heißt: Abhängigkeiten laden. Das darf dauern – bis zu 15 Minuten warten.
+if [ -d .venv ]; then WARTE=240; else WARTE=1800; hinweis "Erster Start: Cash Angel wird eingerichtet, das kann ein paar Minuten dauern …"; fi
+
+log "Starte Server (warte bis zu $((WARTE / 2)) s)"
+echo "" >> "$SERVERLOG"
+CASHANGEL_KEIN_BROWSER=1 nohup ./start.sh >> "$SERVERLOG" 2>&1 &
+SERVER=$!
+for i in $(seq 1 "$WARTE"); do
+  sleep 0.5
+  if lebt; then log "Server antwortet – öffne Browser"; open "$URL"; exit 0; fi
+  if ! kill -0 "$SERVER" 2>/dev/null; then
+    wait "$SERVER" 2>/dev/null; RC=$?
+    log "start.sh hat sich beendet (Code $RC)"
+    alarm "Cash Angel konnte nicht starten. Zuletzt im Log:
+
+$(log_ende)
+
+Alles steht in $SERVERLOG"
+    exit 1
+  fi
+done
+alarm "Cash Angel antwortet nach $((WARTE / 2)) Sekunden noch nicht. Zuletzt im Log:
+
+$(log_ende)
+
+Alles steht in $SERVERLOG"
 exit 1

@@ -6,11 +6,16 @@ Technische Basis ist Steuerfuchs; Parser für CSV, CAMT.053 und PDF-Auszüge sin
 
 ## Starten
 
+- Voraussetzung: Python 3.10 oder neuer (`brew install python@3.12`). Das Apple-eigene python3 (3.9) reicht nicht;
+  `start.sh` sucht selbst nach python3.12/3.13/3.11 und sagt Bescheid, wenn keins da ist.
 - macOS: `Cash Angel.app` doppelklicken (oder ins Dock legen). Beim ersten Start wird einmalig eine
-  virtuelle Umgebung angelegt und die Abhängigkeiten installiert (braucht einmal Internet).
+  virtuelle Umgebung angelegt und die Abhängigkeiten installiert (braucht einmal Internet, dauert ein paar
+  Minuten; die App zeigt dazu eine Mitteilung). Nach einem neuen Download einmal Rechtsklick → Öffnen.
 - Terminal: `./start.sh` – läuft auf http://127.0.0.1:8351
 - Daten liegen in `~/CashAngel` (Datenbank `cashangel.db`, Konfiguration `kategorien.json`, Logs).
   Sichern heißt: diesen Ordner kopieren.
+- Startet es nicht, nennt die Meldung der App die letzten Zeilen aus `~/CashAngel/server.log`; die
+  Schritte der App selbst stehen in `~/CashAngel/app.log`. Im Terminal: `tail -n 40 ~/CashAngel/server.log`.
 
 ## Was es macht
 
