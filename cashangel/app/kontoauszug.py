@@ -185,7 +185,11 @@ def lese_camt053(daten: bytes) -> list[Bewegung]:
 BUCHUNGSTYPEN = (r"Lastschrift|Gutschrift|Ueberweisung|Überweisung|Entgelt|Dauerauftrag|Gehalt|Abbuchung|Zinsen|Retoure|"
                  r"Storno|Kartenzahlung|Bargeldauszahlung|Bargeld|Einzahlung|Auszahlung|R[üu]cklastschrift|Zahlungseingang|Zahlungsausgang|"
                  r"SEPA-Lastschrift|SEPA-Überweisung|Kartenumsatz|Basislastschrift|Echtzeit-Überweisung|Sammelüberweisung")
-RE_BUCHUNGSZEILE = re.compile(r"^(\d{2}\.\d{2}\.\d{4})\s+(" + BUCHUNGSTYPEN + r")\s+(.*?)\s+(-?\d{1,3}(?:\.\d{3})*,\d{2})(\d)?\s*$")
+# Kombinierte Typen wie „Gutschrift/Dauerauftrag“, „Gehalt/Rente“, „Dauerauftrag/Terminueberw.“ (ING)
+RE_BUCHUNGSZEILE = re.compile(r"^(\d{2}\.\d{2}\.\d{4})\s+((?:" + BUCHUNGSTYPEN + r")(?:/[A-Za-zÄÖÜäöüß.\-]+)?)\s+(.*?)\s+(-?\d{1,3}(?:\.\d{3})*,\d{2})(\d)?\s*$")
+# Diese Typen sagen selbst etwas über die Buchung aus und wandern mit in den Verwendungszweck.
+TYP_INFORMATIV = re.compile(r"gehalt|rente|entgelt|zinsen|dauerauftrag|retoure|storno|r[üu]cklastschrift|bargeld|einzahlung|auszahlung", re.I)
+RE_NAMENSBRUCH = re.compile(r"\b([A-ZÄÖÜ]) ([a-zäöüß]{3,})")
 RE_BUCHUNGSZEILE_OHNE_TYP = re.compile(r"^(\d{2}\.\d{2}\.\d{4})\s+(.+?)\s+(-?\d{1,3}(?:\.\d{3})*,\d{2})(\d)?\s*(?:[SH])?\s*$")
 RE_VALUTA_PREFIX = re.compile(r"^\d{2}\.\d{2}\.\d{4}\s+")
 RE_SEITENRAND = re.compile(r"^(Buchung\s+Buchung|Valuta$|Girokonto Nummer|Kontoauszug |Datum \d|Seite \d|IBAN |BIC |Alter Saldo|Neuer Saldo|"
@@ -198,9 +202,29 @@ def _paypal_haendler(zweck: str) -> str:
     if m:
         name = m.group(1).strip(" .")
         # zusammengeklebte Großbuchstaben etwas lesbarer: ADOBESYSTEMS… bleibt, CamelCase trennen
-        return re.sub(r"(?<=[a-z])(?=[A-Z])", " ", name)
+        return re.sub(r"(?<=[a-z])(?=[A-Z])", " ", name).replace("Gmb H", "GmbH").replace("Pay Pal", "PayPal")
     m = re.search(r"IhrEinkaufbei\s*([A-Za-z][^,]{2,60})", zweck.replace(" ", ""))
-    return re.sub(r"(?<=[a-z])(?=[A-Z])", " ", m.group(1).strip(" .")) if m else ""
+    name = m.group(1).strip(" .") if m else ""
+    if not name or name.lower().startswith(("mandat", "referenz")):
+        return ""
+    return re.sub(r"(?<=[a-z])(?=[A-Z])", " ", name).replace("Gmb H", "GmbH").replace("Pay Pal", "PayPal")
+
+
+RE_KARTENUMSATZ = re.compile(
+    r"NR\s*X{2,}\s*(\d{4})\s+(.+?)\s+([A-Z]{2})\s+KAUFUMSATZ\s+(\d\d\.\d\d)\s+[\d.,]+\s+\d{6}\s*(ARN\s*\w+)?\s*(Apple\s*Pay|Google\s*Pay)?", re.I)
+
+
+def _kartenzweck_lesbar(zweck: str) -> str:
+    """ING-Kartenumsatz „NR XXXX 5017 HUETTENBERG DE KAUFUMSATZ 28.06 82.11 110840 ARN… Apple Pay“
+    wird zu „Kaufumsatz 28.06 · HUETTENBERG DE · Karte ···5017 · Apple Pay“."""
+    m = RE_KARTENUMSATZ.search(zweck)
+    if not m:
+        return zweck
+    teile = [f"Kaufumsatz {m.group(4)}", f"{m.group(2).strip()} {m.group(3)}", f"Karte ···{m.group(1)}"]
+    if m.group(6):
+        teile.append(re.sub(r"\s+", " ", m.group(6)))
+    rest = (zweck[:m.start()] + " " + zweck[m.end():]).strip()
+    return " · ".join(teile) + (f" · {rest}" if rest else "")
 
 
 def lese_pdf_text(text: str) -> list[Bewegung]:
@@ -214,10 +238,16 @@ def lese_pdf_text(text: str) -> list[Bewegung]:
         if not aktuell:
             return
         zweck_zeilen = [z for z in aktuell["zweck"] if z and not z.lower().startswith(("mandat:", "referenz:"))]
-        zweck = " ".join(zweck_zeilen).strip()
-        gegen = aktuell["name"]
+        zweck = _kartenzweck_lesbar(" ".join(zweck_zeilen).strip())
+        # Nur die aussagekräftigen Teile des Typs („Gehalt/Rente“, „Dauerauftrag“) in den Zweck übernehmen;
+        # „Gutschrift“/„Lastschrift“ sagen nichts und würden Muster wie „gutschrift“ (Erstattung) auslösen.
+        typ_teile = [t for t in aktuell["typ"].split("/") if TYP_INFORMATIV.search(t)]
+        if typ_teile:
+            zweck = f"{'/'.join(typ_teile)} {zweck}".strip()
+        # Spaltenumbruch im Namen („Telekom D eutschland“, „fuer N eue“) wieder zusammensetzen
+        gegen = RE_NAMENSBRUCH.sub(r"\1\2", aktuell["name"])
         if "paypal" in gegen.lower():
-            haendler = _paypal_haendler(" ".join(aktuell["zweck"]))
+            haendler = _paypal_haendler(" ".join(zweck_zeilen))
             if haendler:
                 gegen = f"PayPal: {haendler}"
         out.append(Bewegung(datum=aktuell["datum"], betrag=aktuell["betrag"], verwendungszweck=zweck[:300], gegenkonto=gegen[:120]))

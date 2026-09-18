@@ -14,6 +14,8 @@ WOCHENTAGE = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"]
 MONATSNAMEN = ["Jan", "Feb", "Mär", "Apr", "Mai", "Jun", "Jul", "Aug", "Sep", "Okt", "Nov", "Dez"]
 RE_ZAHLEN = re.compile(r"\d{3,}")
 RE_PAYPAL = re.compile(r"paypal[:\s\-]*(.*)", re.I)
+# Kartenpräfixe der Bank („VISA ALDI SUED“, „MASTERCARD REWE“) gehören nicht zum Partner
+KARTENWOERTER = ("visa", "mastercard", "maestro", "girocard", "kartenzahlung", "debitkarte")
 FIRMEN_ENDUNGEN = ("gmbh", "ag", "kg", "se", "ltd", "inc", "llc", "co", "ug", "ohg", "e.v.", "ev", "sarl", "s.a.", "sa", "bv", "nv", "plc", "limited", "eu", "ab", "oy", "srl", "spa")
 
 
@@ -30,7 +32,7 @@ def partner_schluessel(gegenkonto: str, zweck: str = "") -> str:
     t = RE_ZAHLEN.sub(" ", t)
     t = re.sub(r"[^a-zäöüß&.+\- ]", " ", t)
     woerter = [w.strip(".-") for w in t.split()]
-    woerter = [w for w in woerter if w and w not in FIRMEN_ENDUNGEN and len(w) > 1]
+    woerter = [w for w in woerter if w and w not in FIRMEN_ENDUNGEN and w not in KARTENWOERTER and len(w) > 1]
     return " ".join(woerter[:3]) or "unbekannt"
 
 

@@ -160,3 +160,48 @@ def test_zeitraeume_und_partner():
     assert analyse.partner_schluessel("Netflix International", "") == "netflix international"
     assert analyse.partner_schluessel("PayPal: Spotify AB", "") == "spotify"
     assert analyse.partner_schluessel("", "Lieferando Bestellung 998877") == "lieferando bestellung"
+
+
+ING_TEXT = """Girokonto Nummer 5411382540
+Kontoauszug Juli 2025
+Buchung Buchung / Verwendungszweck Betrag (EUR)
+Valuta
+01.07.2025 Lastschrift PayPal Europe S.a.r.l. et Cie S.C.A -237,70
+01.07.2025 1043156212407/PP.6087.PP/., Ihr Einkauf bei
+Mandat: 5VE2224PVQYLG
+Referenz: 1043156212407
+02.07.2025 Gutschrift/Dauerauftrag Anneliese Nicolai 600,00
+02.07.2025 Miete und Nebenkosten
+03.07.2025 Lastschrift Susanne und Dustin Nicolai -1.095,07
+03.07.2025 Teilzahlung Darlehen RECHN.ZINS 431,89 TILG./ENTG. 663,18
+TILGUNG PER 01.07.2025
+Mandat: 0209499478D500105175411382540
+10.07.2025 Dauerauftrag/Terminueberw. Norbert und Ulrike Zoerb -501,21
+10.07.2025 Rate
+10.07.2025 Lastschrift PayPal Europe S.a.r.l. et Cie S.C.A -17,99
+10.07.2025 1043381785725/PP.9417.PP/. Spotify AB, Ihr Einkauf bei Spotify AB
+Seite 1 von 2
+30.07.2025 Gehalt/Rente NAHKETING GMBH 1.491,42
+30.07.2025 Lohn - Gehalt Abrechnung 07/2025
+01.07.2025 Lastschrift congstar - eine Marke der Telekom D eutschland -17,50
+01.07.2025 GmbH
+congstar Kundennummer 2210831760 Rechnung 1445099246
+"""
+
+
+def test_ing_pdf_text_kombinierte_typen():
+    from app.kontoauszug import lese_pdf_text
+    bs = lese_pdf_text(ING_TEXT)
+    assert [round(b.betrag, 2) for b in bs] == [-237.70, 600.00, -1095.07, -501.21, -17.99, 1491.42, -17.50]
+    assert round(sum(b.betrag for b in bs), 2) == 221.95
+    # PayPal ohne erkennbaren Händler bleibt PayPal, „Mandat:“ wird nicht zum Händler
+    assert bs[0].gegenkonto == "PayPal Europe S.a.r.l. et Cie S.C.A"
+    assert bs[4].gegenkonto == "PayPal: Spotify AB"
+    # Typ wandert in den Zweck, damit Gehalt/Dauerauftrag erkannt werden
+    assert bs[1].verwendungszweck.startswith("Dauerauftrag Miete")  # „Gutschrift“ bleibt draußen
+    assert bs[5].verwendungszweck.startswith("Gehalt/Rente Lohn")
+    assert bs[3].gegenkonto == "Norbert und Ulrike Zoerb"
+    # Beträge im Zweck (Zins/Tilgung) sind keine eigenen Buchungen
+    assert "431,89" in bs[2].verwendungszweck
+    # Spaltenumbruch im Namen repariert
+    assert bs[6].gegenkonto == "congstar - eine Marke der Telekom Deutschland"
