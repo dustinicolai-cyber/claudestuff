@@ -45,8 +45,36 @@ if lebt; then
   if lebt; then alarm "Ein anderer Cash Angel auf Port $PORT lässt sich nicht beenden. Bitte im Terminal: pkill -f 'uvicorn app.main'"; exit 1; fi
 fi
 
+# Gatekeeper-Falle: Eine frisch geladene App, die direkt im entpackten Ordner geöffnet wird, startet macOS
+# als Kopie aus einem Zufallsordner (App Translocation). Dann liegt start.sh nicht mehr daneben. Wir suchen
+# den echten Ordner, nehmen ihm die Quarantäne-Markierung und starten von dort neu.
+if [[ "$PROJEKT" == */AppTranslocation/* ]] || [ ! -f "$PROJEKT/start.sh" ]; then
+  log "Kein start.sh neben der App ($PROJEKT) – suche den Original-Ordner"
+  MARKE="$CASHANGEL_HOME/.neustart"
+  if [ -f "$MARKE" ] && [ $(( $(date +%s) - $(cat "$MARKE" 2>/dev/null || echo 0) )) -lt 90 ]; then
+    rm -f "$MARKE"
+    alarm "Cash Angel wird von macOS aus einem Zufallsordner gestartet und findet seinen Programmordner nicht. Bitte einmal im Terminal ausführen (Pfad anpassen): xattr -dr com.apple.quarantine ~/Downloads/cashangel  – oder den Ordner cashangel im Finder an einen anderen Ort verschieben und die App von dort öffnen."
+    exit 1
+  fi
+  ORIG=""
+  while IFS= read -r k; do
+    [ -n "$k" ] || continue
+    case "$k" in */AppTranslocation/*) continue;; esac
+    d="$(cd "$(dirname "$k")" 2>/dev/null && pwd)" || continue
+    if [ -f "$d/start.sh" ] && [ -f "$d/app/main.py" ]; then ORIG="$d"; break; fi
+  done < <(mdfind -name "Cash Angel.app" 2>/dev/null; find "$HOME/Downloads" "$HOME/Desktop" "$HOME/Documents" "$HOME/Programme" "$HOME/Applications" "$HOME" -maxdepth 4 -name "Cash Angel.app" 2>/dev/null)
+  if [ -z "$ORIG" ]; then
+    alarm "start.sh fehlt im Ordner $PROJEKT und der Original-Ordner wurde nicht gefunden. Bitte das ZIP komplett entpacken, den Ordner cashangel z. B. nach ~/Programme verschieben und die App von dort öffnen."
+    exit 1
+  fi
+  log "Original gefunden: $ORIG – entferne Quarantäne und starte von dort"
+  xattr -dr com.apple.quarantine "$ORIG" 2>/dev/null
+  date +%s > "$MARKE"
+  open "$ORIG/Cash Angel.app"
+  exit 0
+fi
+rm -f "$CASHANGEL_HOME/.neustart"
 cd "$PROJEKT" || { alarm "Programmordner nicht gefunden: $PROJEKT"; exit 1; }
-[ -f start.sh ] || { alarm "start.sh fehlt im Ordner $PROJEKT. Bitte das ZIP komplett entpacken."; exit 1; }
 chmod +x start.sh 2>/dev/null
 
 # Erster Start (noch keine .venv) heißt: Abhängigkeiten laden. Das darf dauern – bis zu 15 Minuten warten.

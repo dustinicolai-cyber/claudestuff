@@ -11,6 +11,10 @@ Technische Basis ist Steuerfuchs; Parser für CSV, CAMT.053 und PDF-Auszüge sin
 - macOS: `Cash Angel.app` doppelklicken (oder ins Dock legen). Beim ersten Start wird einmalig eine
   virtuelle Umgebung angelegt und die Abhängigkeiten installiert (braucht einmal Internet, dauert ein paar
   Minuten; die App zeigt dazu eine Mitteilung). Nach einem neuen Download einmal Rechtsklick → Öffnen.
+  Öffnet man die App direkt im frisch entpackten Ordner, startet macOS sie als Kopie aus einem Zufallsordner
+  („App Translocation“); der Starter erkennt das, hebt die Quarantäne des Ordners auf und startet neu. Falls das
+  nicht greift: `xattr -dr com.apple.quarantine ~/Downloads/cashangel` (Pfad anpassen) oder den Ordner im
+  Finder einmal verschieben.
 - Terminal: `./start.sh` – läuft auf http://127.0.0.1:8351
 - Daten liegen in `~/CashAngel` (Datenbank `cashangel.db`, Konfiguration `kategorien.json`, Logs).
   Sichern heißt: diesen Ordner kopieren.
