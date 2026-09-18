@@ -155,9 +155,11 @@ def api_uebersicht(zeitraum: Optional[str] = None, s: Session = Depends(get_sess
 @app.get("/ui/abos", response_class=HTMLResponse)
 def ui_abos(zeitraum: Optional[str] = None, s: Session = Depends(get_session)) -> HTMLResponse:
     kats = _kats(s)
-    abos = analyse.abos_finden(_alle(s), kats, _letztes_datum(s))
+    alle = _alle(s)
+    abos = analyse.abos_finden(alle, kats, _letztes_datum(s))
     status = {a.partner: a for a in s.exec(select(AboStatus)).all()}
-    return _html(ui.abos_view(abos, status))
+    bilanz = analyse.monatsbilanz(alle, kats, _monate(s, _zeitraum(s, zeitraum)))
+    return _html(ui.abos_view(abos, status, bilanz["schnitt"].get("ausgaben", 0.0), bilanz["schnitt"].get("einnahmen", 0.0)))
 
 
 @app.post("/api/abo/status", response_class=HTMLResponse)

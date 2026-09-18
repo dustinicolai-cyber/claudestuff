@@ -99,10 +99,60 @@ def uebersicht_view(zeitraum: str, beschriftung: str) -> str:
 
 # ---------------------------------------------------------------- Abos
 
-def abos_view(abos: list[dict], status: dict[str, AboStatus]) -> str:
+def abos_view(abos: list[dict], status: dict[str, AboStatus], ausgaben_monat: float = 0.0, einnahmen_monat: float = 0.0) -> str:
     aktiv = [a for a in abos if a["aktiv"] and status.get(a["partner"], AboStatus()).status == "ok"]
     inaktiv = [a for a in abos if a not in aktiv]
     monat = sum(a["monatlich"] for a in aktiv)
+    daten = {"abos": [{"partner": a["partner"], "name": a["name"], "monatlich": a["monatlich"], "kategorie": a["kategorie"], "intervall": a["intervall"]} for a in aktiv],
+             "ausgaben_monat": round(ausgaben_monat, 2), "einnahmen_monat": round(einnahmen_monat, 2)}
+    daten_json = json.dumps(daten, ensure_ascii=False).replace("</", "<\\/")
+    chips = "".join(f'<button type="button" class="chip" data-partner="{h(a["partner"])}" title="{h(a["kategorie"])} · {h(a["intervall"])}">'
+                    f'<span class="chip-name">{h(a["name"])}</span><span class="chip-wert">{eur(a["monatlich"])}</span></button>' for a in aktiv)
+    simulator = f"""
+  <div class="karten zwei abo-analyse">
+    <div class="karte chart-karte"><div class="row zwischen"><h3 style="margin:0">Abos nach Empfänger</h3><span class="muted klein">pro Monat · laufende Verträge</span></div>
+      <div class="chart-wrap donut"><svg id="chart-abos" viewBox="0 0 480 300" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Abos nach Empfänger"></svg><div class="tooltip" id="tip-abos" hidden></div></div></div>
+    <div class="karte spar-sim"><h3 style="margin:0 0 .2rem">Was wäre, wenn ich kündige?</h3>
+      <p class="muted klein" style="margin:0 0 .7rem">Abos antippen, die du kündigen würdest. Ergebnis und Kurve rechnen sofort mit.</p>
+      <div class="abo-chips" id="abo-chips">{chips}</div>
+      <div class="spar-ergebnis" id="spar-ergebnis"></div>
+    </div>
+  </div>
+  <div class="karte chart-karte"><div class="row zwischen"><h3 style="margin:0">Entwicklung über zwölf Monate</h3><span class="muted klein">Abo-Kosten aufsummiert: so wie jetzt und nach der Kündigung</span></div>
+    <div class="chart-wrap"><svg id="chart-spar" viewBox="0 0 960 340" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Entwicklung der Abo-Kosten"></svg><div class="tooltip" id="tip-spar" hidden></div></div>
+    <div class="legende" id="leg-spar"></div></div>
+  <script type="application/json" id="abo-daten">{daten_json}</script>
+  <script>
+  (function(){{
+    const wurzel = document.getElementById('abo-daten'); if (!wurzel) return;
+    const D = JSON.parse(wurzel.textContent); const weg = new Set();
+    try {{ (JSON.parse(sessionStorage.getItem('abo-weg') || '[]')).forEach(p => {{ if (D.abos.some(a => a.partner === p)) weg.add(p); }}); }} catch(e) {{}}
+    const pal = CA.palette('aus'), grau = '#64748b';
+    const proz = (a, b) => b > 0 ? (a / b * 100).toLocaleString('de-DE', {{maximumFractionDigits: 1}}) + ' %' : '–';
+    const liste = n => n.length <= 1 ? n.join('') : n.slice(0, -1).join(', ') + ' und ' + n[n.length - 1];
+    function zeichnen(){{
+      const gesamt = D.abos.reduce((s, a) => s + a.monatlich, 0);
+      const spar = D.abos.filter(a => weg.has(a.partner)).reduce((s, a) => s + a.monatlich, 0);
+      const rest = gesamt - spar, namen = D.abos.filter(a => weg.has(a.partner)).map(a => a.name);
+      document.querySelectorAll('#abo-chips .chip').forEach(c => c.classList.toggle('aus', weg.has(c.dataset.partner)));
+      const erg = document.getElementById('spar-ergebnis');
+      if (!D.abos.length) erg.innerHTML = '<p class="muted">Noch keine laufenden Abos erkannt.</p>';
+      else if (!weg.size) erg.innerHTML = `<div class="gross muted">Noch nichts ausgewählt</div><p class="muted klein">Alle ${{D.abos.length}} Abos zusammen kosten ${{CA.eur(gesamt)}} im Monat, ${{CA.eur(gesamt * 12)}} im Jahr – das sind ${{proz(gesamt, D.ausgaben_monat)}} deiner Ausgaben.</p>`;
+      else erg.innerHTML = `<div class="gross plus">${{CA.eur(spar)}} <small>im Monat</small> · ${{CA.eur(spar * 12)}} <small>im Jahr</small></div>
+        <p>Kündigst du ${{CA.esc(liste(namen))}}, sparst du <b>${{proz(spar, gesamt)}}</b> deiner Abo-Kosten und <b>${{proz(spar, D.ausgaben_monat)}}</b> deiner monatlichen Ausgaben.</p>
+        <p class="muted klein">Es bleiben ${{D.abos.length - weg.size}} Abos mit ${{CA.eur(rest)}} im Monat (${{CA.eur(rest * 12)}} im Jahr).${{D.einnahmen_monat > 0 ? ' Deine Sparquote steigt um ' + proz(spar, D.einnahmen_monat).replace(' %', ' Prozentpunkte') + '.' : ''}}</p>`;
+      CA.donut('chart-abos', 'tip-abos', D.abos.map((a, i) => ({{name: (weg.has(a.partner) ? '✕ ' : '') + a.name, wert: a.monatlich, farbe: weg.has(a.partner) ? grau : pal[i % pal.length]}})), 'Abos / Monat', null);
+      const labels = Array.from({{length: 12}}, (_, i) => String(i + 1));
+      CA.linien('chart-spar', 'tip-spar', 'leg-spar', labels, [
+        {{name: 'so wie jetzt', farbe: CA.css('--minus'), werte: labels.map((_, i) => gesamt * (i + 1))}},
+        {{name: 'nach Kündigung', farbe: CA.css('--plus'), werte: labels.map((_, i) => rest * (i + 1))}}],
+        {{band: [0, 1], bandName: 'gespart', einheit: n => 'nach ' + n + (n == 1 ? ' Monat' : ' Monaten')}});
+    }}
+    document.getElementById('abo-chips').addEventListener('click', e => {{ const c = e.target.closest('.chip'); if (!c) return; const p = c.dataset.partner; weg.has(p) ? weg.delete(p) : weg.add(p);
+      try {{ sessionStorage.setItem('abo-weg', JSON.stringify([...weg])); }} catch(e) {{}} zeichnen(); }});
+    zeichnen();
+  }})();
+  </script>"""
 
     def zeile(a: dict) -> str:
         st = status.get(a["partner"])
@@ -132,6 +182,8 @@ def abos_view(abos: list[dict], status: dict[str, AboStatus]) -> str:
     <div class="kpi"><div class="l">Pro Jahr</div><div class="w">{eur(monat * 12)}</div></div>
     <div class="kpi"><div class="l">Streaming &amp; Abos</div><div class="w">{eur(sum(a["monatlich"] for a in aktiv if a["kategorie_schluessel"] == "abos_streaming"))}</div><div class="klein muted">pro Monat</div></div>
   </div>
+  {simulator}
+  <h3>Alle laufenden Abos &amp; Verträge</h3>
   <div class="scroll"><table class="tabelle kompakt abo-tabelle"><thead><tr><th>Empfänger</th><th>Kategorie</th><th>Rhythmus</th><th class="num">Betrag</th><th class="num">pro Monat</th><th class="num">pro Jahr</th><th>Status</th><th></th></tr></thead>
     <tbody>{rows}</tbody></table></div>
   {f'<h3>Ausgelaufen, gekündigt oder kein Abo ({len(inaktiv)})</h3><div class="scroll"><table class="tabelle kompakt abo-tabelle"><thead><tr><th>Empfänger</th><th>Kategorie</th><th>Rhythmus</th><th class="num">Betrag</th><th class="num">pro Monat</th><th class="num">pro Jahr</th><th>Status</th><th></th></tr></thead><tbody>{rows_inaktiv}</tbody></table></div>' if inaktiv else ''}

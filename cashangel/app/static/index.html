@@ -86,6 +86,14 @@ a{color:var(--akzent)}
 .karte{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:1rem 1.2rem;margin:.8rem 0}
 .karten{display:grid;gap:.9rem} .karten.zwei{grid-template-columns:1fr 1fr} .karten.drei{grid-template-columns:1fr 1fr 1fr} .karten > .karte{margin:0}
 @media (max-width:1100px){.karten.zwei,.karten.drei{grid-template-columns:1fr}}
+.abo-chips{display:flex;flex-wrap:wrap;gap:.45rem;margin-bottom:.9rem}
+.chip{display:inline-flex;align-items:center;gap:.5rem;background:var(--card2);color:var(--fg);border:1px solid var(--line);border-radius:999px;padding:.35rem .8rem .35rem .9rem;font-weight:600;font-size:.85rem;box-shadow:none;transition:background .15s,border-color .15s,color .15s}
+.chip:hover{border-color:var(--akzent);background:var(--akzent-hell);transform:none}
+.chip .chip-wert{color:var(--muted);font-weight:500;font-size:.8em}
+.chip.aus{background:var(--minus-hell);border-color:var(--minus);color:var(--minus)} .chip.aus .chip-name{text-decoration:line-through} .chip.aus .chip-wert{color:var(--minus)}
+.chip.aus::before{content:"✕";font-size:.75em;font-weight:700}
+.spar-ergebnis .gross{font-size:1.5rem;font-weight:700;line-height:1.2;margin:.2rem 0 .4rem} .spar-ergebnis .gross small{font-size:.6em;font-weight:500;color:var(--muted)}
+.spar-ergebnis p{margin:.35rem 0}
 .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:.9rem;margin:.2rem 0 1rem}
 .kpi{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:.9rem 1.1rem}
 .kpi .l{font-size:.8em;color:var(--muted)} .kpi .w{font-size:1.6rem;font-weight:700;letter-spacing:-.02em;line-height:1.15;font-variant-numeric:tabular-nums;margin:.15rem 0}
@@ -243,7 +251,33 @@ window.CA = (function(){
       svg.appendChild(el('text', {x: legX + 20, y, class: 'label', style: 'font-size:12.5px'}, k.name.length > 26 ? k.name.slice(0, 25) + '…' : k.name));
       svg.appendChild(el('text', {x: legX + 20, y: y + 14, class: 'tick', style: 'font-size:11px'}, `${eur(k.wert)} · ${(k.wert / gesamt * 100).toFixed(1)} %`)); });
   }
-  return {css, eur, kurz, esc, gruppen, donut, palette};
+  function linien(svgId, tipId, legId, labels, reihen, opt){
+    const svg = document.getElementById(svgId); if (!svg) return; leer(svg); const t = tipFn(svg, tipId); opt = opt || {};
+    const L = 80, R = 930, T = 24, B = 300, n = labels.length;
+    const max = Math.max(1, ...reihen.flatMap(r => r.werte)); const tk = ticks(max); const mx = tk[tk.length - 1];
+    const x = i => L + (R - L) * (n === 1 ? 0.5 : i / (n - 1)), y = v => B - (B - T) * v / mx;
+    tk.forEach(v => { const yy = y(v); svg.appendChild(el('line', {x1: L, x2: R, y1: yy, y2: yy, class: 'grid'})); svg.appendChild(el('text', {x: L - 8, y: yy + 4, class: 'tick', 'text-anchor': 'end'}, kurz(v))); });
+    svg.appendChild(el('line', {x1: L, x2: R, y1: B, y2: B, class: 'achse'}));
+    labels.forEach((lab, i) => svg.appendChild(el('text', {x: x(i), y: B + 18, class: 'tick', 'text-anchor': 'middle'}, lab)));
+    if (opt.band && reihen.length > 1) { const A = reihen[opt.band[0]].werte, Bw = reihen[opt.band[1]].werte;
+      const d = A.map((v, i) => `${i ? 'L' : 'M'}${x(i)} ${y(v)}`).join(' ') + ' ' + Bw.map((_, i) => `L${x(n - 1 - i)} ${y(Bw[n - 1 - i])}`).join(' ') + ' Z';
+      svg.appendChild(el('path', {d, fill: opt.bandFarbe || css('--plus'), opacity: .16})); }
+    const belegt = [];
+    reihen.forEach(r => {
+      svg.appendChild(el('path', {d: r.werte.map((v, i) => `${i ? 'L' : 'M'}${x(i)} ${y(v)}`).join(' '), fill: 'none', stroke: r.farbe, 'stroke-width': 2.5, 'stroke-linejoin': 'round'}));
+      r.werte.forEach((v, i) => svg.appendChild(el('circle', {cx: x(i), cy: y(v), r: 3.5, fill: '#fff', stroke: r.farbe, 'stroke-width': 2})));
+      // Endwert über dem letzten Punkt; liegt dort schon ein Wert, darunter ausweichen
+      const letzte = r.werte[n - 1]; let ly = y(letzte) - 9; if (belegt.some(b => Math.abs(b - ly) < 16)) ly = y(letzte) + 20; belegt.push(ly);
+      svg.appendChild(el('text', {x: R, y: ly, class: 'label', 'text-anchor': 'end', style: `fill:${r.farbe};font-weight:700`}, eur(letzte)));
+    });
+    const band = (R - L) / Math.max(1, n - 1);
+    labels.forEach((lab, i) => { const hit = el('rect', {x: x(i) - band / 2, y: T, width: band, height: B - T, fill: 'transparent'});
+      const kopf = typeof opt.einheit === 'function' ? opt.einheit(lab) : (opt.einheit ? opt.einheit.replace('{n}', lab) : lab); const diff = reihen.length > 1 && opt.band ? reihen[opt.band[0]].werte[i] - reihen[opt.band[1]].werte[i] : null;
+      hit.addEventListener('mousemove', ev => t.zeig(ev, `<b>${esc(kopf)}</b><br>${reihen.map(q => `<i style="background:${q.farbe}"></i>${esc(q.name)}: ${eur(q.werte[i])}`).join('<br>')}${diff != null ? `<br><i style="background:${opt.bandFarbe || css('--plus')}"></i>${esc(opt.bandName || 'Differenz')}: ${eur(diff)}` : ''}`));
+      hit.addEventListener('mouseleave', t.weg); svg.appendChild(hit); });
+    if (legId) { const leg = document.getElementById(legId); if (leg) leg.innerHTML = reihen.map(r => `<span><i style="background:${r.farbe}"></i>${esc(r.name)} <b>${eur(r.werte[n - 1])}</b> nach ${n} Monaten</span>`).join('') + (opt.band ? `<span><i style="background:${opt.bandFarbe || css('--plus')};opacity:.5"></i>${esc(opt.bandName || 'Differenz')} <b>${eur(reihen[opt.band[0]].werte[n - 1] - reihen[opt.band[1]].werte[n - 1])}</b></span>` : ''); }
+  }
+  return {css, eur, kurz, esc, gruppen, donut, linien, palette};
 })();
 
 (function(){
