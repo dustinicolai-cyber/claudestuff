@@ -562,9 +562,9 @@ def muster_view(ins: dict, zeitraum: str, beschriftung: str) -> str:
       <div class="chart-wrap flach"><svg id="chart-dr" viewBox="0 0 480 240" preserveAspectRatio="xMidYMid meet" role="img"></svg><div class="tooltip" id="tip-dr" hidden></div></div></div>
   </div>
   <div class="karten drei">
-    <div class="karte"><h3 style="margin:0 0 .5rem">Wo das meiste Geld hingeht</h3><table class="tabelle kompakt"><tbody>{top_s or '<tr><td class=muted>–</td></tr>'}</tbody></table></div>
-    <div class="karte"><h3 style="margin:0 0 .5rem">Wo am häufigsten gezahlt wird</h3><table class="tabelle kompakt"><tbody>{top_n or '<tr><td class=muted>–</td></tr>'}</tbody></table></div>
-    <div class="karte"><h3 style="margin:0 0 .5rem">Größte Einzelausgaben</h3><table class="tabelle kompakt"><tbody>{gross or '<tr><td class=muted>–</td></tr>'}</tbody></table></div>
+    <div class="karte"><h3 style="margin:0 0 .5rem">Wo das meiste Geld hingeht</h3><div class="scroll"><table class="tabelle kompakt"><tbody>{top_s or '<tr><td class=muted>–</td></tr>'}</tbody></table></div></div>
+    <div class="karte"><h3 style="margin:0 0 .5rem">Wo am häufigsten gezahlt wird</h3><div class="scroll"><table class="tabelle kompakt"><tbody>{top_n or '<tr><td class=muted>–</td></tr>'}</tbody></table></div></div>
+    <div class="karte"><h3 style="margin:0 0 .5rem">Größte Einzelausgaben</h3><div class="scroll"><table class="tabelle kompakt"><tbody>{gross or '<tr><td class=muted>–</td></tr>'}</tbody></table></div></div>
   </div>
 </section>
 <script>
@@ -624,7 +624,7 @@ def einstellungen_view(cfg: dict, kats: list[Kategorie], regeln: list[Regel], db
     </form></div>
   <div class="karte"><h3 style="margin-top:0">Gelernte Zuordnungen ({len(regeln)})</h3>
     <p class="muted klein">Entstehen, wenn du in der Buchungsliste eine Kategorie änderst, getrennt nach Einnahmen und Ausgaben. Hier neu vergeben: Die Auswahl gilt sofort für alle Buchungen dieses Empfängers auf dieser Seite, auch künftige.</p>
-    <table class="tabelle kompakt regeln-tabelle"><thead><tr><th>Empfänger</th><th>Seite</th><th>Kategorie · Person</th><th></th></tr></thead><tbody>{regeln_html or '<tr><td colspan=4 class="muted">Noch keine.</td></tr>'}</tbody></table>
+    <div class="scroll"><table class="tabelle kompakt regeln-tabelle"><thead><tr><th>Empfänger</th><th>Seite</th><th>Kategorie · Person</th><th></th></tr></thead><tbody>{regeln_html or '<tr><td colspan=4 class="muted">Noch keine.</td></tr>'}</tbody></table></div>
     <form class="row" hx-post="/api/neu-klassifizieren" hx-target="#main" style="margin-top:.8rem">
       <button class="btn-secondary klein">Automatik erneut anwenden</button>
       <label class="check klein"><input type="checkbox" name="alle" value="1"> auch von Hand gesetzte überschreiben</label></form></div>
