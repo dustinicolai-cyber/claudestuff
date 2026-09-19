@@ -70,6 +70,7 @@ class AboManuell(SQLModel, table=True):
     intervall: str = "monatlich"       # monatlich | quartal | halbjahr | jaehrlich
     kategorie_id: Optional[int] = None
     typ: str = ""
+    quelle_partner: str = ""           # aus den Zuordnungen übernommen: Schlüssel des Empfängers
     aktiv: bool = True
     erstellt_am: datetime = Field(default_factory=datetime.now)
 

@@ -6,7 +6,7 @@ from datetime import date, timedelta
 from fastapi.testclient import TestClient
 from sqlmodel import Session, select
 
-from app import analyse, config
+from app import analyse, config, ui
 from app.db import engine
 from app.main import app
 from app.models import Bewegung, Kategorie, Regel
@@ -357,3 +357,22 @@ def test_typ_flags_und_kategoriefarbe():
         quellen = c.get("/api/uebersicht?zeitraum=jahr:2025").json()["einnahmequellen"]
         gehalt = [q for q in quellen if q["name"].startswith("Gehalt ")]
         assert len(gehalt) == 2 and gehalt[0]["farbe"] != gehalt[1]["farbe"] and all(q["farbe"].startswith("#") for q in gehalt)
+
+
+def test_aus_zuordnungen_uebernehmen():
+    with client() as c:
+        c.post("/api/import", files={"datei": ("konto.csv", jahres_csv().encode(), "text/csv")})
+        t = c.get("/ui/abos").text
+        # Überblick oben, Kennzahlen darunter, Boxen je Art
+        assert 'id="chart-gesamt"' in t and 'class="kpis"' in t and 'class="block-raster"' in t
+        assert t.index('id="chart-gesamt"') < t.index('class="kpis"') < t.index('class="block-raster"')
+        # ALDI SUED taucht als Vorschlag auf, ist aber noch kein Vertrag
+        assert "ALDI SUED" in t and t.count('<option value="aldi sued"') == len(ui.TYPEN)
+        r = c.post("/api/abo/aus-zuordnung", data={"partner": "aldi sued", "typ": "vertrag"})
+        assert "ALDI SUED" in r.text and '<option value="aldi sued"' not in r.text   # jetzt Vertrag, nicht mehr Vorschlag
+        with Session(engine()) as s:
+            from app.models import AboManuell
+            m = s.exec(select(AboManuell).where(AboManuell.quelle_partner == "aldi sued")).first()
+            assert m and m.typ == "vertrag" and m.betrag > 0 and m.intervall == "monatlich"
+        # zählt jetzt in den Summen mit
+        assert c.get("/api/uebersicht?zeitraum=jahr:2025").json()["abos"]["anzahl"] >= 6

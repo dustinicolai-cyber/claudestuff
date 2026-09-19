@@ -38,8 +38,11 @@ Technische Basis ist Steuerfuchs; Parser für CSV, CAMT.053 und PDF-Auszüge sin
    „gekündigt“ oder „kein Abo“ markierbar. Kreisdiagramm je Empfänger und „Was wäre, wenn …?“: Abos antippen,
    die man kündigen würde, geplante Mehrausgaben eintragen – Ersparnis pro Monat/Jahr, Anteil an Abo-Kosten und
    Ausgaben, Kurve über zwölf Monate (grün nach oben = gespart, rot nach unten = mehr ausgegeben).
-   Getrennte Blöcke für Abos, Verträge, Versicherung & Krankenkasse, Depots & Sparpläne und Kredite & Raten –
-   je Block ein Kreisdiagramm und daneben die Anbieter in zwei Spalten. Jede Anbieterkarte ist direkt editierbar:
+   Oben ein großes Kreisdiagramm mit den Arten daneben, darunter Laufende Verträge, Pro Monat, Pro Jahr und
+   größter Posten. Danach zweispaltig je eine Box für Abos, Verträge, Versicherung & Krankenkasse,
+   Depots & Sparpläne und Kredite & Raten – mit eigenem Kreisdiagramm, Monats- und Jahressumme und der Liste
+   darunter. Jede Box hat ein Auswahlfeld, um einen bekannten Empfänger aus den Zuordnungen zu übernehmen
+   (Betrag und Rhythmus werden aus seinen Buchungen geschätzt). Jede Anbieterkarte ist direkt editierbar:
    Name, Monatsbetrag, Kategorie, Status und die Art (damit die Krankenkasse nicht als Abo zählt). Was noch nicht
    erkannt wird, trägt man je Block von Hand ein. Der Simulator „Was wäre, wenn …?“ hat Reiter je Bereich mit
    „alle auswählen“ und „Auswahl aufheben“.

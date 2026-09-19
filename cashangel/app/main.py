@@ -207,7 +207,7 @@ def _abos(s: Session) -> tuple[list[dict], dict[str, AboStatus]]:
                      "kategorie_schluessel": k.schluessel if k else "", "farbe": k.farbe if k else "#64748b", "intervall": txt, "intervall_schluessel": m.intervall,
                      "betrag": round(m.betrag, 2), "monatlich": round(m.betrag * faktor, 2), "jaehrlich": round(m.betrag * faktor * 12, 2),
                      "anzahl": 0, "seit": None, "zuletzt": None, "naechste": None, "aktiv": m.aktiv, "stabil": True, "letzter_betrag": round(m.betrag, 2),
-                     "art": "von Hand", "manuell": True, "typ": _typ(k.schluessel if k else "", m.typ)})
+                     "art": "von Hand", "manuell": True, "typ": _typ(k.schluessel if k else "", m.typ), "quelle_partner": m.quelle_partner})
     for a in abos:
         a.setdefault("typ", _typ(a["kategorie_schluessel"], (status.get(a["partner"]).typ if status.get(a["partner"]) else "")))
     abos.sort(key=lambda a: (-a["aktiv"], -a["monatlich"]))
@@ -219,12 +219,54 @@ def _abos_laufend(s: Session) -> list[dict]:
     return [a for a in abos if a["aktiv"] and a["typ"] != "kein" and (a["partner"] not in status or status[a["partner"]].status == "ok")]
 
 
+def _partner_vorschlaege(s: Session, abos: list[dict]) -> list[dict]:
+    """Empfänger aus den Buchungen, die noch in keinem Block stehen – für „aus Zuordnungen hinzufügen“.
+    Betrag und Rhythmus werden aus den vorhandenen Buchungen geschätzt."""
+    schon = {a["partner"] for a in abos} | {a.get("quelle_partner") for a in abos if a.get("quelle_partner")}
+    kats = _kats(s)
+    nach_partner: dict[str, list[Bewegung]] = {}
+    for b in s.exec(select(Bewegung)).all():
+        if b.betrag >= 0 or b.ignoriert or not b.partner or b.partner in schon:
+            continue
+        nach_partner.setdefault(b.partner, []).append(b)
+    out = []
+    for partner, liste in nach_partner.items():
+        liste.sort(key=lambda b: b.datum)
+        betraege = sorted(abs(b.betrag) for b in liste)
+        betrag = betraege[len(betraege) // 2]
+        intervall = "monatlich"
+        if len(liste) >= 2:
+            tage = (liste[-1].datum - liste[0].datum).days / (len(liste) - 1)
+            intervall = "monatlich" if tage <= 45 else "quartal" if tage <= 135 else "halbjahr" if tage <= 250 else "jaehrlich"
+        k = kats.get(liste[-1].kategorie_id or -1)
+        out.append({"partner": partner, "name": analyse.partner_anzeigename(liste), "betrag": round(betrag, 2),
+                    "intervall": intervall, "kategorie_id": k.id if k else None, "kategorie": k.name if k else "–",
+                    "anzahl": len(liste), "summe": round(sum(abs(b.betrag) for b in liste), 2)})
+    out.sort(key=lambda x: x["name"].lower())
+    return out
+
+
+@app.post("/api/abo/aus-zuordnung", response_class=HTMLResponse)
+def api_abo_aus_zuordnung(partner: str = Form(""), typ: str = Form("vertrag"), s: Session = Depends(get_session)) -> HTMLResponse:
+    """Einen bekannten Empfänger als Abo/Vertrag übernehmen – Betrag und Rhythmus aus seinen Buchungen."""
+    abos, _ = _abos(s)
+    treffer = next((v for v in _partner_vorschlaege(s, abos) if v["partner"] == partner), None)
+    if not treffer:
+        return _html(ui.meldung_box("Empfänger nicht gefunden oder schon eingetragen.", "fehler-box") + ui_abos(None, "", s).body.decode("utf-8"))
+    m = AboManuell(name=treffer["name"], betrag=treffer["betrag"], intervall=treffer["intervall"], quelle_partner=partner,
+                   kategorie_id=treffer["kategorie_id"], typ=typ if typ in {t for t, _ in TYPEN} else "vertrag")
+    s.add(m)
+    s.commit()
+    return ui_abos(None, f"manuell:{m.id}", s)
+
+
 @app.get("/ui/abos", response_class=HTMLResponse)
 def ui_abos(zeitraum: Optional[str] = None, gespeichert: str = "", s: Session = Depends(get_session)) -> HTMLResponse:
     kats = _kats(s)
     abos, status = _abos(s)
     bilanz = analyse.monatsbilanz(_alle(s), kats, _monate(s, _zeitraum(s, zeitraum)))
-    return _html(ui.abos_view(abos, status, bilanz["schnitt"].get("ausgaben", 0.0), bilanz["schnitt"].get("einnahmen", 0.0), kats, gespeichert))
+    return _html(ui.abos_view(abos, status, bilanz["schnitt"].get("ausgaben", 0.0), bilanz["schnitt"].get("einnahmen", 0.0), kats, gespeichert,
+                              _partner_vorschlaege(s, abos)))
 
 
 @app.post("/api/abo/bearbeiten", response_class=HTMLResponse)

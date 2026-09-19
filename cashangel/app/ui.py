@@ -99,17 +99,18 @@ def uebersicht_view(zeitraum: str, beschriftung: str) -> str:
 
 # ---------------------------------------------------------------- Abos
 
-# (Schlüssel, Überschrift, Unterzeile, kurzer Name für die Kreismitte)
-TYPEN = [("abo", "Abos", "Streaming, Software, Mitgliedschaften", "Abos"),
-         ("vertrag", "Verträge", "Miete, Strom, Telefon, Daueraufträge", "Verträge"),
-         ("krankenkasse", "Versicherung & Krankenkasse", "Beiträge zur Vorsorge", "Versicherung"),
-         ("depot", "Depots & Sparpläne", "Geld, das im Haushalt bleibt", "Depots"),
-         ("kredit", "Kredite & Raten", "Tilgung und Finanzierung", "Kredite")]
+# (Schlüssel, Überschrift, Unterzeile, kurzer Name für die Kreismitte, Farbvariable)
+TYPEN = [("abo", "Abos", "Streaming, Software, Mitgliedschaften", "Abos", "--lila"),
+         ("vertrag", "Verträge", "Miete, Strom, Telefon, Daueraufträge", "Verträge", "--akzent"),
+         ("krankenkasse", "Versicherung & Krankenkasse", "Beiträge zur Vorsorge", "Versicherung", "--dunkelblau"),
+         ("depot", "Depots & Sparpläne", "Geld, das im Haushalt bleibt", "Depots", "--tuerkis"),
+         ("kredit", "Kredite & Raten", "Tilgung und Finanzierung", "Kredite", "--minus")]
 
 
 def abos_view(abos: list[dict], status: dict[str, AboStatus], ausgaben_monat: float = 0.0, einnahmen_monat: float = 0.0,
-              kats: dict[int, Kategorie] | None = None, gespeichert: str = "") -> str:
+              kats: dict[int, Kategorie] | None = None, gespeichert: str = "", vorschlaege: list[dict] | None = None) -> str:
     kats = kats or {}
+    vorschlaege = vorschlaege or []
     ausgabe_kats = [k for k in sorted(kats.values(), key=lambda x: x.sortierung) if k.art in ("ausgabe", "einnahme")]
 
     def kat_opts(schluessel: str) -> str:
@@ -120,7 +121,7 @@ def abos_view(abos: list[dict], status: dict[str, AboStatus], ausgaben_monat: fl
                        for w, t in (("monatlich", "monatlich"), ("quartal", "vierteljährlich"), ("halbjahr", "halbjährlich"), ("jaehrlich", "jährlich")))
 
     def typ_opts(gewaehlt: str) -> str:
-        eintraege = [(t, name) for t, name, _, _ in TYPEN] + [("kein", "kein Vertrag")]
+        eintraege = [(t, name) for t, name, _, _, _ in TYPEN] + [("kein", "kein Vertrag")]
         return "".join(f'<option value="{t}" {"selected" if t == gewaehlt else ""}>{name}</option>' for t, name in eintraege)
 
     def laeuft(a: dict) -> bool:
@@ -165,61 +166,90 @@ def abos_view(abos: list[dict], status: dict[str, AboStatus], ausgaben_monat: fl
                 f'<select name="status" aria-label="Status"><option value="ok" {"selected" if st_status == "ok" else ""}>läuft</option>'
                 f'<option value="gekuendigt" {"selected" if st_status != "ok" else ""}>gekündigt</option></select>{weg}</div></article>')
 
-    # ------------------------------------------------------------ Block je Typ
+    # ------------------------------------------------------------ Box je Art
+    vorschlag_opts = "".join(f'<option value="{h(v["partner"])}">{h(v["name"])} · {eur(v["betrag"])} · {h(v["kategorie"])}</option>' for v in vorschlaege)
+
     def block(typ: str, titel: str, unterzeile: str) -> str:
         eintraege = [a for a in aktiv if a["typ"] == typ]
         summe = sum(a["monatlich"] for a in eintraege)
         karten = "".join(karte(a, (a["monatlich"] / summe) if summe else 0) for a in eintraege)
-        kopf_zahl = (f'<span class="b-zahl">{eur(summe)}<small> / Monat</small></span>'
-                     f'<span class="muted klein">{len(eintraege)} {"Eintrag" if len(eintraege) == 1 else "Einträge"} · {eur(summe * 12)} pro Jahr</span>') if eintraege else ""
+        vorwahl = {"abo": "abos_streaming", "krankenkasse": "versicherungen", "depot": "sparen", "kredit": "kredit"}.get(typ, "wohnen")
         if eintraege:
-            inhalt = (f'<div class="b-koerper"><div class="chart-wrap rund"><svg id="chart-{typ}" viewBox="0 0 300 300" preserveAspectRatio="xMidYMid meet" role="img" '
-                      f'aria-label="{h(titel)} nach Anbieter"></svg><div class="tooltip" id="tip-{typ}" hidden></div></div>'
-                      f'<div class="anbieter-raster">{karten}</div></div>')
+            mitte = (f'<div class="chart-wrap rund"><svg id="chart-{typ}" viewBox="0 0 300 300" preserveAspectRatio="xMidYMid meet" role="img" '
+                     f'aria-label="{h(titel)} nach Anbieter"></svg><div class="tooltip" id="tip-{typ}" hidden></div></div>'
+                     f'<div class="b-summe"><span class="b-zahl">{eur(summe)}<small> / Monat</small></span>'
+                     f'<span class="muted klein">{len(eintraege)} {"Eintrag" if len(eintraege) == 1 else "Einträge"} · {eur(summe * 12)} pro Jahr</span></div>')
         else:
-            inhalt = f'<p class="b-leer muted">Noch nichts unter „{h(titel)}“. Über <b>+ Eintrag</b> hinzufügen oder in einem anderen Block die Art umstellen.</p>'
+            mitte = f'<p class="b-leer muted">Noch nichts unter „{h(titel)}“. Unten einen bekannten Empfänger übernehmen, von Hand eintragen oder in einem anderen Block die Art umstellen.</p>'
         return f"""
-  <section class="v-block karte" id="block-{typ}" data-typ="{typ}">
-    <header class="b-kopf">
-      <div class="b-titel"><h3>{h(titel)}</h3><p class="muted klein">{h(unterzeile)}</p></div>
-      <div class="b-rechts">{kopf_zahl}<button type="button" class="btn-secondary klein b-neu" data-typ="{typ}" aria-expanded="false">+ Eintrag</button></div>
-    </header>
-    <form class="b-form" hx-post="/api/abo/neu" hx-target="#main" hidden>
-      <input type="hidden" name="typ" value="{typ}">
-      <input name="name" placeholder="Anbieter, z. B. Fitnessstudio" required>
-      <input name="betrag" type="text" inputmode="decimal" placeholder="Betrag" style="width:7em" required>
-      <select name="intervall" aria-label="Rhythmus">{intervall_opts("monatlich")}</select>
-      <select name="kategorie_id" aria-label="Kategorie">{kat_opts("abos_streaming" if typ == "abo" else "versicherungen" if typ == "krankenkasse" else "sparen" if typ == "depot" else "kredit" if typ == "kredit" else "wohnen")}</select>
-      <button class="btn-primary klein">Hinzufügen</button>
-      <button type="button" class="btn-ghost klein b-ab">Abbrechen</button>
-    </form>
-    {inhalt}
-  </section>"""
+    <section class="v-block karte" id="block-{typ}" data-typ="{typ}">
+      <header class="b-kopf"><div class="b-titel"><h3>{h(titel)}</h3><p class="muted klein">{h(unterzeile)}</p></div></header>
+      {mitte}
+      <div class="b-aktionen">
+        <form class="b-zuordnung" hx-post="/api/abo/aus-zuordnung" hx-target="#main">
+          <input type="hidden" name="typ" value="{typ}">
+          <select name="partner" aria-label="Bekannten Empfänger übernehmen" required><option value="">aus Zuordnungen hinzufügen …</option>{vorschlag_opts}</select>
+          <button class="btn-secondary klein">Übernehmen</button>
+        </form>
+        <button type="button" class="btn-ghost klein b-neu" aria-expanded="false">+ von Hand</button>
+      </div>
+      <form class="b-form" hx-post="/api/abo/neu" hx-target="#main" hidden>
+        <input type="hidden" name="typ" value="{typ}">
+        <input name="name" placeholder="Anbieter" required>
+        <input name="betrag" type="text" inputmode="decimal" placeholder="Betrag" style="width:6.5em" required>
+        <select name="intervall" aria-label="Rhythmus">{intervall_opts("monatlich")}</select>
+        <select name="kategorie_id" aria-label="Kategorie">{kat_opts(vorwahl)}</select>
+        <button class="btn-primary klein">Hinzufügen</button>
+        <button type="button" class="btn-ghost klein b-ab">Abbrechen</button>
+      </form>
+      <div class="anbieter-raster einzeln">{karten}</div>
+    </section>"""
 
-    bloecke = "".join(block(t, titel, unter) for t, titel, unter, _ in TYPEN)
+    bloecke = "".join(block(t, titel, unter) for t, titel, unter, _, _ in TYPEN)
     ruhend_html = "".join(karte(a, 0) for a in ruhend)
 
-    # ------------------------------------------------------------ Simulator
-    daten = {"typen": [{"typ": t, "titel": titel, "kurz": kurz} for t, titel, _, kurz in TYPEN],
-             "abos": [{"partner": a["partner"], "name": a["name"], "monatlich": a["monatlich"], "typ": a["typ"],
-                       "farbe": a["farbe"], "kategorie": a["kategorie"], "intervall": a["intervall"]} for a in aktiv],
-             "ausgaben_monat": round(ausgaben_monat, 2), "einnahmen_monat": round(einnahmen_monat, 2)}
-    daten_json = json.dumps(daten, ensure_ascii=False).replace("</", "<\\/")
+    # ------------------------------------------------------------ Überblick oben
+    haupt = []
+    for typ, titel, _, _, farbe in TYPEN:
+        wert = sum(a["monatlich"] for a in aktiv if a["typ"] == typ)
+        if wert:
+            haupt.append({"typ": typ, "name": titel, "wert": round(wert, 2), "farbe": farbe})
+    haupt_zeilen = "".join(
+        f'<a class="kat-zeile" href="#block-{x["typ"]}"><span class="kat-name"><i style="background:var({x["farbe"]})"></i>{h(x["name"])}</span>'
+        f'<span class="kat-balken"><span style="width:{x["wert"] / monat * 100:.1f}%;background:var({x["farbe"]})"></span></span>'
+        f'<span class="kat-wert">{eur(x["wert"])}<small> · {prozent_kurz(x["wert"] / monat)}</small></span></a>' for x in haupt) if monat else ""
 
+    groesster_kat = f'<div class="klein muted">{h(groesster["kategorie"])}</div>' if groesster else ""
     kpis = f"""
   <div class="kpis">
     <div class="kpi"><div class="l">Laufende Verträge</div><div class="w">{len(aktiv)}</div><div class="klein muted">{len(ruhend)} ruhend oder gekündigt</div></div>
     <div class="kpi"><div class="l">Pro Monat</div><div class="w">{eur(monat)}</div><div class="klein muted">{prozent_kurz(monat / ausgaben_monat) if ausgaben_monat else "–"} deiner Ausgaben</div></div>
     <div class="kpi"><div class="l">Pro Jahr</div><div class="w">{eur(monat * 12)}</div><div class="klein muted">hochgerechnet</div></div>
-    <div class="kpi"><div class="l">Größter Posten</div><div class="w">{eur(groesster["monatlich"]) if groesster else "–"}</div><div class="klein muted">{h(groesster["name"]) if groesster else "noch nichts erkannt"}</div></div>
+    <div class="kpi"><div class="l">Größter Posten</div><div class="w">{eur(groesster["monatlich"]) if groesster else "–"}</div>
+      <div class="klein muted">{h(groesster["name"]) if groesster else "noch nichts erkannt"}</div>{groesster_kat}</div>
   </div>"""
+
+    # ------------------------------------------------------------ Simulator
+    daten = {"typen": [{"typ": t, "titel": titel, "kurz": kurz, "farbe": farbe} for t, titel, _, kurz, farbe in TYPEN],
+             "abos": [{"partner": a["partner"], "name": a["name"], "monatlich": a["monatlich"], "typ": a["typ"],
+                       "farbe": a["farbe"], "kategorie": a["kategorie"], "intervall": a["intervall"]} for a in aktiv],
+             "ausgaben_monat": round(ausgaben_monat, 2), "einnahmen_monat": round(einnahmen_monat, 2)}
+    daten_json = json.dumps(daten, ensure_ascii=False).replace("</", "<\\/")
 
     return f"""
 <section class="abos">
-  <p class="muted erkl">Wiederkehrende Zahlungen: gleicher Empfänger, regelmäßiger Abstand, ähnlicher Betrag. Jahres- und Quartalsbeiträge sind auf den Monat umgerechnet.
-  Jede Karte lässt sich direkt bearbeiten – Name, Betrag, Art und Kategorie werden sofort gespeichert.</p>
+  <div class="karte ueberblick">
+    <div class="ub-koerper">
+      <div class="chart-wrap rund gross"><svg id="chart-gesamt" viewBox="0 0 300 300" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Verträge nach Art"></svg><div class="tooltip" id="tip-gesamt" hidden></div></div>
+      <div class="ub-rechts">
+        <h3 style="margin:0 0 .1rem">Abos &amp; Verträge</h3>
+        <p class="muted klein" style="margin:0 0 .3rem">Wiederkehrende Zahlungen: gleicher Empfänger, regelmäßiger Abstand, ähnlicher Betrag. Jahres- und Quartalsbeiträge sind auf den Monat umgerechnet.</p>
+        <div class="kat-liste haupt-liste">{haupt_zeilen or '<p class="muted">Noch nichts erkannt – dafür braucht es mindestens drei Monate Kontoauszüge. Unten lässt sich alles von Hand eintragen.</p>'}</div>
+      </div>
+    </div>
+  </div>
   {kpis}
-  {bloecke}
+  <div class="block-raster">{bloecke}</div>
   {f'<section class="v-block karte gedaempft"><header class="b-kopf"><div class="b-titel"><h3>Gekündigt, ausgelaufen oder kein Vertrag</h3><p class="muted klein">Zählt nirgends mit. Art oder Status ändern holt den Eintrag zurück.</p></div><span class="muted klein">{len(ruhend)}</span></header><div class="anbieter-raster breit">{ruhend_html}</div></section>' if ruhend else ''}
   <section class="karte spar-sim" id="spar-sim">
     <header class="b-kopf"><div class="b-titel"><h3>Was wäre, wenn …?</h3>
@@ -251,6 +281,9 @@ ABO_SKRIPT = """
 (function(){
   const wurzel = document.getElementById('abo-daten'); if (!wurzel) return;
   const D = JSON.parse(wurzel.textContent);
+  // Überblick nach Art
+  CA.donut('chart-gesamt', 'tip-gesamt', D.typen.map(t => ({name: t.titel, farbe: CA.css(t.farbe),
+    wert: D.abos.filter(a => a.typ === t.typ).reduce((s, a) => s + a.monatlich, 0)})), 'pro Monat', null, {ohneLegende: true});
   // Blockweise Kreisdiagramme
   D.typen.forEach(t => {
     const teil = D.abos.filter(a => a.typ === t.typ);
