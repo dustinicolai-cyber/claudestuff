@@ -53,19 +53,28 @@ if [[ "$PROJEKT" == */AppTranslocation/* ]] || [ ! -f "$PROJEKT/start.sh" ]; the
   MARKE="$CASHANGEL_HOME/.neustart"
   if [ -f "$MARKE" ] && [ $(( $(date +%s) - $(cat "$MARKE" 2>/dev/null || echo 0) )) -lt 90 ]; then
     rm -f "$MARKE"
-    alarm "Cash Angel wird von macOS aus einem Zufallsordner gestartet und findet seinen Programmordner nicht. Bitte einmal im Terminal ausführen (Pfad anpassen): xattr -dr com.apple.quarantine ~/Downloads/cashangel  – oder den Ordner cashangel im Finder an einen anderen Ort verschieben und die App von dort öffnen."
+    alarm "Cash Angel wird von macOS aus einem Zufallsordner gestartet und findet seinen Programmordner nicht. Abhilfe: Im Terminal eingeben: xattr -dr com.apple.quarantine  (mit Leerzeichen dahinter), dann den Ordner cashangel aus dem Finder ins Terminal-Fenster ziehen und Enter drücken. Danach die App erneut öffnen."
     exit 1
   fi
   ORIG=""
+  passt(){ [ -f "$1/start.sh" ] && [ -f "$1/app/main.py" ]; }
   while IFS= read -r k; do
     [ -n "$k" ] || continue
     case "$k" in */AppTranslocation/*) continue;; esac
     d="$(cd "$(dirname "$k")" 2>/dev/null && pwd)" || continue
-    if [ -f "$d/start.sh" ] && [ -f "$d/app/main.py" ]; then ORIG="$d"; break; fi
-  done < <(mdfind -name "Cash Angel.app" 2>/dev/null; find "$HOME/Downloads" "$HOME/Desktop" "$HOME/Documents" "$HOME/Programme" "$HOME/Applications" "$HOME" -maxdepth 4 -name "Cash Angel.app" 2>/dev/null)
+    if passt "$d"; then ORIG="$d"; break; fi
+  done < <(mdfind -name "Cash Angel.app" 2>/dev/null; mdfind "kMDItemFSName == 'start.sh'" 2>/dev/null | grep -i cashangel
+           find "$HOME/Downloads" "$HOME/Desktop" "$HOME/Documents" "$HOME/Programme" "$HOME/Applications" "$HOME/Library/Mobile Documents/com~apple~CloudDocs" "$HOME" /Applications /Volumes -maxdepth 6 -name "Cash Angel.app" 2>/dev/null)
   if [ -z "$ORIG" ]; then
-    alarm "start.sh fehlt im Ordner $PROJEKT und der Original-Ordner wurde nicht gefunden. Bitte das ZIP komplett entpacken, den Ordner cashangel z. B. nach ~/Programme verschieben und die App von dort öffnen."
-    exit 1
+    # Nicht gefunden: den Ordner einfach auswählen lassen (Finder-Dialog)
+    log "Original nicht gefunden – frage nach dem Ordner"
+    GEWAEHLT="$(osascript -e 'try' -e 'POSIX path of (choose folder with prompt "Cash Angel wurde von macOS aus einem Zufallsordner gestartet. Bitte den entpackten Ordner „cashangel“ auswählen (darin liegen start.sh und Cash Angel.app):")' -e 'on error' -e 'return ""' -e 'end try' 2>/dev/null)"
+    GEWAEHLT="${GEWAEHLT%/}"
+    if [ -n "$GEWAEHLT" ] && passt "$GEWAEHLT"; then ORIG="$GEWAEHLT"
+    elif [ -n "$GEWAEHLT" ] && passt "$GEWAEHLT/cashangel"; then ORIG="$GEWAEHLT/cashangel"
+    elif [ -n "$GEWAEHLT" ]; then alarm "Im gewählten Ordner ($GEWAEHLT) liegt keine start.sh. Bitte den Ordner wählen, in dem start.sh und Cash Angel.app nebeneinander liegen."; exit 1
+    else alarm "start.sh fehlt im Ordner $PROJEKT und der Original-Ordner wurde nicht gefunden. Abhilfe: Im Terminal eingeben: xattr -dr com.apple.quarantine  (mit Leerzeichen dahinter), dann den Ordner cashangel aus dem Finder ins Terminal-Fenster ziehen und Enter drücken. Danach die App erneut öffnen."; exit 1
+    fi
   fi
   log "Original gefunden: $ORIG – entferne Quarantäne und starte von dort"
   xattr -dr com.apple.quarantine "$ORIG" 2>/dev/null
