@@ -58,6 +58,7 @@ class AboStatus(SQLModel, table=True):
     name: str = ""                     # eigener Anbietername (überschreibt den erkannten)
     monatlich: Optional[float] = None  # eigener Monatsbetrag (überschreibt den erkannten)
     kategorie_id: Optional[int] = None # eigene Kategorie (überschreibt die erkannte)
+    typ: str = ""                      # abo | vertrag | krankenkasse | depot | kredit | kein ("" = aus der Kategorie ableiten)
     geaendert_am: datetime = Field(default_factory=datetime.now)
 
 
@@ -68,6 +69,7 @@ class AboManuell(SQLModel, table=True):
     betrag: float = 0.0
     intervall: str = "monatlich"       # monatlich | quartal | halbjahr | jaehrlich
     kategorie_id: Optional[int] = None
+    typ: str = ""
     aktiv: bool = True
     erstellt_am: datetime = Field(default_factory=datetime.now)
 

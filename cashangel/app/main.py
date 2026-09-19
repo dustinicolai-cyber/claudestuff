@@ -134,6 +134,21 @@ def ui_uebersicht(zeitraum: Optional[str] = None, s: Session = Depends(get_sessi
     return _html(ui.uebersicht_view(z, analyse.zeitraum_beschriftung(z)))
 
 
+def _einnahmequellen(quellen: dict, ks: dict) -> list[dict]:
+    """Einnahmen fürs Kreisdiagramm. Gehalt ist je Person getrennt und bekommt denselben Ton, jede weitere Person etwas heller."""
+    gehalt_farbe = ks["gehalt"].farbe if "gehalt" in ks else "#2dd4bf"
+    nach_name = {k.name: k.farbe for k in ks.values()}
+    out, i = [], 0
+    for name, wert in quellen.items():
+        if name.startswith("Gehalt "):
+            farbe = analyse.heller(gehalt_farbe, 0.28 * i)
+            i += 1
+        else:
+            farbe = nach_name.get(name, "")
+        out.append({"name": name, "wert": wert, "farbe": farbe})
+    return out
+
+
 @app.get("/api/uebersicht")
 def api_uebersicht(zeitraum: Optional[str] = None, s: Session = Depends(get_session)) -> dict:
     z = _zeitraum(s, zeitraum)
@@ -147,11 +162,21 @@ def api_uebersicht(zeitraum: Optional[str] = None, s: Session = Depends(get_sess
                    "fix": ks[sk].fix if sk in ks else False} for sk, v in bilanz["kategorien"].items()]
     return {"zeitraum": z, "beschriftung": analyse.zeitraum_beschriftung(z), "monate": bilanz["monate"], "summe": bilanz["summe"], "schnitt": bilanz["schnitt"],
             "monate_mit_daten": bilanz["monate_mit_daten"], "kategorien": kategorien,
-            "einnahmequellen": [{"name": k, "wert": v} for k, v in bilanz["einnahmequellen"].items()],
+            "einnahmequellen": _einnahmequellen(bilanz["einnahmequellen"], ks),
             "abos": {"anzahl": sum(1 for a in abos if a["aktiv"]), "monatlich": round(sum(a["monatlich"] for a in abos if a["aktiv"]), 2)}}
 
 
 INTERVALLE = {"monatlich": ("monatlich", 1.0), "quartal": ("vierteljährlich", 1 / 3), "halbjahr": ("halbjährlich", 1 / 6), "jaehrlich": ("jährlich", 1 / 12)}
+# Welcher Block: aus der Kategorie abgeleitet, per Flag in der Zeile überschreibbar
+TYP_AUS_KATEGORIE = {"abos_streaming": "abo", "mobilfunk": "abo", "krankenkasse": "krankenkasse", "versicherungen": "krankenkasse",
+                     "sparen": "depot", "kapitalertrag": "depot", "kredit": "kredit"}
+TYPEN = [("abo", "Abos"), ("vertrag", "Verträge"), ("krankenkasse", "Versicherung & Krankenkasse"), ("depot", "Depots & Sparpläne"), ("kredit", "Kredite & Raten")]
+
+
+def _typ(schluessel: str, gesetzt: str = "") -> str:
+    if gesetzt in {t for t, _ in TYPEN} | {"kein"}:
+        return gesetzt
+    return TYP_AUS_KATEGORIE.get(schluessel, "vertrag")
 
 
 def _abos(s: Session) -> tuple[list[dict], dict[str, AboStatus]]:
@@ -173,6 +198,8 @@ def _abos(s: Session) -> tuple[list[dict], dict[str, AboStatus]]:
         if k:
             a["kategorie"], a["kategorie_schluessel"], a["farbe"] = k.name, k.schluessel, k.farbe
             a["art"] = "Abo" if k.schluessel in ("abos_streaming", "mobilfunk") else ("Fixkosten" if k.fix else "Dauerauftrag")
+        if st.status == "kein_abo" and not st.typ:
+            st.typ = "kein"
     for m in s.exec(select(AboManuell).order_by(AboManuell.name)).all():
         k = kats.get(m.kategorie_id or -1)
         txt, faktor = INTERVALLE.get(m.intervall, INTERVALLE["monatlich"])
@@ -180,27 +207,29 @@ def _abos(s: Session) -> tuple[list[dict], dict[str, AboStatus]]:
                      "kategorie_schluessel": k.schluessel if k else "", "farbe": k.farbe if k else "#64748b", "intervall": txt, "intervall_schluessel": m.intervall,
                      "betrag": round(m.betrag, 2), "monatlich": round(m.betrag * faktor, 2), "jaehrlich": round(m.betrag * faktor * 12, 2),
                      "anzahl": 0, "seit": None, "zuletzt": None, "naechste": None, "aktiv": m.aktiv, "stabil": True, "letzter_betrag": round(m.betrag, 2),
-                     "art": "von Hand", "manuell": True})
+                     "art": "von Hand", "manuell": True, "typ": _typ(k.schluessel if k else "", m.typ)})
+    for a in abos:
+        a.setdefault("typ", _typ(a["kategorie_schluessel"], (status.get(a["partner"]).typ if status.get(a["partner"]) else "")))
     abos.sort(key=lambda a: (-a["aktiv"], -a["monatlich"]))
     return abos, status
 
 
 def _abos_laufend(s: Session) -> list[dict]:
     abos, status = _abos(s)
-    return [a for a in abos if a["aktiv"] and (a["partner"] not in status or status[a["partner"]].status == "ok")]
+    return [a for a in abos if a["aktiv"] and a["typ"] != "kein" and (a["partner"] not in status or status[a["partner"]].status == "ok")]
 
 
 @app.get("/ui/abos", response_class=HTMLResponse)
-def ui_abos(zeitraum: Optional[str] = None, s: Session = Depends(get_session)) -> HTMLResponse:
+def ui_abos(zeitraum: Optional[str] = None, gespeichert: str = "", s: Session = Depends(get_session)) -> HTMLResponse:
     kats = _kats(s)
     abos, status = _abos(s)
     bilanz = analyse.monatsbilanz(_alle(s), kats, _monate(s, _zeitraum(s, zeitraum)))
-    return _html(ui.abos_view(abos, status, bilanz["schnitt"].get("ausgaben", 0.0), bilanz["schnitt"].get("einnahmen", 0.0), kats))
+    return _html(ui.abos_view(abos, status, bilanz["schnitt"].get("ausgaben", 0.0), bilanz["schnitt"].get("einnahmen", 0.0), kats, gespeichert))
 
 
 @app.post("/api/abo/bearbeiten", response_class=HTMLResponse)
 def api_abo_bearbeiten(partner: str = Form(...), name: str = Form(""), monatlich: str = Form(""), kategorie_id: str = Form(""), status: str = Form("ok"),
-                       betrag: str = Form(""), intervall: str = Form(""), s: Session = Depends(get_session)) -> HTMLResponse:
+                       betrag: str = Form(""), intervall: str = Form(""), typ: str = Form(""), s: Session = Depends(get_session)) -> HTMLResponse:
     """Zeile in der Abo-Tabelle geändert: Anbietername, Monatsbetrag, Kategorie, Status – bei von Hand eingetragenen auch Betrag und Rhythmus."""
     kats = _kats(s)
     kid = int(kategorie_id) if kategorie_id.isdigit() and int(kategorie_id) in kats else None
@@ -212,6 +241,7 @@ def api_abo_bearbeiten(partner: str = Form(...), name: str = Form(""), monatlich
         m.betrag = abs(_zahl(betrag, m.betrag))
         m.intervall = intervall if intervall in INTERVALLE else m.intervall
         m.kategorie_id = kid or m.kategorie_id
+        m.typ = typ
         m.aktiv = status != "gekuendigt"
         s.add(m)
     else:
@@ -222,20 +252,25 @@ def api_abo_bearbeiten(partner: str = Form(...), name: str = Form(""), monatlich
         if a.monatlich is not None and a.monatlich < 0:
             a.monatlich = None
         a.kategorie_id = kid
+        a.typ = typ
+        if a.status == "kein_abo":
+            a.status = "ok"
         s.add(a)
     s.commit()
-    return ui_abos(None, s)
+    return ui_abos(None, partner, s)
 
 
 @app.post("/api/abo/neu", response_class=HTMLResponse)
-def api_abo_neu(name: str = Form(""), betrag: str = Form(""), intervall: str = Form("monatlich"), kategorie_id: str = Form(""), s: Session = Depends(get_session)) -> HTMLResponse:
+def api_abo_neu(name: str = Form(""), betrag: str = Form(""), intervall: str = Form("monatlich"), kategorie_id: str = Form(""), typ: str = Form(""),
+                s: Session = Depends(get_session)) -> HTMLResponse:
     kats = _kats(s)
     if not name.strip() or _zahl(betrag, 0.0) <= 0:
         return _html(ui.meldung_box("Bitte Anbieter und Betrag angeben.", "fehler-box") + ui_abos(None, s).body.decode("utf-8"))
     kid = int(kategorie_id) if kategorie_id.isdigit() and int(kategorie_id) in kats else next((k.id for k in kats.values() if k.schluessel == "abos_streaming"), None)
-    s.add(AboManuell(name=name.strip(), betrag=abs(_zahl(betrag, 0.0)), intervall=intervall if intervall in INTERVALLE else "monatlich", kategorie_id=kid))
+    m = AboManuell(name=name.strip(), betrag=abs(_zahl(betrag, 0.0)), intervall=intervall if intervall in INTERVALLE else "monatlich", kategorie_id=kid, typ=typ)
+    s.add(m)
     s.commit()
-    return ui_abos(None, s)
+    return ui_abos(None, f"manuell:{m.id}", s)
 
 
 @app.post("/api/abo/manuell/{mid}/loeschen", response_class=HTMLResponse)
@@ -244,7 +279,7 @@ def api_abo_manuell_loeschen(mid: int, s: Session = Depends(get_session)) -> HTM
     if m:
         s.delete(m)
         s.commit()
-    return ui_abos(None, s)
+    return ui_abos(None, "", s)
 
 
 def _zahl(text: str, standard: float) -> float:
@@ -260,7 +295,7 @@ def api_abo_status(partner: str = Form(...), status: str = Form("ok"), s: Sessio
     a.status = status if status in ("ok", "gekuendigt", "kein_abo") else "ok"
     s.add(a)
     s.commit()
-    return ui_abos(None, s)
+    return ui_abos(None, partner, s)
 
 
 @app.get("/ui/buchungen", response_class=HTMLResponse)
@@ -622,6 +657,17 @@ def api_kategorie_neu(name: str = Form(""), art: str = Form("ausgabe"), fix: str
     kategorien_synchronisieren(s)
     n = _klassifiziere_neu(s)
     return _einstellungen(s, f"Kategorie „{name.strip()}“ angelegt ({schl}). {n} Buchungen neu zugeordnet.")
+
+
+@app.post("/api/kategorie/{schluessel}/farbe", response_class=HTMLResponse)
+def api_kategorie_farbe(schluessel: str, farbe: str = Form(""), s: Session = Depends(get_session)) -> HTMLResponse:
+    if not re.fullmatch(r"#[0-9a-fA-F]{6}", farbe.strip()):
+        return _einstellungen(s, "Ungültige Farbe.")
+    if not config.kategorie_aendern(schluessel, farbe=farbe.strip().lower()):
+        return _einstellungen(s, "Kategorie nicht gefunden.")
+    kategorien_synchronisieren(s)
+    k = s.exec(select(Kategorie).where(Kategorie.schluessel == schluessel)).first()
+    return _einstellungen(s, f"Farbe für „{k.name if k else schluessel}“ geändert.")
 
 
 @app.post("/api/kategorie/{schluessel}/loeschen", response_class=HTMLResponse)

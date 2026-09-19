@@ -38,8 +38,11 @@ Technische Basis ist Steuerfuchs; Parser für CSV, CAMT.053 und PDF-Auszüge sin
    „gekündigt“ oder „kein Abo“ markierbar. Kreisdiagramm je Empfänger und „Was wäre, wenn …?“: Abos antippen,
    die man kündigen würde, geplante Mehrausgaben eintragen – Ersparnis pro Monat/Jahr, Anteil an Abo-Kosten und
    Ausgaben, Kurve über zwölf Monate (grün nach oben = gespart, rot nach unten = mehr ausgegeben).
-   Anbietername, Kategorie und Monatsbetrag lassen sich direkt in der Tabelle ändern; Abos und Verträge, die
-   noch nicht erkannt werden, trägt man von Hand ein (Anbieter, Betrag, Rhythmus, Kategorie).
+   Getrennte Blöcke für Abos, Verträge, Versicherung & Krankenkasse, Depots & Sparpläne und Kredite & Raten –
+   je Block ein Kreisdiagramm und daneben die Anbieter in zwei Spalten. Jede Anbieterkarte ist direkt editierbar:
+   Name, Monatsbetrag, Kategorie, Status und die Art (damit die Krankenkasse nicht als Abo zählt). Was noch nicht
+   erkannt wird, trägt man je Block von Hand ein. Der Simulator „Was wäre, wenn …?“ hat Reiter je Bereich mit
+   „alle auswählen“ und „Auswahl aufheben“.
 5. **Sparpotenzial & Gewohnheiten** – Sparquote, Fixkostenquote, Abo-Summe, Latte-Faktor (Kleinbeträge),
    Wochenend-Anteil, Zahltag-Effekt (Ausgaben in den ersten zehn Tagen), Lieferdienste je Monat,
    Kategorien über dem Durchschnitt, Kauf-Serien, größte Einzelausgaben, häufigste Empfänger.
@@ -49,7 +52,8 @@ Technische Basis ist Steuerfuchs; Parser für CSV, CAMT.053 und PDF-Auszüge sin
    (Kategorie setzen, ausblenden, löschen), Reiter Alle | Einnahmen | Ausgaben, CSV-Export. Buchungen ohne
    Auszug (Nebenerwerb, Bareinnahmen) trägt man mit Monat, Betrag, Bezeichnung und Kategorie von Hand ein.
 7. **Einstellungen** – Personen, eigene IBANs, gelernte Zuordnungen neu vergeben oder entfernen, eigene Kategorien
-   anlegen (Name, Einnahme/Ausgabe, Farbe, fix, Erkennungsmuster) und wieder entfernen. „Daten löschen“ entfernt
+   anlegen (Name, Einnahme/Ausgabe, Farbe, fix, Erkennungsmuster) und wieder entfernen. Die Farbe jeder Kategorie
+   lässt sich jederzeit über das Farbfeld in der Liste ändern und gilt sofort in allen Diagrammen. „Daten löschen“ entfernt
    alle Buchungen, auf Wunsch auch Zuordnungen, Abo-Markierungen und die Merkliste gelöschter Buchungen.
 8. **Dubletten** (unter Import) – findet Buchungen mit gleichem Empfänger, gleichem Betrag und höchstens einem Tag
    Abstand (CSV und PDF desselben Auszugs, doppelt geladener Monat, Buchungs- vs. Valutadatum). Je Gruppe wird die

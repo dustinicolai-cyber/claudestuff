@@ -292,7 +292,7 @@ def test_abos_bearbeiten_handeintraege_und_reiter():
         assert "Netflix Familie" in r.text and 'value="19,99"' in r.text
         # Abo von Hand
         r = c.post("/api/abo/neu", data={"name": "Fitnessstudio", "betrag": "29,90", "intervall": "monatlich", "kategorie_id": ""})
-        assert "Fitnessstudio" in r.text and "von Hand eingetragen" in r.text
+        assert "Fitnessstudio" in r.text and "von Hand ·" in r.text
         r = c.post("/api/abo/neu", data={"name": "Haftpflicht", "betrag": "120", "intervall": "jaehrlich", "kategorie_id": ""})
         assert "Haftpflicht" in r.text
         nachher = c.get("/api/uebersicht?zeitraum=jahr:2025").json()["abos"]
@@ -324,3 +324,36 @@ def test_abos_bearbeiten_handeintraege_und_reiter():
         assert "0 neue" in c.post("/api/import", files={"datei": ("konto.csv", jahres_csv().encode(), "text/csv")}).text
         assert "Merkliste geleert" in c.post("/api/merkliste/leeren").text
         assert "1 neue" in c.post("/api/import", files={"datei": ("konto.csv", jahres_csv().encode(), "text/csv")}).text
+
+
+def test_typ_flags_und_kategoriefarbe():
+    with client() as c:
+        c.post("/api/import", files={"datei": ("konto.csv", jahres_csv().encode(), "text/csv")})
+        t = c.get("/ui/abos").text
+        # HUK-COBURG steckt in „Versicherungen“ und landet damit im Block Versicherung & Krankenkasse
+        assert 'id="block-krankenkasse"' in t and 'id="block-depot"' in t and 'id="block-kredit"' in t
+        vorher = c.get("/api/uebersicht?zeitraum=jahr:2025").json()["abos"]
+        # Netflix von „Abo“ auf „Vertrag“ umflaggen
+        r = c.post("/api/abo/bearbeiten", data={"partner": "netflix international", "name": "Netflix", "monatlich": "17,99",
+                                                "kategorie_id": "", "status": "ok", "typ": "vertrag"})
+        assert "Netflix" in r.text
+        with Session(engine()) as s:
+            from app.models import AboStatus
+            assert s.exec(select(AboStatus).where(AboStatus.partner == "netflix international")).first().typ == "vertrag"
+        # als „kein Vertrag“ flaggen: fällt aus Summe und Simulator, taucht unten auf
+        r = c.post("/api/abo/bearbeiten", data={"partner": "netflix international", "name": "Netflix", "monatlich": "17,99",
+                                                "kategorie_id": "", "status": "ok", "typ": "kein"})
+        assert "kein Vertrag" in r.text
+        nachher = c.get("/api/uebersicht?zeitraum=jahr:2025").json()["abos"]
+        assert nachher["anzahl"] == vorher["anzahl"] - 1 and abs(nachher["monatlich"] - (vorher["monatlich"] - 17.99)) < 0.02
+        # Kategoriefarbe ändern wirkt sofort in der Konfiguration und in den Diagrammen
+        r = c.post("/api/kategorie/lebensmittel/farbe", data={"farbe": "#ff8800"})
+        assert "Farbe für „Lebensmittel“ geändert" in r.text
+        assert next(d for d in config.konfig()["kategorien"] if d["schluessel"] == "lebensmittel")["farbe"] == "#ff8800"
+        assert any(k["schluessel"] == "lebensmittel" and k["farbe"] == "#ff8800"
+                   for k in c.get("/api/uebersicht?zeitraum=jahr:2025").json()["kategorien"])
+        assert "#ff8800" in c.get("/ui/einstellungen").text
+        # Gehalt je Person bekommt denselben Ton, die zweite Person heller
+        quellen = c.get("/api/uebersicht?zeitraum=jahr:2025").json()["einnahmequellen"]
+        gehalt = [q for q in quellen if q["name"].startswith("Gehalt ")]
+        assert len(gehalt) == 2 and gehalt[0]["farbe"] != gehalt[1]["farbe"] and all(q["farbe"].startswith("#") for q in gehalt)

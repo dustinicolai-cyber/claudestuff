@@ -112,6 +112,25 @@ def kategorie_anlegen(name: str, art: str, fix: bool, farbe: str, muster: list[s
     return schl
 
 
+def kategorie_aendern(schluessel: str, **felder) -> bool:
+    """Einzelne Felder einer Kategorie (Farbe, Name, fix) in der Nutzerdatei überschreiben – auch bei Standardkategorien."""
+    pfad = kategorien_path()
+    with open(pfad, encoding="utf-8") as f:
+        daten = json.load(f)
+    liste = daten.setdefault("kategorien", [])
+    eintrag = next((d for d in liste if d.get("schluessel") == schluessel), None)
+    if eintrag is None:
+        if schluessel not in standard_schluessel():
+            return False
+        eintrag = {"schluessel": schluessel}
+        liste.append(eintrag)
+    eintrag.update({k: v for k, v in felder.items() if v is not None})
+    with open(pfad, "w", encoding="utf-8") as f:
+        json.dump(daten, f, ensure_ascii=False, indent=2)
+    konfig_neu_laden()
+    return True
+
+
 def kategorie_entfernen(schluessel: str) -> bool:
     """Nur eigene Kategorien lassen sich entfernen; Standardkategorien nicht."""
     if schluessel in standard_schluessel():

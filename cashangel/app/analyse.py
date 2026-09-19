@@ -99,6 +99,19 @@ def klassifiziere(b: Bewegung, kategorien: dict[str, Kategorie], regeln: list[Re
     return kategorien.get("sonstige_einnahmen" if art == "einnahme" else "sonstiges"), "", "-"
 
 
+def heller(farbe: str, anteil: float) -> str:
+    """Denselben Ton heller machen (Richtung Weiß) – für mehrere Reihen derselben Sache, z. B. Gehalt je Person."""
+    t = farbe.strip().lstrip("#")
+    if len(t) != 6:
+        return farbe
+    try:
+        r, g, b = (int(t[i:i + 2], 16) for i in (0, 2, 4))
+    except ValueError:
+        return farbe
+    misch = lambda x: min(255, round(x + (255 - x) * max(0.0, min(1.0, anteil))))
+    return "#%02x%02x%02x" % (misch(r), misch(g), misch(b))
+
+
 # ---------------------------------------------------------------- Dubletten
 
 def dubletten(bewegungen: Iterable[Bewegung]) -> list[list[Bewegung]]:

@@ -93,10 +93,66 @@ a{color:var(--akzent)}
 .chip.aus{background:var(--minus-hell);border-color:var(--minus);color:var(--minus)} .chip.aus .chip-name{text-decoration:line-through} .chip.aus .chip-wert{color:var(--minus)}
 .chip.aus::before{content:"✕";font-size:.75em;font-weight:700}
 .chip.neu{background:var(--minus-hell);border-color:var(--minus);color:var(--minus)} .chip.neu .chip-wert{color:var(--minus)} .chip.neu::before{content:"+";font-weight:700}
-.neu-form{display:flex;gap:.45rem;flex-wrap:wrap;align-items:center;margin:.2rem 0 .6rem} .neu-form input{padding:.4rem .6rem} .neu-form input[name=name]{flex:1 1 12em}
+.neu-form{display:flex;gap:.45rem;flex-wrap:wrap;align-items:center;margin:0 0 .6rem} .neu-form input{padding:.4rem .6rem} .neu-form input[name=name]{flex:1 1 9em;min-width:0}
 .kat-neu{display:flex;gap:.45rem;flex-wrap:wrap;align-items:center;margin:.2rem 0 .6rem} .kat-neu input,.kat-neu select{padding:.4rem .6rem} .kat-neu input[name=name]{flex:1 1 14em} .kat-neu input.breit{flex:2 1 20em} .kat-neu input[type=color]{width:2.6rem;height:2.1rem;padding:.1rem;border-radius:8px}
 .zeile-fuss .alle-knopf{padding:.05rem .4rem;font-size:.95em;color:var(--akzent);opacity:0;transition:opacity .15s} tr.bw:hover .alle-knopf,tr.bw.gespeichert .alle-knopf,.alle-knopf:focus-visible{opacity:1}
 .regeln-tabelle select{padding:.3rem .5rem;font-size:.9em}
+/* Kopfzeile: Neu laden */
+#neu-laden{background:transparent;border:1px solid var(--line);color:var(--muted);border-radius:10px;padding:.42rem;line-height:0;box-shadow:none}
+#neu-laden svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;transform-origin:50% 50%}
+#neu-laden:hover{color:var(--akzent);border-color:var(--akzent);transform:none}
+#neu-laden.laedt{color:var(--akzent);border-color:var(--akzent)} #neu-laden.laedt svg{animation:dreh .85s cubic-bezier(.4,.1,.3,1) infinite}
+@keyframes dreh{to{transform:rotate(360deg)}}
+/* Verträge: Blöcke je Art */
+.v-block{padding:1.1rem 1.3rem 1.3rem}
+.b-kopf{display:flex;align-items:flex-start;justify-content:space-between;gap:1rem;flex-wrap:wrap;margin-bottom:.9rem}
+.b-titel h3{margin:0 0 .15rem} .b-titel p{margin:0}
+.b-rechts{display:flex;align-items:center;gap:.9rem;flex-wrap:wrap}
+.b-zahl{font-size:1.15rem;font-weight:700;font-variant-numeric:tabular-nums} .b-zahl small{font-size:.62em;font-weight:500;color:var(--muted)}
+.b-rechts .muted{text-align:right}
+.b-koerper{display:grid;grid-template-columns:minmax(220px,300px) 1fr;gap:1.4rem;align-items:start}
+.chart-wrap.rund{aspect-ratio:1;max-width:300px;min-height:0}
+.anbieter-raster{display:grid;grid-template-columns:1fr 1fr;gap:.7rem;align-content:start}
+.anbieter-raster.breit{grid-template-columns:repeat(auto-fill,minmax(300px,1fr))}
+@media (max-width:1250px){.b-koerper{grid-template-columns:1fr} .chart-wrap.rund{margin:0 auto}}
+@media (max-width:820px){.anbieter-raster{grid-template-columns:1fr}}
+.anbieter{position:relative;background:var(--card2);border:1px solid var(--line);border-left:3px solid var(--f,var(--akzent));border-radius:10px;padding:.6rem .75rem;transition:border-color .15s,background .15s}
+.anbieter:hover{border-color:var(--f,var(--akzent))}
+.anbieter.frisch{animation:gemerkt 1.6s ease-out}
+@keyframes gemerkt{0%{background:var(--plus-hell);border-color:var(--plus)}100%{background:var(--card2)}}
+.a-kopf{display:flex;align-items:center;gap:.4rem}
+.a-name{flex:1 1 auto;min-width:0;font:inherit;font-weight:700;background:transparent;border:1px solid transparent;border-radius:6px;padding:.15rem .35rem}
+.a-wert{width:6.2em;text-align:right;font:inherit;font-weight:700;font-variant-numeric:tabular-nums;background:transparent;border:1px solid transparent;border-radius:6px;padding:.15rem .3rem}
+.a-eur{color:var(--muted);font-weight:700}
+.anbieter input:hover{border-color:var(--line);background:var(--card)} .anbieter input:focus{background:var(--card);border-color:var(--akzent)}
+.a-balken{height:4px;border-radius:3px;background:var(--line);margin:.45rem .35rem .4rem;overflow:hidden}
+.a-balken span{display:block;height:100%;border-radius:3px;background:var(--f,var(--akzent))}
+.a-meta{color:var(--muted);font-size:.76rem;padding:0 .35rem;margin-bottom:.45rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.a-felder{display:flex;gap:.3rem;align-items:center;flex-wrap:wrap}
+.a-felder select{flex:1 1 6.5em;min-width:0;padding:.25rem .3rem;font-size:.78rem;border-radius:7px}
+.a-chip{flex:0 0 auto;font-size:.72rem;color:var(--muted);background:var(--card);border:1px solid var(--line);border-radius:7px;padding:.22rem .45rem;white-space:nowrap}
+.a-weg{position:absolute;top:.3rem;right:.3rem;background:transparent;border:0;color:var(--muted);padding:.2rem;line-height:0;box-shadow:none;border-radius:6px;opacity:0;transition:opacity .15s}
+.anbieter:hover .a-weg,.a-weg:focus-visible{opacity:1}
+.a-weg svg{width:15px;height:15px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round} .a-weg:hover{color:var(--minus);background:var(--minus-hell);transform:none}
+.b-form{display:flex;gap:.5rem;flex-wrap:wrap;align-items:center;margin:-.2rem 0 1rem;padding:.7rem .85rem;background:var(--card2);border:1px solid var(--line);border-radius:10px}
+.b-form[hidden]{display:none}
+.b-form input,.b-form select{padding:.4rem .6rem} .b-form input[name=name]{flex:1 1 12em}
+.b-leer{margin:.2rem 0 0;padding:.9rem;border:1px dashed var(--line);border-radius:10px}
+.v-block.gedaempft .anbieter{opacity:.62} .v-block.gedaempft .anbieter:hover{opacity:1}
+/* Simulator */
+.sim-reiter{display:flex;gap:.3rem;flex-wrap:wrap;border-bottom:1px solid var(--line);margin-bottom:.9rem}
+.sim-reiter .reiter{background:transparent;color:var(--muted);border:0;border-bottom:2px solid transparent;border-radius:0;padding:.45rem .8rem;font-weight:600;font-size:.9rem;box-shadow:none;margin-bottom:-1px}
+.sim-reiter .reiter:hover{color:var(--fg);transform:none} .sim-reiter .reiter.aktiv{color:var(--akzent);border-bottom-color:var(--akzent)}
+.sim-reiter .reiter .z{font-size:.78em;font-weight:500;color:var(--muted);margin-left:.2rem}
+.sim-koerper{display:grid;grid-template-columns:1fr minmax(300px,420px);gap:1.4rem;align-items:start}
+@media (max-width:1100px){.sim-koerper{grid-template-columns:1fr}}
+.sim-werkzeug{display:flex;gap:.3rem;margin-bottom:.5rem}
+.chip-punkt{width:8px;height:8px;border-radius:50%;display:inline-block;flex:none}
+.sim-ergebnis{background:var(--card2);border:1px solid var(--line);border-radius:12px;padding:.9rem 1rem}
+/* Kategorien: Farbe direkt ändern */
+.kat-ul li{display:flex;align-items:center;gap:.45rem}
+.kat-farbe{width:22px;height:22px;padding:0;border:1px solid var(--line);border-radius:6px;background:transparent;cursor:pointer;flex:none}
+.kat-farbe::-webkit-color-swatch-wrapper{padding:2px} .kat-farbe::-webkit-color-swatch{border:0;border-radius:4px}
 .reiter-leiste{display:flex;gap:.3rem;margin:.2rem 0 .6rem;border-bottom:1px solid var(--line)}
 .reiter-leiste .reiter{background:transparent;color:var(--muted);border:0;border-bottom:2px solid transparent;border-radius:0;padding:.5rem .9rem;font-weight:600;box-shadow:none;margin-bottom:-1px}
 .reiter-leiste .reiter:hover{color:var(--fg);transform:none} .reiter-leiste .reiter.aktiv{color:var(--akzent);border-bottom-color:var(--akzent)}
@@ -108,7 +164,8 @@ a{color:var(--akzent)}
 .dub-tabelle .dub-kopf td{background:var(--card2);font-weight:600;padding:.45rem .7rem;border-top:2px solid var(--line)} .dub-tabelle tr.behalten td{opacity:.75}
 .gefahr-zone{border-color:var(--minus)} .gefahr-zone h3{color:var(--minus)}
 button.gefahr-knopf{background:var(--minus);color:#fff} button.gefahr-knopf:hover{background:var(--minus)}
-.spar-ergebnis .gross{font-size:1.5rem;font-weight:700;line-height:1.2;margin:.2rem 0 .4rem} .spar-ergebnis .gross small{font-size:.6em;font-weight:500;color:var(--muted)}
+.spar-ergebnis .gross{font-size:1.5rem;font-weight:700;line-height:1.2;margin:.2rem 0 .4rem;font-variant-numeric:tabular-nums}
+.spar-ergebnis .gross.muted{font-size:1.05rem;font-weight:600} .spar-ergebnis .gross small{font-size:.6em;font-weight:500;color:var(--muted)}
 .spar-ergebnis p{margin:.35rem 0}
 .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:.9rem;margin:.2rem 0 1rem}
 .kpi{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:.9rem 1.1rem}
@@ -169,7 +226,7 @@ tr.gedaempft td{opacity:.6}
 .ins{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:.9rem 1.1rem;border-top:3px solid var(--akzent)}
 .ins.gut{border-top-color:var(--plus)} .ins.warn{border-top-color:var(--minus)} .ins.tipp{border-top-color:var(--lila)} .ins.info{border-top-color:var(--akzent)}
 .ins-kopf{display:flex;justify-content:space-between;gap:.8rem;align-items:baseline} .ins-betrag{font-weight:700;font-variant-numeric:tabular-nums;white-space:nowrap;color:var(--muted)} .ins p{margin:.4rem 0 0;color:var(--muted);line-height:1.55}
-.stapel{display:flex;flex-direction:column;gap:.7rem;margin:.6rem 0 0} .kat-ul{columns:3;list-style:none;padding:0;font-size:.9em} .kat-ul li{margin:.2rem 0;break-inside:avoid}
+.stapel{display:flex;flex-direction:column;gap:.7rem;margin:.6rem 0 0} .kat-ul{columns:3;list-style:none;padding:0;font-size:.9em} .kat-ul li{margin:.25rem 0;break-inside:avoid} .kat-text{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 #nach-oben{position:fixed;right:1.2rem;bottom:1.2rem;width:44px;height:44px;border-radius:50%;background:var(--card);border:1px solid var(--line);color:var(--fg);display:grid;place-items:center;opacity:0;pointer-events:none;transition:opacity .2s;box-shadow:var(--schatten);padding:0}
 #nach-oben.sichtbar{opacity:1;pointer-events:auto} #nach-oben svg{width:20px;height:20px;margin:0}
 dialog.frage{border:1px solid var(--line);border-radius:12px;background:var(--card);color:var(--fg);padding:1.3rem 1.5rem;max-width:min(92vw,460px);box-shadow:0 24px 60px rgba(0,0,0,.5)}
@@ -205,6 +262,7 @@ dialog.frage .knoepfe{display:flex;justify-content:flex-end;gap:.6rem} dialog.fr
   <h1 id="titel">Übersicht</h1>
   <div class="rechts">
     <label class="zeit-wahl" title="Zeitraum – gilt für alle Ansichten">Zeitraum <select id="zeit-select"><option value="12m">letzte 12 Monate</option></select></label>
+    <button id="neu-laden" type="button" title="Daten neu laden" aria-label="Daten neu laden"><svg viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-1.6 5.6"/><path d="M20 4v7h-7"/></svg></button>
     <span class="zusicherung">offline · lokal</span>
   </div>
 </header>
@@ -250,17 +308,20 @@ window.CA = (function(){
     const [x1, y1] = p(r, a1), [x2, y2] = p(r, a2), [x3, y3] = p(ri, a2), [x4, y4] = p(ri, a1);
     return el('path', {d: `M${x1} ${y1} A${r} ${r} 0 ${gross} 1 ${x2} ${y2} L${x3} ${y3} A${ri} ${ri} 0 ${gross} 0 ${x4} ${y4} Z`, fill: farbe, stroke: css('--card'), 'stroke-width': 2});
   }
-  function donut(svgId, tipId, eintraege, titel, farben){
-    const svg = document.getElementById(svgId); if (!svg) return; leer(svg); const t = tipFn(svg, tipId);
-    const cx = 130, cy = 150, r = 105, ri = 66, legX = 262;
+  function donut(svgId, tipId, eintraege, titel, farben, opt){
+    const svg = document.getElementById(svgId); if (!svg) return; leer(svg); const t = tipFn(svg, tipId); opt = opt || {};
+    const ohne = !!opt.ohneLegende;
+    const cx = ohne ? 150 : 130, cy = 150, r = ohne ? 118 : 105, ri = ohne ? 76 : 66, legX = 262;
     let e = eintraege.filter(k => k.wert > 0).sort((a, b) => b.wert - a.wert);
-    if (!e.length) { svg.appendChild(el('text', {x: 240, y: cy, class: 'tick', 'text-anchor': 'middle'}, 'keine Daten im Zeitraum')); return; }
-    if (e.length > 7) { const rest = e.slice(6).reduce((a, k) => a + k.wert, 0); e = e.slice(0, 6).concat([{name: 'Sonstige (' + (eintraege.length - 6) + ')', wert: rest, farbe: '#64748b'}]); }
+    if (!e.length) { svg.appendChild(el('text', {x: ohne ? cx : 240, y: cy, class: 'tick', 'text-anchor': 'middle'}, 'keine Daten im Zeitraum')); return; }
+    const grenze = ohne ? 9 : 7;
+    if (e.length > grenze) { const rest = e.slice(grenze - 1).reduce((a, k) => a + k.wert, 0); e = e.slice(0, grenze - 1).concat([{name: 'Sonstige (' + (eintraege.length - grenze + 1) + ')', wert: rest, farbe: '#64748b'}]); }
     const pal = farben || palette('aus'); const gesamt = e.reduce((a, k) => a + k.wert, 0); let w = -Math.PI / 2;
     e.forEach((k, i) => { const a2 = w + k.wert / gesamt * 2 * Math.PI; const f = k.farbe || pal[i % pal.length]; const seg = ring(cx, cy, r, ri, f, w, a2);
       seg.addEventListener('mousemove', ev => t.zeig(ev, `<b>${esc(k.name)}</b><br>${eur(k.wert)} · ${(k.wert / gesamt * 100).toFixed(1)} %`)); seg.addEventListener('mouseleave', t.weg); svg.appendChild(seg); w = a2; });
     svg.appendChild(el('text', {x: cx, y: cy - 4, class: 'hero', 'text-anchor': 'middle'}, kurz(gesamt) + (Math.abs(gesamt) >= 1000 ? '' : ' €')));
     svg.appendChild(el('text', {x: cx, y: cy + 16, class: 'tick', 'text-anchor': 'middle'}, titel));
+    if (ohne) return;
     const schritt = Math.min(36, 280 / e.length);
     e.forEach((k, i) => { const y = 34 + i * schritt; const f = k.farbe || pal[i % pal.length];
       svg.appendChild(el('rect', {x: legX, y: y - 11, width: 12, height: 12, rx: 3, fill: f}));
@@ -318,6 +379,10 @@ window.CA = (function(){
     sel.innerHTML = liste.map(z => `<option value="${z.wert}" ${z.wert === gew ? 'selected' : ''}>${z.name}</option>`).join('');
   }
   async function zaehler(){ try { const r = await fetch('/api/status'); const s = await r.json(); fuellen(s.zeitraeume, s.standard); document.getElementById('z-offen').textContent = s.offen || ''; } catch(e) {} }
+  const laden = document.getElementById('neu-laden');
+  laden.addEventListener('click', () => { if (laden.classList.contains('laedt')) return; laden.classList.add('laedt');
+    const b = nav.querySelector('button.aktiv') || nav.querySelector('button'); if (b) b.click();
+    setTimeout(() => laden.classList.remove('laedt'), 850); });
   const nachOben = document.getElementById('nach-oben');
   window.addEventListener('scroll', () => nachOben.classList.toggle('sichtbar', window.scrollY > 240), {passive: true});
   nachOben.addEventListener('click', () => window.scrollTo({top: 0, behavior: 'smooth'}));

@@ -83,7 +83,7 @@ def uebersicht_view(zeitraum: str, beschriftung: str) -> str:
     CA.gruppen('chart-monate', 'tip-monate', 'leg-monate', d.monate.map(m => m.name.replace(' 20', ' ’')), [
       {{name: 'Einnahmen', farbe: CA.css('--plus'), werte: d.monate.map(m => m.einnahmen)}},
       {{name: 'Ausgaben', farbe: CA.css('--minus'), werte: d.monate.map(m => m.ausgaben)}}]);
-    CA.donut('chart-ein', 'tip-ein', d.einnahmequellen.map(e => ({{name: e.name, wert: e.wert}})), 'Einnahmen', CA.palette('plus'));
+    CA.donut('chart-ein', 'tip-ein', d.einnahmequellen.map(e => ({{name: e.name, wert: e.wert, farbe: e.farbe}})), 'Einnahmen', CA.palette('plus'));
     CA.donut('chart-aus', 'tip-aus', d.kategorien.map(k => ({{name: k.name, wert: k.wert, farbe: k.farbe}})), 'Ausgaben', null);
     const max = Math.max(1, ...d.kategorien.map(k => k.wert));
     document.getElementById('kat-liste').innerHTML = d.kategorien.map(k => `
@@ -99,145 +99,229 @@ def uebersicht_view(zeitraum: str, beschriftung: str) -> str:
 
 # ---------------------------------------------------------------- Abos
 
+# (Schlüssel, Überschrift, Unterzeile, kurzer Name für die Kreismitte)
+TYPEN = [("abo", "Abos", "Streaming, Software, Mitgliedschaften", "Abos"),
+         ("vertrag", "Verträge", "Miete, Strom, Telefon, Daueraufträge", "Verträge"),
+         ("krankenkasse", "Versicherung & Krankenkasse", "Beiträge zur Vorsorge", "Versicherung"),
+         ("depot", "Depots & Sparpläne", "Geld, das im Haushalt bleibt", "Depots"),
+         ("kredit", "Kredite & Raten", "Tilgung und Finanzierung", "Kredite")]
+
+
 def abos_view(abos: list[dict], status: dict[str, AboStatus], ausgaben_monat: float = 0.0, einnahmen_monat: float = 0.0,
-              kats: dict[int, Kategorie] | None = None) -> str:
+              kats: dict[int, Kategorie] | None = None, gespeichert: str = "") -> str:
     kats = kats or {}
-    aktiv = [a for a in abos if a["aktiv"] and status.get(a["partner"], AboStatus()).status == "ok"]
-    inaktiv = [a for a in abos if a not in aktiv]
-    monat = sum(a["monatlich"] for a in aktiv)
-    ausgabe_kats = [k for k in sorted(kats.values(), key=lambda x: x.sortierung) if k.art == "ausgabe"]
+    ausgabe_kats = [k for k in sorted(kats.values(), key=lambda x: x.sortierung) if k.art in ("ausgabe", "einnahme")]
 
     def kat_opts(schluessel: str) -> str:
         return "".join(f'<option value="{k.id}" {"selected" if k.schluessel == schluessel else ""}>{h(k.name)}</option>' for k in ausgabe_kats)
 
-    intervall_opts = lambda gewaehlt: "".join(f'<option value="{w}" {"selected" if w == gewaehlt else ""}>{t}</option>'
-                                             for w, t in (("monatlich", "monatlich"), ("quartal", "vierteljährlich"), ("halbjahr", "halbjährlich"), ("jaehrlich", "jährlich")))
-    daten = {"abos": [{"partner": a["partner"], "name": a["name"], "monatlich": a["monatlich"], "kategorie": a["kategorie"], "intervall": a["intervall"]} for a in aktiv],
+    def intervall_opts(gewaehlt: str) -> str:
+        return "".join(f'<option value="{w}" {"selected" if w == gewaehlt else ""}>{t}</option>'
+                       for w, t in (("monatlich", "monatlich"), ("quartal", "vierteljährlich"), ("halbjahr", "halbjährlich"), ("jaehrlich", "jährlich")))
+
+    def typ_opts(gewaehlt: str) -> str:
+        eintraege = [(t, name) for t, name, _, _ in TYPEN] + [("kein", "kein Vertrag")]
+        return "".join(f'<option value="{t}" {"selected" if t == gewaehlt else ""}>{name}</option>' for t, name in eintraege)
+
+    def laeuft(a: dict) -> bool:
+        st = status.get(a["partner"])
+        return a["aktiv"] and a["typ"] != "kein" and (st is None or st.status == "ok")
+
+    aktiv = [a for a in abos if laeuft(a)]
+    ruhend = [a for a in abos if not laeuft(a)]
+    monat = sum(a["monatlich"] for a in aktiv)
+    groesster = max(aktiv, key=lambda a: a["monatlich"], default=None)
+
+    # ------------------------------------------------------------ eine Karte je Anbieter
+    def karte(a: dict, anteil: float) -> str:
+        manuell = a.get("manuell", False)
+        st = status.get(a["partner"])
+        st_status = "ok" if a["aktiv"] and (st is None or st.status == "ok") else "gekuendigt"
+        frisch = " frisch" if gespeichert and a["partner"] == gespeichert else ""
+        if manuell:
+            wert_txt = f"{a['betrag']:.2f}".replace(".", ",")
+            wert_feld = f'<input name="betrag" type="text" inputmode="decimal" value="{wert_txt}" class="a-wert" aria-label="Betrag" title="Betrag ändern">'
+            rhythmus = f'<select name="intervall" aria-label="Rhythmus">{intervall_opts(a.get("intervall_schluessel", "monatlich"))}</select>'
+            meta = f'von Hand · {eur(a["monatlich"])} pro Monat · {eur(a["jaehrlich"])} pro Jahr'
+            weg = (f'<button type="button" class="a-weg" hx-post="/api/abo/manuell/{a["manuell_id"]}/loeschen" hx-target="#main" '
+                   f'hx-confirm="„{h(a["name"])}“ entfernen?" title="Eintrag entfernen" aria-label="Eintrag entfernen">{ICON["x"]}</button>')
+        else:
+            wert_txt = format(a["monatlich"], ".2f").replace(".", ",")
+            wert_feld = f'<input name="monatlich" type="text" inputmode="decimal" value="{wert_txt}" class="a-wert" aria-label="pro Monat" title="Monatsbetrag anpassen">'
+            rhythmus = f'<span class="a-chip">{h(a["intervall"])}</span>'
+            schwankt = "" if a["stabil"] else " · Betrag schwankt"
+            naechste = f' · nächste ca. {d(a["naechste"])}' if a["aktiv"] else " · zuletzt " + d(a["zuletzt"])
+            meta = f'{eur(a["betrag"])} je Zahlung · {a["anzahl"]}× seit {d(a["seit"])}{naechste}{schwankt}'
+            weg = ""
+        return (f'<article class="anbieter{frisch}" style="--f:{h(a["farbe"])}" hx-post="/api/abo/bearbeiten" hx-trigger="change" '
+                f'hx-include="closest .anbieter" hx-target="#main" hx-swap="innerHTML" hx-disinherit="*">'
+                f'<input type="hidden" name="partner" value="{h(a["partner"])}">'
+                f'<div class="a-kopf"><input name="name" value="{h(a["name"])}" class="a-name" aria-label="Anbieter" title="Anbieter umbenennen">'
+                f'{wert_feld}<span class="a-eur">€</span></div>'
+                f'<div class="a-balken" title="{prozent_kurz(anteil)} dieses Blocks"><span style="width:{max(2.0, anteil * 100):.1f}%"></span></div>'
+                f'<div class="a-meta">{h(meta)}</div>'
+                f'<div class="a-felder">{rhythmus}<select name="typ" aria-label="Art" title="Als Abo, Vertrag, Versicherung, Depot oder Kredit einordnen">{typ_opts(a["typ"])}</select>'
+                f'<select name="kategorie_id" aria-label="Kategorie">{kat_opts(a["kategorie_schluessel"])}</select>'
+                f'<select name="status" aria-label="Status"><option value="ok" {"selected" if st_status == "ok" else ""}>läuft</option>'
+                f'<option value="gekuendigt" {"selected" if st_status != "ok" else ""}>gekündigt</option></select>{weg}</div></article>')
+
+    # ------------------------------------------------------------ Block je Typ
+    def block(typ: str, titel: str, unterzeile: str) -> str:
+        eintraege = [a for a in aktiv if a["typ"] == typ]
+        summe = sum(a["monatlich"] for a in eintraege)
+        karten = "".join(karte(a, (a["monatlich"] / summe) if summe else 0) for a in eintraege)
+        kopf_zahl = (f'<span class="b-zahl">{eur(summe)}<small> / Monat</small></span>'
+                     f'<span class="muted klein">{len(eintraege)} {"Eintrag" if len(eintraege) == 1 else "Einträge"} · {eur(summe * 12)} pro Jahr</span>') if eintraege else ""
+        if eintraege:
+            inhalt = (f'<div class="b-koerper"><div class="chart-wrap rund"><svg id="chart-{typ}" viewBox="0 0 300 300" preserveAspectRatio="xMidYMid meet" role="img" '
+                      f'aria-label="{h(titel)} nach Anbieter"></svg><div class="tooltip" id="tip-{typ}" hidden></div></div>'
+                      f'<div class="anbieter-raster">{karten}</div></div>')
+        else:
+            inhalt = f'<p class="b-leer muted">Noch nichts unter „{h(titel)}“. Über <b>+ Eintrag</b> hinzufügen oder in einem anderen Block die Art umstellen.</p>'
+        return f"""
+  <section class="v-block karte" id="block-{typ}" data-typ="{typ}">
+    <header class="b-kopf">
+      <div class="b-titel"><h3>{h(titel)}</h3><p class="muted klein">{h(unterzeile)}</p></div>
+      <div class="b-rechts">{kopf_zahl}<button type="button" class="btn-secondary klein b-neu" data-typ="{typ}" aria-expanded="false">+ Eintrag</button></div>
+    </header>
+    <form class="b-form" hx-post="/api/abo/neu" hx-target="#main" hidden>
+      <input type="hidden" name="typ" value="{typ}">
+      <input name="name" placeholder="Anbieter, z. B. Fitnessstudio" required>
+      <input name="betrag" type="text" inputmode="decimal" placeholder="Betrag" style="width:7em" required>
+      <select name="intervall" aria-label="Rhythmus">{intervall_opts("monatlich")}</select>
+      <select name="kategorie_id" aria-label="Kategorie">{kat_opts("abos_streaming" if typ == "abo" else "versicherungen" if typ == "krankenkasse" else "sparen" if typ == "depot" else "kredit" if typ == "kredit" else "wohnen")}</select>
+      <button class="btn-primary klein">Hinzufügen</button>
+      <button type="button" class="btn-ghost klein b-ab">Abbrechen</button>
+    </form>
+    {inhalt}
+  </section>"""
+
+    bloecke = "".join(block(t, titel, unter) for t, titel, unter, _ in TYPEN)
+    ruhend_html = "".join(karte(a, 0) for a in ruhend)
+
+    # ------------------------------------------------------------ Simulator
+    daten = {"typen": [{"typ": t, "titel": titel, "kurz": kurz} for t, titel, _, kurz in TYPEN],
+             "abos": [{"partner": a["partner"], "name": a["name"], "monatlich": a["monatlich"], "typ": a["typ"],
+                       "farbe": a["farbe"], "kategorie": a["kategorie"], "intervall": a["intervall"]} for a in aktiv],
              "ausgaben_monat": round(ausgaben_monat, 2), "einnahmen_monat": round(einnahmen_monat, 2)}
     daten_json = json.dumps(daten, ensure_ascii=False).replace("</", "<\\/")
-    chips = "".join(f'<button type="button" class="chip" data-partner="{h(a["partner"])}" title="{h(a["kategorie"])} · {h(a["intervall"])}">'
-                    f'<span class="chip-name">{h(a["name"])}</span><span class="chip-wert">{eur(a["monatlich"])}</span></button>' for a in aktiv)
-    simulator = f"""
-  <div class="karten zwei abo-analyse">
-    <div class="karte chart-karte"><div class="row zwischen"><h3 style="margin:0">Abos &amp; Verträge (nach Anbieter)</h3><span class="muted klein">pro Monat · laufende Verträge</span></div>
-      <div class="chart-wrap donut"><svg id="chart-abos" viewBox="0 0 480 300" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Abos und Verträge nach Anbieter"></svg><div class="tooltip" id="tip-abos" hidden></div></div></div>
-    <div class="karte spar-sim"><h3 style="margin:0 0 .2rem">Was wäre, wenn …?</h3>
-      <p class="muted klein" style="margin:0 0 .7rem">Abos antippen, die du kündigen würdest. Geplante Mehrausgaben (neues Abo, Leasing, Beitrag) trägst du darunter ein.</p>
-      <div class="abo-chips" id="abo-chips">{chips}</div>
-      <form class="neu-form" id="neu-form"><input name="name" placeholder="Mehrausgabe, z. B. Fitnessstudio" aria-label="Bezeichnung"><input name="betrag" type="number" step="0.01" min="0" placeholder="€ / Monat" aria-label="Betrag pro Monat" style="width:7.5em" required><button class="btn-secondary klein">+ Mehrausgabe</button></form>
-      <div class="abo-chips" id="neu-chips"></div>
-      <div class="spar-ergebnis" id="spar-ergebnis"></div>
+
+    kpis = f"""
+  <div class="kpis">
+    <div class="kpi"><div class="l">Laufende Verträge</div><div class="w">{len(aktiv)}</div><div class="klein muted">{len(ruhend)} ruhend oder gekündigt</div></div>
+    <div class="kpi"><div class="l">Pro Monat</div><div class="w">{eur(monat)}</div><div class="klein muted">{prozent_kurz(monat / ausgaben_monat) if ausgaben_monat else "–"} deiner Ausgaben</div></div>
+    <div class="kpi"><div class="l">Pro Jahr</div><div class="w">{eur(monat * 12)}</div><div class="klein muted">hochgerechnet</div></div>
+    <div class="kpi"><div class="l">Größter Posten</div><div class="w">{eur(groesster["monatlich"]) if groesster else "–"}</div><div class="klein muted">{h(groesster["name"]) if groesster else "noch nichts erkannt"}</div></div>
+  </div>"""
+
+    return f"""
+<section class="abos">
+  <p class="muted erkl">Wiederkehrende Zahlungen: gleicher Empfänger, regelmäßiger Abstand, ähnlicher Betrag. Jahres- und Quartalsbeiträge sind auf den Monat umgerechnet.
+  Jede Karte lässt sich direkt bearbeiten – Name, Betrag, Art und Kategorie werden sofort gespeichert.</p>
+  {kpis}
+  {bloecke}
+  {f'<section class="v-block karte gedaempft"><header class="b-kopf"><div class="b-titel"><h3>Gekündigt, ausgelaufen oder kein Vertrag</h3><p class="muted klein">Zählt nirgends mit. Art oder Status ändern holt den Eintrag zurück.</p></div><span class="muted klein">{len(ruhend)}</span></header><div class="anbieter-raster breit">{ruhend_html}</div></section>' if ruhend else ''}
+  <section class="karte spar-sim" id="spar-sim">
+    <header class="b-kopf"><div class="b-titel"><h3>Was wäre, wenn …?</h3>
+      <p class="muted klein">Verträge antippen, die du kündigen würdest. Geplante Mehrausgaben trägst du rechts ein.</p></div></header>
+    <div class="sim-reiter" id="sim-reiter"></div>
+    <div class="sim-koerper">
+      <div class="sim-wahl"><div class="sim-werkzeug"><button type="button" class="btn-ghost klein" data-alle="1">alle auswählen</button><button type="button" class="btn-ghost klein" data-alle="0">Auswahl aufheben</button></div>
+        <div class="abo-chips" id="abo-chips"></div></div>
+      <div class="sim-ergebnis">
+        <form class="neu-form" id="neu-form"><input name="name" placeholder="Mehrausgabe, z. B. Fitnessstudio" aria-label="Bezeichnung"><input name="betrag" type="number" step="0.01" min="0" placeholder="€ / Monat" aria-label="Betrag pro Monat" style="width:7.5em" required><button class="btn-secondary klein">+ Mehrausgabe</button></form>
+        <div class="abo-chips" id="neu-chips"></div>
+        <div class="spar-ergebnis" id="spar-ergebnis"></div>
+      </div>
     </div>
-  </div>
+  </section>
   <div class="karte chart-karte"><div class="row zwischen"><h3 style="margin:0">Entwicklung über zwölf Monate</h3><span class="muted klein">Unterschied zu heute, Monat für Monat aufsummiert: grün nach oben = gespart, rot nach unten = mehr ausgegeben</span></div>
     <div class="chart-wrap"><svg id="chart-spar" viewBox="0 0 960 340" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Entwicklung der Ersparnis"></svg><div class="tooltip" id="tip-spar" hidden></div></div>
     <div class="legende" id="leg-spar"></div></div>
   <script type="application/json" id="abo-daten">{daten_json}</script>
-  <script>
-  (function(){{
-    const wurzel = document.getElementById('abo-daten'); if (!wurzel) return;
-    const D = JSON.parse(wurzel.textContent); const weg = new Set(); let neu = [];
-    try {{ (JSON.parse(sessionStorage.getItem('abo-weg') || '[]')).forEach(p => {{ if (D.abos.some(a => a.partner === p)) weg.add(p); }});
-          neu = JSON.parse(sessionStorage.getItem('abo-neu') || '[]').filter(x => x && x.betrag > 0); }} catch(e) {{}}
-    const merken = () => {{ try {{ sessionStorage.setItem('abo-weg', JSON.stringify([...weg])); sessionStorage.setItem('abo-neu', JSON.stringify(neu)); }} catch(e) {{}} }};
-    const pal = CA.palette('aus'), grau = '#64748b';
-    const proz = (a, b) => b > 0 ? (a / b * 100).toLocaleString('de-DE', {{maximumFractionDigits: 1}}) + ' %' : '–';
-    const liste = n => n.length <= 1 ? n.join('') : n.slice(0, -1).join(', ') + ' und ' + n[n.length - 1];
-    const vz = x => (x > 0 ? '+' : x < 0 ? '−' : '') + CA.eur(Math.abs(x));
-    function zeichnen(){{
-      const gesamt = D.abos.reduce((s, a) => s + a.monatlich, 0);
-      const spar = D.abos.filter(a => weg.has(a.partner)).reduce((s, a) => s + a.monatlich, 0);
-      const mehr = neu.reduce((s, x) => s + x.betrag, 0), netto = spar - mehr, rest = gesamt - spar;
-      const namen = D.abos.filter(a => weg.has(a.partner)).map(a => a.name);
-      document.querySelectorAll('#abo-chips .chip').forEach(c => c.classList.toggle('aus', weg.has(c.dataset.partner)));
-      document.getElementById('neu-chips').innerHTML = neu.map((x, i) => `<button type="button" class="chip neu" data-i="${{i}}" title="entfernen"><span class="chip-name">${{CA.esc(x.name || 'Mehrausgabe')}}</span><span class="chip-wert">${{CA.eur(x.betrag)}}</span></button>`).join('');
-      const erg = document.getElementById('spar-ergebnis');
-      if (!D.abos.length && !neu.length) erg.innerHTML = '<p class="muted">Noch keine laufenden Abos erkannt – dafür braucht es mindestens drei Monate Kontoauszüge.</p>';
-      else if (!weg.size && !neu.length) erg.innerHTML = `<div class="gross muted">Noch nichts ausgewählt</div><p class="muted klein">Alle ${{D.abos.length}} Abos zusammen kosten ${{CA.eur(gesamt)}} im Monat, ${{CA.eur(gesamt * 12)}} im Jahr – das sind ${{proz(gesamt, D.ausgaben_monat)}} deiner Ausgaben.</p>`;
-      else {{
-        const farbe = netto >= 0 ? 'plus' : 'minus';
-        let html = `<div class="gross ${{farbe}}">${{vz(netto)}} <small>im Monat</small> · ${{vz(netto * 12)}} <small>im Jahr</small></div>`;
-        if (weg.size) html += `<p>Kündigst du ${{CA.esc(liste(namen))}}, sparst du <b>${{CA.eur(spar)}}</b> im Monat – <b>${{proz(spar, gesamt)}}</b> deiner Abo-Kosten und <b>${{proz(spar, D.ausgaben_monat)}}</b> deiner monatlichen Ausgaben.</p>`;
-        if (neu.length) html += `<p>Neue Ausgaben: <b class="minus">−${{CA.eur(mehr)}}</b> im Monat (${{CA.esc(liste(neu.map(x => x.name || 'Mehrausgabe')))}}).</p>`;
-        html += `<p class="muted klein">Unterm Strich ${{netto >= 0 ? 'bleiben dir' : 'fehlen dir'}} <b>${{CA.eur(Math.abs(netto))}}</b> im Monat, <b>${{CA.eur(Math.abs(netto) * 12)}}</b> im Jahr. Es laufen dann ${{D.abos.length - weg.size}} Abos mit ${{CA.eur(rest)}} im Monat.${{D.einnahmen_monat > 0 ? ' Sparquote ' + (netto >= 0 ? '+' : '−') + proz(Math.abs(netto), D.einnahmen_monat).replace(' %', ' Punkte') + '.' : ''}}</p>`;
-        erg.innerHTML = html;
-      }}
-      CA.donut('chart-abos', 'tip-abos', D.abos.map((a, i) => ({{name: (weg.has(a.partner) ? '✕ ' : '') + a.name, wert: a.monatlich, farbe: weg.has(a.partner) ? grau : pal[i % pal.length]}})), 'Abos / Monat', null);
-      const labels = Array.from({{length: 12}}, (_, i) => String(i + 1)), f = netto >= 0 ? CA.css('--plus') : CA.css('--minus');
-      CA.linien('chart-spar', 'tip-spar', 'leg-spar', labels, [
-        {{name: 'so wie jetzt', farbe: CA.css('--muted'), werte: labels.map(() => 0), gestrichelt: true, ohneEndwert: true}},
-        {{name: netto >= 0 ? 'gespart' : 'mehr ausgegeben', farbe: f, werte: labels.map((_, i) => netto * (i + 1))}}],
-        {{band: [1, 0], bandFarbe: f, bandName: 'Unterschied', einheit: n => 'nach ' + n + (n == 1 ? ' Monat' : ' Monaten'), nullLinie: true}});
-    }}
-    document.getElementById('abo-chips').addEventListener('click', e => {{ const c = e.target.closest('.chip'); if (!c) return; const p = c.dataset.partner; weg.has(p) ? weg.delete(p) : weg.add(p); merken(); zeichnen(); }});
-    document.getElementById('neu-chips').addEventListener('click', e => {{ const c = e.target.closest('.chip'); if (!c) return; neu.splice(+c.dataset.i, 1); merken(); zeichnen(); }});
-    document.getElementById('neu-form').addEventListener('submit', e => {{ e.preventDefault(); const f = e.target, b = parseFloat(String(f.betrag.value).replace(',', '.')); if (!(b > 0)) return;
-      neu.push({{name: f.name.value.trim(), betrag: Math.round(b * 100) / 100}}); f.reset(); merken(); zeichnen(); }});
-    zeichnen();
-  }})();
-  </script>"""
+</section>
+<script>{ABO_SKRIPT}</script>"""
 
-    def zeile(a: dict) -> str:
-        st = status.get(a["partner"])
-        st_status = st.status if st else ("ok" if a["aktiv"] else "gekuendigt")
-        manuell = a.get("manuell", False)
-        st_txt = {"gekuendigt": '<span class="badge ok">gekündigt</span>', "kein_abo": '<span class="badge">kein Abo</span>'}.get(st_status, "")
-        if not st_txt and not a["aktiv"]:
-            st_txt = '<span class="badge mid">ausgelaufen?</span>'
-        if manuell:
-            info = '<span class="muted klein">von Hand eingetragen</span>'
-        else:
-            naechste = f' · nächste ca. {d(a["naechste"])}' if a["aktiv"] else ""
-            info = f'<span class="muted klein">seit {d(a["seit"])} · {a["anzahl"]}× · zuletzt {d(a["zuletzt"])}{naechste}</span>'
-        if manuell:
-            betrag_txt = f"{a['betrag']:.2f}".replace(".", ",")
-            betrag_zelle = f'<td class="num"><input name="betrag" type="text" inputmode="decimal" value="{betrag_txt}" class="abo-feld num" aria-label="Betrag"></td>'
-            rhythmus = f'<select name="intervall" aria-label="Rhythmus">{intervall_opts(a.get("intervall_schluessel", "monatlich"))}</select>'
-            monat_zelle = f'<td class="num fett">{eur(a["monatlich"])}</td>'
-            status_sel = (f'<select name="status" aria-label="Status"><option value="ok" {"selected" if a["aktiv"] else ""}>läuft</option>'
-                          f'<option value="gekuendigt" {"selected" if not a["aktiv"] else ""}>gekündigt</option></select>')
-            loeschen = f'<button type="button" class="btn-ghost klein gefahr-text" hx-post="/api/abo/manuell/{a["manuell_id"]}/loeschen" hx-target="#main" hx-confirm="Abo „{h(a["name"])}“ entfernen?">{ICON["x"]}</button>'
-        else:
-            betrag_zelle = f'<td class="num">{eur(a["betrag"])}<div class="klein muted">{"" if a["stabil"] else "schwankt"}</div></td>'
-            rhythmus = h(a["intervall"])
-            monat_zelle = f'<td class="num"><input name="monatlich" type="text" inputmode="decimal" value="{format(a["monatlich"], ".2f").replace(".", ",")}" class="abo-feld num fett" aria-label="pro Monat" title="Monatsbetrag anpassen"></td>'
-            status_sel = (f'<select name="status" aria-label="Status"><option value="ok" {"selected" if st_status == "ok" else ""}>läuft</option>'
-                          f'<option value="gekuendigt" {"selected" if st_status == "gekuendigt" else ""}>gekündigt</option>'
-                          f'<option value="kein_abo" {"selected" if st_status == "kein_abo" else ""}>kein Abo</option></select>')
-            loeschen = ""
-        return (f'<tr class="abo-zeile {"" if a["aktiv"] else "gedaempft"}" hx-post="/api/abo/bearbeiten" hx-trigger="change" hx-include="closest tr" hx-target="#main" hx-disinherit="*">'
-                f'<input type="hidden" name="partner" value="{h(a["partner"])}">'
-                f'<td><input name="name" value="{h(a["name"])}" class="abo-feld" aria-label="Anbieter" title="Anbietername ändern"><div>{info}</div></td>'
-                f'<td><span class="kat-punkt" style="background:{h(a["farbe"])}"></span><select name="kategorie_id" aria-label="Kategorie">{kat_opts(a["kategorie_schluessel"])}</select><div class="klein muted">{h(a["art"])}</div></td>'
-                f'<td>{rhythmus}</td>{betrag_zelle}{monat_zelle}<td class="num">{eur(a["jaehrlich"])}</td>'
-                f'<td>{st_txt}</td><td class="aktionen-zelle">{status_sel} {loeschen}</td></tr>')
 
-    rows = "".join(zeile(a) for a in aktiv) or '<tr><td colspan=8 class="muted">Noch keine wiederkehrenden Zahlungen erkannt – dafür braucht es mindestens drei Monate Kontoauszüge. Bis dahin: oben von Hand eintragen.</td></tr>'
-    rows_inaktiv = "".join(zeile(a) for a in inaktiv)
-    return f"""
-<section class="abos">
-  <p class="muted erkl">Wiederkehrende Zahlungen: gleicher Empfänger, regelmäßiger Abstand, ähnlicher Betrag. Jahres- und Quartalsbeiträge sind auf den Monat umgerechnet.
-  Als „gekündigt“ markierte verschwinden aus der Summe; „kein Abo“ für Dinge, die zufällig regelmäßig sind.</p>
-  <div class="kpis">
-    <div class="kpi"><div class="l">Laufende Abos &amp; Verträge</div><div class="w">{len(aktiv)}</div></div>
-    <div class="kpi"><div class="l">Pro Monat</div><div class="w">{eur(monat)}</div></div>
-    <div class="kpi"><div class="l">Pro Jahr</div><div class="w">{eur(monat * 12)}</div></div>
-    <div class="kpi"><div class="l">Streaming &amp; Abos</div><div class="w">{eur(sum(a["monatlich"] for a in aktiv if a["kategorie_schluessel"] == "abos_streaming"))}</div><div class="klein muted">pro Monat</div></div>
-  </div>
-  {simulator}
-  <div class="row zwischen" style="margin-top:1.2rem"><h3 style="margin:0">Alle laufenden Abos &amp; Verträge</h3><span class="muted klein">Anbieter, Kategorie und Monatsbetrag direkt in der Zeile ändern – wird sofort gespeichert</span></div>
-  <form hx-post="/api/abo/neu" hx-target="#main" class="abo-neu karte">
-    <b>Abo oder Vertrag von Hand eintragen</b>
-    <input name="name" placeholder="Anbieter, z. B. Fitnessstudio" required>
-    <input name="betrag" type="text" inputmode="decimal" placeholder="Betrag" style="width:7em" required>
-    <select name="intervall" aria-label="Rhythmus">{intervall_opts("monatlich")}</select>
-    <select name="kategorie_id" aria-label="Kategorie">{kat_opts("abos_streaming")}</select>
-    <button class="btn-primary klein">Hinzufügen</button>
-  </form>
-  <div class="scroll"><table class="tabelle kompakt abo-tabelle"><thead><tr><th>Anbieter</th><th>Kategorie</th><th>Rhythmus</th><th class="num">Betrag</th><th class="num">pro Monat</th><th class="num">pro Jahr</th><th>Status</th><th></th></tr></thead>
-    <tbody>{rows}</tbody></table></div>
-  {f'<h3>Ausgelaufen, gekündigt oder kein Abo ({len(inaktiv)})</h3><div class="scroll"><table class="tabelle kompakt abo-tabelle"><thead><tr><th>Anbieter</th><th>Kategorie</th><th>Rhythmus</th><th class="num">Betrag</th><th class="num">pro Monat</th><th class="num">pro Jahr</th><th>Status</th><th></th></tr></thead><tbody>{rows_inaktiv}</tbody></table></div>' if inaktiv else ''}
-</section>"""
+def prozent_kurz(anteil: float) -> str:
+    return f"{anteil * 100:.1f}".replace(".", ",").replace(",0", "") + " %"
+
+
+ABO_SKRIPT = """
+(function(){
+  const wurzel = document.getElementById('abo-daten'); if (!wurzel) return;
+  const D = JSON.parse(wurzel.textContent);
+  // Blockweise Kreisdiagramme
+  D.typen.forEach(t => {
+    const teil = D.abos.filter(a => a.typ === t.typ);
+    if (!teil.length) return;
+    CA.donut('chart-' + t.typ, 'tip-' + t.typ, teil.map(a => ({name: a.name, wert: a.monatlich, farbe: a.farbe})), t.kurz, null, {ohneLegende: true});
+  });
+  // Formular je Block auf- und zuklappen
+  document.querySelectorAll('.b-neu').forEach(b => b.addEventListener('click', () => {
+    const f = b.closest('.v-block').querySelector('.b-form'); const auf = f.hidden;
+    f.hidden = !auf; b.setAttribute('aria-expanded', auf ? 'true' : 'false'); if (auf) f.querySelector('input[name=name]').focus();
+  }));
+  document.querySelectorAll('.b-ab').forEach(b => b.addEventListener('click', () => {
+    const f = b.closest('.b-form'); f.hidden = true; f.closest('.v-block').querySelector('.b-neu').setAttribute('aria-expanded', 'false');
+  }));
+
+  // -------- Simulator
+  const weg = new Set(); let neu = []; let reiter = D.typen[0].typ;
+  try { (JSON.parse(sessionStorage.getItem('abo-weg') || '[]')).forEach(p => { if (D.abos.some(a => a.partner === p)) weg.add(p); });
+        neu = JSON.parse(sessionStorage.getItem('abo-neu') || '[]').filter(x => x && x.betrag > 0);
+        reiter = sessionStorage.getItem('abo-reiter') || reiter; } catch(e) {}
+  const merken = () => { try { sessionStorage.setItem('abo-weg', JSON.stringify([...weg])); sessionStorage.setItem('abo-neu', JSON.stringify(neu));
+                               sessionStorage.setItem('abo-reiter', reiter); } catch(e) {} };
+  const proz = (a, b) => b > 0 ? (a / b * 100).toLocaleString('de-DE', {maximumFractionDigits: 1}) + ' %' : '–';
+  const liste = n => n.length <= 1 ? n.join('') : n.slice(0, -1).join(', ') + ' und ' + n[n.length - 1];
+  const vz = x => (x > 0 ? '+' : x < 0 ? '−' : '') + CA.eur(Math.abs(x));
+  const imReiter = () => D.abos.filter(a => a.typ === reiter);
+  if (!imReiter().length) { const erster = D.typen.find(t => D.abos.some(a => a.typ === t.typ)); if (erster) reiter = erster.typ; }
+
+  function zeichnen(){
+    const gesamt = D.abos.reduce((s, a) => s + a.monatlich, 0);
+    const spar = D.abos.filter(a => weg.has(a.partner)).reduce((s, a) => s + a.monatlich, 0);
+    const mehr = neu.reduce((s, x) => s + x.betrag, 0), netto = spar - mehr, rest = gesamt - spar;
+    const namen = D.abos.filter(a => weg.has(a.partner)).map(a => a.name);
+    document.getElementById('sim-reiter').innerHTML = D.typen.filter(t => D.abos.some(a => a.typ === t.typ)).map(t => {
+      const teil = D.abos.filter(a => a.typ === t.typ), n = teil.filter(a => weg.has(a.partner)).length;
+      return `<button type="button" class="reiter ${t.typ === reiter ? 'aktiv' : ''}" data-reiter="${t.typ}">${CA.esc(t.titel)}
+        <span class="z">${n ? n + '/' + teil.length : teil.length}</span></button>`;
+    }).join('');
+    document.getElementById('abo-chips').innerHTML = imReiter().map(a =>
+      `<button type="button" class="chip ${weg.has(a.partner) ? 'aus' : ''}" data-partner="${CA.esc(a.partner)}" title="${CA.esc(a.kategorie)} · ${CA.esc(a.intervall)}">
+         <span class="chip-punkt" style="background:${a.farbe}"></span><span class="chip-name">${CA.esc(a.name)}</span><span class="chip-wert">${CA.eur(a.monatlich)}</span></button>`).join('')
+      || '<p class="muted klein">In diesem Bereich gibt es nichts zum Kündigen.</p>';
+    document.getElementById('neu-chips').innerHTML = neu.map((x, i) =>
+      `<button type="button" class="chip neu" data-i="${i}" title="entfernen"><span class="chip-name">${CA.esc(x.name || 'Mehrausgabe')}</span><span class="chip-wert">${CA.eur(x.betrag)}</span></button>`).join('');
+    const erg = document.getElementById('spar-ergebnis');
+    if (!D.abos.length && !neu.length) erg.innerHTML = '<p class="muted">Noch keine laufenden Verträge erkannt – dafür braucht es mindestens drei Monate Kontoauszüge.</p>';
+    else if (!weg.size && !neu.length) erg.innerHTML = `<div class="gross muted">Noch nichts ausgewählt</div><p class="muted klein">Alle ${D.abos.length} Verträge zusammen kosten ${CA.eur(gesamt)} im Monat, ${CA.eur(gesamt * 12)} im Jahr – das sind ${proz(gesamt, D.ausgaben_monat)} deiner Ausgaben.</p>`;
+    else {
+      let html = `<div class="gross ${netto >= 0 ? 'plus' : 'minus'}">${vz(netto)} <small>im Monat</small> · ${vz(netto * 12)} <small>im Jahr</small></div>`;
+      if (weg.size) html += `<p>Kündigst du ${CA.esc(liste(namen))}, sparst du <b>${CA.eur(spar)}</b> im Monat – <b>${proz(spar, gesamt)}</b> deiner Vertragskosten und <b>${proz(spar, D.ausgaben_monat)}</b> deiner monatlichen Ausgaben.</p>`;
+      if (neu.length) html += `<p>Neue Ausgaben: <b class="minus">−${CA.eur(mehr)}</b> im Monat (${CA.esc(liste(neu.map(x => x.name || 'Mehrausgabe')))}).</p>`;
+      html += `<p class="muted klein">Unterm Strich ${netto >= 0 ? 'bleiben dir' : 'fehlen dir'} <b>${CA.eur(Math.abs(netto))}</b> im Monat, <b>${CA.eur(Math.abs(netto) * 12)}</b> im Jahr. Es laufen dann ${D.abos.length - weg.size} Verträge mit ${CA.eur(rest)} im Monat.${D.einnahmen_monat > 0 ? ' Sparquote ' + (netto >= 0 ? '+' : '−') + proz(Math.abs(netto), D.einnahmen_monat).replace(' %', ' Punkte') + '.' : ''}</p>`;
+      erg.innerHTML = html;
+    }
+    const labels = Array.from({length: 12}, (_, i) => String(i + 1)), f = netto >= 0 ? CA.css('--plus') : CA.css('--minus');
+    CA.linien('chart-spar', 'tip-spar', 'leg-spar', labels, [
+      {name: 'so wie jetzt', farbe: CA.css('--muted'), werte: labels.map(() => 0), gestrichelt: true, ohneEndwert: true},
+      {name: netto >= 0 ? 'gespart' : 'mehr ausgegeben', farbe: f, werte: labels.map((_, i) => netto * (i + 1))}],
+      {band: [1, 0], bandFarbe: f, bandName: 'Unterschied', einheit: n => 'nach ' + n + (n == 1 ? ' Monat' : ' Monaten'), nullLinie: true});
+  }
+  document.getElementById('sim-reiter').addEventListener('click', e => { const r = e.target.closest('.reiter'); if (!r) return; reiter = r.dataset.reiter; merken(); zeichnen(); });
+  document.getElementById('abo-chips').addEventListener('click', e => { const c = e.target.closest('.chip'); if (!c) return; const p = c.dataset.partner;
+    weg.has(p) ? weg.delete(p) : weg.add(p); merken(); zeichnen(); });
+  document.getElementById('neu-chips').addEventListener('click', e => { const c = e.target.closest('.chip'); if (!c) return; neu.splice(+c.dataset.i, 1); merken(); zeichnen(); });
+  document.querySelectorAll('.sim-werkzeug [data-alle]').forEach(b => b.addEventListener('click', () => {
+    imReiter().forEach(a => b.dataset.alle === '1' ? weg.add(a.partner) : weg.delete(a.partner)); merken(); zeichnen(); }));
+  document.getElementById('neu-form').addEventListener('submit', e => { e.preventDefault(); const f = e.target, b = parseFloat(String(f.betrag.value).replace(',', '.'));
+    if (!(b > 0)) return; neu.push({name: f.name.value.trim(), betrag: Math.round(b * 100) / 100}); f.reset(); merken(); zeichnen(); });
+  zeichnen();
+})();
+"""
 
 
 # ---------------------------------------------------------------- Buchungen
@@ -491,8 +575,9 @@ def einstellungen_view(cfg: dict, kats: list[Kategorie], regeln: list[Regel], db
         eigen = k.schluessel not in standard
         knopf = (f' <button class="klein btn-ghost gefahr-text" hx-post="/api/kategorie/{h(k.schluessel)}/loeschen" hx-target="#main" '
                  f'hx-confirm="Kategorie „{h(k.name)}“ entfernen? Buchungen darin wandern nach Sonstiges.">entfernen</button>') if eigen else ""
-        return (f'<li title="{h(muster)}"><span class="kat-punkt" style="background:{h(k.farbe)}"></span>{h(k.name)} '
-                f'<span class="muted klein">{h(k.art)}{" · fix" if k.fix else ""}{" · eigene" if eigen else ""}</span>{knopf}</li>')
+        return (f'<li title="{h(muster)}"><input type="color" class="kat-farbe" value="{h(k.farbe)}" aria-label="Farbe für {h(k.name)}" title="Farbe ändern" '
+                f'hx-post="/api/kategorie/{h(k.schluessel)}/farbe" hx-trigger="change" hx-target="#main" name="farbe" hx-disinherit="*">'
+                f'<span class="kat-text">{h(k.name)} <span class="muted klein">{h(k.art)}{" · fix" if k.fix else ""}{" · eigene" if eigen else ""}</span></span>{knopf}</li>')
 
     kat_html = "".join(kat_eintrag(k) for k in sorted(kats, key=lambda x: (x.art != "einnahme", x.sortierung)))
     return f"""
@@ -519,7 +604,7 @@ def einstellungen_view(cfg: dict, kats: list[Kategorie], regeln: list[Regel], db
       <input name="muster" placeholder="Erkennungsmuster, kommagetrennt (z. B. einspeis, solar)" class="breit">
       <button class="btn-primary klein">Anlegen</button>
     </form>
-    <p class="muted klein">Eigene Kategorien stehen in <code>kategorien.json</code> im Datenordner; dort lassen sich auch Farben und Muster der Standardkategorien ändern. Muster: Buchungen, deren Empfänger oder Zweck eines der Wörter enthält, landen automatisch hier. Maus über einen Eintrag zeigt die Muster.</p>
+    <p class="muted klein">Farbe jederzeit über das Feld links vom Namen ändern – sie gilt sofort in allen Diagrammen. Muster: Buchungen, deren Empfänger oder Zweck eines der Wörter enthält, landen automatisch in dieser Kategorie; Maus über einen Eintrag zeigt sie. Muster stehen in <code>kategorien.json</code> im Datenordner.</p>
     <ul class="kat-ul">{kat_html}</ul></div>
   <div class="karte gefahr-zone"><h3 style="margin-top:0">Daten löschen</h3>
     <p class="muted klein">Entfernt alle eingelesenen Buchungen. Kategorien und die Einstellungen oben bleiben; die Kontoauszüge kannst du danach neu einlesen.
