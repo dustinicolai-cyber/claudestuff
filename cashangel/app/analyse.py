@@ -99,6 +99,32 @@ def klassifiziere(b: Bewegung, kategorien: dict[str, Kategorie], regeln: list[Re
     return kategorien.get("sonstige_einnahmen" if art == "einnahme" else "sonstiges"), "", "-"
 
 
+# ---------------------------------------------------------------- Dubletten
+
+def dubletten(bewegungen: Iterable[Bewegung]) -> list[list[Bewegung]]:
+    """Gruppen mutmaßlich doppelter Buchungen: gleicher Partner, gleicher Betrag, Datum höchstens einen Tag
+    auseinander (Buchungs- vs. Valutadatum, CSV vs. PDF desselben Auszugs). Innerhalb der Gruppe steht die
+    zuerst importierte vorn – sie wird beim Bereinigen behalten."""
+    sortiert = sorted(bewegungen, key=lambda b: ((b.partner or b.gegenkonto or "").lower(), round(b.betrag, 2), b.datum, b.importiert_am, b.id or 0))
+    gruppen: list[list[Bewegung]] = []
+    aktuell: list[Bewegung] = []
+    for b in sortiert:
+        if aktuell:
+            a = aktuell[0]
+            gleich = ((a.partner or a.gegenkonto or "").lower() == (b.partner or b.gegenkonto or "").lower()
+                      and round(a.betrag, 2) == round(b.betrag, 2) and abs((b.datum - aktuell[-1].datum).days) <= 1)
+            if gleich:
+                aktuell.append(b)
+                continue
+            if len(aktuell) > 1:
+                gruppen.append(sorted(aktuell, key=lambda x: (x.importiert_am, x.id or 0)))
+        aktuell = [b]
+    if len(aktuell) > 1:
+        gruppen.append(sorted(aktuell, key=lambda x: (x.importiert_am, x.id or 0)))
+    gruppen.sort(key=lambda g: (g[0].datum, g[0].partner), reverse=True)
+    return gruppen
+
+
 # ---------------------------------------------------------------- Zeiträume
 
 def monat_key(d: date) -> str:

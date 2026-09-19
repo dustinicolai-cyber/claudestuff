@@ -288,6 +288,46 @@ def buchungen_view(zeilen: list[Bewegung], kats: dict[int, Kategorie], personen:
 </script>"""
 
 
+# ---------------------------------------------------------------- Dubletten
+
+def dubletten_view(gruppen: list[list[Bewegung]], kats: dict[int, Kategorie]) -> str:
+    def zeile(b: Bewegung, erste: bool) -> str:
+        k = kats.get(b.kategorie_id or -1)
+        return (f'<tr class="{"behalten" if erste else ""}"><td><input type="checkbox" name="ids" value="{b.id}" class="dub-wahl" {"" if erste else "checked"} aria-label="löschen"></td>'
+                f'<td class="nowrap">{d(b.datum)}</td><td class="num {"plus" if b.betrag > 0 else "minus"}">{eur(b.betrag)}</td>'
+                f'<td><b>{h(b.gegenkonto or "–")}</b><div class="klein muted">{h(b.verwendungszweck[:110])}</div></td>'
+                f'<td><span class="kat-punkt" style="background:{h(k.farbe if k else "#64748b")}"></span>{h(k.name if k else "–")}</td>'
+                f'<td class="klein muted">{h(b.quelle_datei or "–")}{(" · " + h(b.konto)) if b.konto else ""}<div>{b.importiert_am.strftime("%d.%m.%Y %H:%M")}{" · zuerst importiert, wird behalten" if erste else ""}</div></td></tr>')
+
+    bloecke = "".join(f'<tbody class="dub-gruppe"><tr class="dub-kopf"><td colspan="6">Gruppe {i + 1} · {len(g)} Buchungen · {h(g[0].gegenkonto or g[0].partner)} · {eur(g[0].betrag)}</td></tr>'
+                      + "".join(zeile(b, j == 0) for j, b in enumerate(g)) + '</tbody>' for i, g in enumerate(gruppen))
+    anzahl = sum(len(g) - 1 for g in gruppen)
+    if not gruppen:
+        inhalt = '<p class="ok-box"><span>Keine doppelten Einträge gefunden.</span></p>'
+    else:
+        inhalt = f"""
+  <form hx-post="/api/dubletten/loeschen" hx-target="#main" id="dubletten-form">
+    <div class="row zwischen" style="margin:.4rem 0 .8rem">
+      <span class="muted">{len(gruppen)} Gruppen, {anzahl} mutmaßliche Dubletten. Vorausgewählt ist je Gruppe alles außer der zuerst importierten Buchung.</span>
+      <span class="row" style="margin:0">
+        <button type="submit" name="automatisch" value="1" class="btn-secondary klein" hx-confirm="Je Gruppe alle bis auf die zuerst importierte Buchung löschen? {anzahl} Buchungen werden entfernt.">Automatisch bereinigen</button>
+        <button type="submit" class="btn-primary klein gefahr-knopf" hx-confirm="Ausgewählte Dubletten wirklich löschen? Ein erneuter Import bringt sie nicht zurück.">Ausgewählte löschen</button>
+      </span></div>
+    <div class="scroll"><table class="tabelle kompakt dub-tabelle"><thead><tr><th>löschen</th><th>Datum</th><th class="num">Betrag</th><th>Empfänger / Zweck</th><th>Kategorie</th><th>Quelle</th></tr></thead>{bloecke}</table></div>
+  </form>"""
+    return f"""
+<section class="dubletten">
+  <p class="muted erkl">Als doppelt gilt: gleicher Empfänger, gleicher Betrag, höchstens ein Tag Abstand. Das passiert, wenn derselbe Auszug als CSV und als PDF geladen wurde,
+  ein Monat in zwei Auszügen steckt oder die Bank Buchungs- und Valutadatum unterschiedlich liefert. Echte Wiederholungen (zweimal derselbe Kaffee am selben Tag) sehen genauso aus – deshalb vor dem Löschen kurz draufschauen.</p>
+  <div class="row"><button class="btn-ghost klein" hx-get="/ui/import" hx-target="#main">← zurück zum Import</button></div>
+  {inhalt}
+</section>
+<script>
+(function(){{ const t = document.getElementById('titel'); if (t) t.textContent = 'Doppelte Einträge';
+  document.querySelectorAll('#nav button').forEach(b => b.classList.toggle('aktiv', b.dataset.ansicht === 'import')); }})();
+</script>"""
+
+
 # ---------------------------------------------------------------- Import
 
 def import_view(konten: list[str], dateien: list[tuple[str, int]]) -> str:
@@ -311,6 +351,9 @@ def import_view(konten: list[str], dateien: list[tuple[str, int]]) -> str:
     </div>
   </form>
   {f'<h3>Bisher geladen</h3><ul class="klein dateien">{dateien_html}</ul>' if dateien else ''}
+  <div class="karte"><div class="row zwischen"><div><h3 style="margin:0 0 .2rem">Doppelte Einträge</h3>
+    <p class="muted klein" style="margin:0">Derselbe Auszug als CSV und PDF, ein Monat zweimal geladen, Buchungs- und Valutadatum: Cash Angel findet Buchungen mit gleichem Empfänger, gleichem Betrag und höchstens einem Tag Abstand.</p></div>
+    <button class="btn-secondary" hx-get="/ui/dubletten" hx-target="#main">Dubletten suchen</button></div></div>
 </section>
 <script>
 (function(){{
@@ -423,6 +466,14 @@ def einstellungen_view(cfg: dict, kats: list[Kategorie], regeln: list[Regel], db
     </form>
     <p class="muted klein">Eigene Kategorien stehen in <code>kategorien.json</code> im Datenordner; dort lassen sich auch Farben und Muster der Standardkategorien ändern. Muster: Buchungen, deren Empfänger oder Zweck eines der Wörter enthält, landen automatisch hier. Maus über einen Eintrag zeigt die Muster.</p>
     <ul class="kat-ul">{kat_html}</ul></div>
+  <div class="karte gefahr-zone"><h3 style="margin-top:0">Daten löschen</h3>
+    <p class="muted klein">Entfernt alle eingelesenen Buchungen. Kategorien und die Einstellungen oben bleiben; die Kontoauszüge kannst du danach neu einlesen.
+      Doppelte Einträge findest du gezielt unter Import → „Dubletten suchen“.</p>
+    <form hx-post="/api/daten/loeschen" hx-target="#main" class="row" hx-confirm="Wirklich alle Buchungen löschen? Das lässt sich nicht rückgängig machen – Sicherung ist der Ordner CashAngel im Benutzerverzeichnis.">
+      <label class="check klein"><input type="checkbox" name="zuordnungen" value="1"> auch gelernte Zuordnungen und Abo-Markierungen</label>
+      <label class="check klein"><input type="checkbox" name="merkliste" value="1"> auch die Merkliste gelöschter Buchungen (dann kommen sie beim nächsten Import wieder)</label>
+      <button class="gefahr">Alle Buchungen löschen</button>
+    </form></div>
   <div class="karte"><h3 style="margin-top:0">Dateien</h3>
     <p>Datenbank: <code>{h(db_pfad)}</code><br>Version <code>{h(version)}</code> · lokal, offline, keine Telemetrie.</p>
     <div class="row"><button class="gefahr" hx-post="/api/beenden" hx-target="#main" hx-confirm="Cash Angel beenden? Der Server wird gestoppt; alle Daten sind gespeichert.">Cash Angel beenden</button></div></div>

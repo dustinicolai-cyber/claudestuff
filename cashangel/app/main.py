@@ -299,6 +299,57 @@ async def api_bewegungen_aktion(request: Request, s: Session = Depends(get_sessi
     return _html(ui.meldung_box(text) + antwort.body.decode())
 
 
+@app.get("/ui/dubletten", response_class=HTMLResponse)
+def ui_dubletten(s: Session = Depends(get_session)) -> HTMLResponse:
+    return _dubletten(s)
+
+
+def _dubletten(s: Session, meldung: str = "") -> HTMLResponse:
+    gruppen = analyse.dubletten(s.exec(select(Bewegung)).all())
+    return _html((ui.meldung_box(meldung) if meldung else "") + ui.dubletten_view(gruppen, _kats(s)))
+
+
+@app.post("/api/dubletten/loeschen", response_class=HTMLResponse)
+async def api_dubletten_loeschen(request: Request, s: Session = Depends(get_session)) -> HTMLResponse:
+    """Ausgewählte Dubletten löschen – oder automatisch je Gruppe alle bis auf die zuerst importierte."""
+    form = await request.form()
+    if str(form.get("automatisch", "")):
+        ids = [b.id for g in analyse.dubletten(s.exec(select(Bewegung)).all()) for b in g[1:]]
+    else:
+        ids = [int(t) for x in form.getlist("ids") for t in str(x).split(",") if t.strip().isdigit()]
+    n = 0
+    for bid in ids:
+        b = s.get(Bewegung, bid)
+        if not b:
+            continue
+        if b.fingerprint and not s.exec(select(Geloescht).where(Geloescht.fingerprint == b.fingerprint)).first():
+            s.add(Geloescht(fingerprint=b.fingerprint))
+        s.delete(b)
+        n += 1
+    s.commit()
+    return _dubletten(s, f"{n} doppelte Buchungen gelöscht – ein erneuter Import bringt sie nicht zurück." if n else "Nichts gelöscht.")
+
+
+@app.post("/api/daten/loeschen", response_class=HTMLResponse)
+def api_daten_loeschen(zuordnungen: str = Form(""), merkliste: str = Form(""), s: Session = Depends(get_session)) -> HTMLResponse:
+    """Alle Buchungen löschen; auf Wunsch auch gelernte Zuordnungen, Abo-Status und die Merkliste gelöschter Buchungen.
+    Kategorien und Einstellungen (kategorien.json) bleiben."""
+    n = 0
+    for b in s.exec(select(Bewegung)).all():
+        s.delete(b)
+        n += 1
+    teile = [f"{n} Buchungen gelöscht"]
+    if zuordnungen:
+        r = sum(1 for x in s.exec(select(Regel)).all() if not s.delete(x))
+        a = sum(1 for x in s.exec(select(AboStatus)).all() if not s.delete(x))
+        teile.append(f"{r} Zuordnungen und {a} Abo-Markierungen entfernt")
+    if merkliste:
+        g = sum(1 for x in s.exec(select(Geloescht)).all() if not s.delete(x))
+        teile.append(f"Merkliste mit {g} gelöschten Buchungen geleert")
+    s.commit()
+    return _einstellungen(s, ", ".join(teile) + ". Kategorien und Einstellungen sind noch da.")
+
+
 @app.get("/ui/import", response_class=HTMLResponse)
 def ui_import(s: Session = Depends(get_session)) -> HTMLResponse:
     konten = sorted({b.konto for b in s.exec(select(Bewegung)).all() if b.konto})

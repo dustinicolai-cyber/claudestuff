@@ -253,3 +253,31 @@ def test_eigene_kategorien_regeln_und_auf_alle_anwenden():
         # Sortierköpfe in der Buchungsliste
         t = c.get("/ui/buchungen?zeitraum=jahr:2025&q=starbucks").text
         assert 'data-sort="partner"' in t and 'data-sort="kategorie"' in t and "auf alle anwenden" in t
+
+
+def test_dubletten_und_alles_loeschen():
+    with client() as c:
+        c.post("/api/import", files={"datei": ("konto.csv", jahres_csv().encode(), "text/csv")})
+        vorher = c.get("/api/status").json()["bewegungen"]
+        assert "Keine doppelten Einträge" in c.get("/ui/dubletten").text
+        # derselbe Auszug nochmal, aber mit anderem Zweck-Text (wie CSV vs. PDF) → alles doppelt
+        nochmal = jahres_csv().replace(";Netflix", " Abo;Netflix").replace(";Spotify", " Abo;Spotify")
+        r = c.post("/api/import", files={"datei": ("konto-pdf.csv", nochmal.encode(), "text/csv")})
+        assert "24 neue Buchungen" in r.text
+        t = c.get("/ui/dubletten").text
+        assert "24 Gruppen, 24 mutmaßliche Dubletten" in t and "wird behalten" in t
+        with Session(engine()) as s:
+            gruppen = analyse.dubletten(s.exec(select(Bewegung)).all())
+            assert len(gruppen) == 24 and all(g[0].quelle_datei == "konto.csv" for g in gruppen)
+            eine = gruppen[0][1].id
+        r = c.post("/api/dubletten/loeschen", data={"ids": [str(eine)]})
+        assert "1 doppelte Buchungen gelöscht" in r.text
+        r = c.post("/api/dubletten/loeschen", data={"automatisch": "1"})
+        assert "23 doppelte Buchungen gelöscht" in r.text
+        assert c.get("/api/status").json()["bewegungen"] == vorher
+        assert "0 neue Buchungen" in c.post("/api/import", files={"datei": ("konto-pdf.csv", nochmal.encode(), "text/csv")}).text
+        # alles löschen
+        r = c.post("/api/daten/loeschen", data={"zuordnungen": "1"})
+        assert f"{vorher} Buchungen gelöscht" in r.text and "Abo-Markierungen entfernt" in r.text
+        assert c.get("/api/status").json()["bewegungen"] == 0
+        assert "Willkommen" in c.get("/ui/uebersicht").text

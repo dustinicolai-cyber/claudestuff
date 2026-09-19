@@ -46,7 +46,11 @@ Technische Basis ist Steuerfuchs; Parser für CSV, CAMT.053 und PDF-Auszüge sin
    „auf alle anwenden“ für alle Buchungen desselben Empfängers auf derselben Seite, Mehrfachauswahl
    (Kategorie setzen, ausblenden, löschen), CSV-Export.
 7. **Einstellungen** – Personen, eigene IBANs, gelernte Zuordnungen neu vergeben oder entfernen, eigene Kategorien
-   anlegen (Name, Einnahme/Ausgabe, Farbe, fix, Erkennungsmuster) und wieder entfernen.
+   anlegen (Name, Einnahme/Ausgabe, Farbe, fix, Erkennungsmuster) und wieder entfernen. „Daten löschen“ entfernt
+   alle Buchungen, auf Wunsch auch Zuordnungen, Abo-Markierungen und die Merkliste gelöschter Buchungen.
+8. **Dubletten** (unter Import) – findet Buchungen mit gleichem Empfänger, gleichem Betrag und höchstens einem Tag
+   Abstand (CSV und PDF desselben Auszugs, doppelt geladener Monat, Buchungs- vs. Valutadatum). Je Gruppe wird die
+   zuerst importierte behalten; Auswahl von Hand oder „Automatisch bereinigen“. Gelöschte kommen beim Re-Import nicht zurück.
 
 Der Zeitraum oben rechts (letzte 3/6/12 Monate, Jahr, einzelner Monat) gilt für alle Ansichten.
 
