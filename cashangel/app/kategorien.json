@@ -10,6 +10,7 @@
     {"schluessel": "kindergeld",      "name": "Kindergeld & Zuschüsse",    "art": "einnahme",  "farbe": "#5eead4", "fix": true,  "muster": ["kindergeld", "familienkasse", "familien kasse", "elterngeld", "wohngeld", "bafög", "bafoeg"]},
     {"schluessel": "erstattung",      "name": "Erstattungen",              "art": "einnahme",  "farbe": "#99f6e4", "fix": false, "muster": ["erstattung", "rueckzahlung", "rückzahlung", "gutschrift", "refund", "storno", "retoure", "rueckerstattung", "erstatt", "kv-lstg", "beihilfe", "amazon", "rueckverg", "rückverg"]},
     {"schluessel": "kapitalertrag",   "name": "Zinsen & Dividenden",       "art": "einnahme",  "farbe": "#67e8f9", "fix": false, "muster": ["zinsen", "dividende", "ausschuettung", "ausschüttung", "kapitalertrag"]},
+    {"schluessel": "solar",           "name": "Solarenergie & Einspeisung", "art": "einnahme", "farbe": "#facc15", "fix": false, "muster": ["einspeis", "solar", "photovoltaik", "pv-anlage", "pv anlage", "netzbetreiber", "stromeinspeisung", "eeg-verg", "eeg verg"]},
     {"schluessel": "sonstige_einnahmen", "name": "Sonstige Einnahmen",     "art": "einnahme",  "farbe": "#a5f3fc", "fix": false, "muster": []},
 
     {"schluessel": "wohnen",          "name": "Wohnen & Miete",            "art": "ausgabe",   "farbe": "#38bdf8", "fix": true,  "muster": ["miete", "hausgeld", "wohnungsbau", "hausverwaltung", "nebenkosten", "wohnungsgenossenschaft", "vonovia", "immobilien", "grundsteuer", "kaltmiete"]},

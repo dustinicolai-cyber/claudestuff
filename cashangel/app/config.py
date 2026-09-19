@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 from functools import lru_cache
 from pathlib import Path
@@ -76,6 +77,57 @@ def konfig_setzen(**werte) -> dict:
     with open(pfad, "w", encoding="utf-8") as f:
         json.dump(daten, f, ensure_ascii=False, indent=2)
     return konfig_neu_laden()
+
+
+def standard_schluessel() -> set[str]:
+    with open(DEFAULT_KATEGORIEN, encoding="utf-8") as f:
+        return {d["schluessel"] for d in json.load(f).get("kategorien", [])}
+
+
+def schluessel_aus_name(name: str) -> str:
+    t = name.lower().strip()
+    for a, b in (("ä", "ae"), ("ö", "oe"), ("ü", "ue"), ("ß", "ss"), ("&", " und ")):
+        t = t.replace(a, b)
+    t = re.sub(r"[^a-z0-9]+", "_", t).strip("_")
+    return t or "eigene"
+
+
+def kategorie_anlegen(name: str, art: str, fix: bool, farbe: str, muster: list[str]) -> str:
+    """Eigene Kategorie in die Nutzerdatei schreiben (Standardkategorien bleiben unberührt). Liefert den Schlüssel."""
+    pfad = kategorien_path()
+    with open(pfad, encoding="utf-8") as f:
+        daten = json.load(f)
+    liste = daten.setdefault("kategorien", [])
+    basis = schluessel_aus_name(name)
+    vergeben = {d.get("schluessel") for d in liste} | standard_schluessel()
+    schl, i = basis, 2
+    while schl in vergeben:
+        schl, i = f"{basis}_{i}", i + 1
+    liste.append({"schluessel": schl, "name": name.strip(), "art": art if art in ("einnahme", "ausgabe") else "ausgabe",
+                  "farbe": farbe if re.fullmatch(r"#[0-9a-fA-F]{6}", farbe or "") else "#38bdf8", "fix": bool(fix),
+                  "muster": [m.strip().lower() for m in muster if m.strip()]})
+    with open(pfad, "w", encoding="utf-8") as f:
+        json.dump(daten, f, ensure_ascii=False, indent=2)
+    konfig_neu_laden()
+    return schl
+
+
+def kategorie_entfernen(schluessel: str) -> bool:
+    """Nur eigene Kategorien lassen sich entfernen; Standardkategorien nicht."""
+    if schluessel in standard_schluessel():
+        return False
+    pfad = kategorien_path()
+    with open(pfad, encoding="utf-8") as f:
+        daten = json.load(f)
+    liste = daten.get("kategorien", [])
+    neu = [d for d in liste if d.get("schluessel") != schluessel]
+    if len(neu) == len(liste):
+        return False
+    daten["kategorien"] = neu
+    with open(pfad, "w", encoding="utf-8") as f:
+        json.dump(daten, f, ensure_ascii=False, indent=2)
+    konfig_neu_laden()
+    return True
 
 
 @lru_cache(maxsize=1)

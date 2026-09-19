@@ -35,12 +35,18 @@ Technische Basis ist Steuerfuchs; Parser für CSV, CAMT.053 und PDF-Auszüge sin
    Sparpläne gelten als gespart, nicht als Ausgabe.
 4. **Abos & Verträge** – wiederkehrende Zahlungen: gleicher Empfänger, regelmäßiger Abstand (wöchentlich bis
    jährlich), stabiler Betrag. Jahres- und Quartalsbeiträge auf den Monat umgerechnet, nächste Fälligkeit,
-   „gekündigt“ oder „kein Abo“ markierbar.
+   „gekündigt“ oder „kein Abo“ markierbar. Kreisdiagramm je Empfänger und „Was wäre, wenn …?“: Abos antippen,
+   die man kündigen würde, geplante Mehrausgaben eintragen – Ersparnis pro Monat/Jahr, Anteil an Abo-Kosten und
+   Ausgaben, Kurve über zwölf Monate (grün nach oben = gespart, rot nach unten = mehr ausgegeben).
 5. **Sparpotenzial & Gewohnheiten** – Sparquote, Fixkostenquote, Abo-Summe, Latte-Faktor (Kleinbeträge),
    Wochenend-Anteil, Zahltag-Effekt (Ausgaben in den ersten zehn Tagen), Lieferdienste je Monat,
    Kategorien über dem Durchschnitt, Kauf-Serien, größte Einzelausgaben, häufigste Empfänger.
-6. **Buchungen** – Volltextsuche, Filter nach Kategorie und Konto, Sortierung, Kategorie direkt in der Zeile,
-   Mehrfachauswahl (Kategorie setzen, ausblenden, löschen), CSV-Export.
+6. **Buchungen** – Volltextsuche, Filter nach Kategorie und Konto, Sortierung nach Datum, Betrag, Empfänger/Zweck
+   und Kategorie, Kategorie direkt in der Zeile (lernt die Zuordnung, getrennt nach Einnahmen und Ausgaben),
+   „auf alle anwenden“ für alle Buchungen desselben Empfängers auf derselben Seite, Mehrfachauswahl
+   (Kategorie setzen, ausblenden, löschen), CSV-Export.
+7. **Einstellungen** – Personen, eigene IBANs, gelernte Zuordnungen neu vergeben oder entfernen, eigene Kategorien
+   anlegen (Name, Einnahme/Ausgabe, Farbe, fix, Erkennungsmuster) und wieder entfernen.
 
 Der Zeitraum oben rechts (letzte 3/6/12 Monate, Jahr, einzelner Monat) gilt für alle Ansichten.
 

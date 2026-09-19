@@ -92,6 +92,11 @@ a{color:var(--akzent)}
 .chip .chip-wert{color:var(--muted);font-weight:500;font-size:.8em}
 .chip.aus{background:var(--minus-hell);border-color:var(--minus);color:var(--minus)} .chip.aus .chip-name{text-decoration:line-through} .chip.aus .chip-wert{color:var(--minus)}
 .chip.aus::before{content:"✕";font-size:.75em;font-weight:700}
+.chip.neu{background:var(--minus-hell);border-color:var(--minus);color:var(--minus)} .chip.neu .chip-wert{color:var(--minus)} .chip.neu::before{content:"+";font-weight:700}
+.neu-form{display:flex;gap:.45rem;flex-wrap:wrap;align-items:center;margin:.2rem 0 .6rem} .neu-form input{padding:.4rem .6rem} .neu-form input[name=name]{flex:1 1 12em}
+.kat-neu{display:flex;gap:.45rem;flex-wrap:wrap;align-items:center;margin:.2rem 0 .6rem} .kat-neu input,.kat-neu select{padding:.4rem .6rem} .kat-neu input[name=name]{flex:1 1 14em} .kat-neu input.breit{flex:2 1 20em} .kat-neu input[type=color]{width:2.6rem;height:2.1rem;padding:.1rem;border-radius:8px}
+.zeile-fuss .alle-knopf{padding:.05rem .4rem;font-size:.95em;color:var(--akzent);opacity:0;transition:opacity .15s} tr.bw:hover .alle-knopf,tr.bw.gespeichert .alle-knopf,.alle-knopf:focus-visible{opacity:1}
+.regeln-tabelle select{padding:.3rem .5rem;font-size:.9em}
 .spar-ergebnis .gross{font-size:1.5rem;font-weight:700;line-height:1.2;margin:.2rem 0 .4rem} .spar-ergebnis .gross small{font-size:.6em;font-weight:500;color:var(--muted)}
 .spar-ergebnis p{margin:.35rem 0}
 .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:.9rem;margin:.2rem 0 1rem}
@@ -254,28 +259,35 @@ window.CA = (function(){
   function linien(svgId, tipId, legId, labels, reihen, opt){
     const svg = document.getElementById(svgId); if (!svg) return; leer(svg); const t = tipFn(svg, tipId); opt = opt || {};
     const L = 80, R = 930, T = 24, B = 300, n = labels.length;
-    const max = Math.max(1, ...reihen.flatMap(r => r.werte)); const tk = ticks(max); const mx = tk[tk.length - 1];
-    const x = i => L + (R - L) * (n === 1 ? 0.5 : i / (n - 1)), y = v => B - (B - T) * v / mx;
-    tk.forEach(v => { const yy = y(v); svg.appendChild(el('line', {x1: L, x2: R, y1: yy, y2: yy, class: 'grid'})); svg.appendChild(el('text', {x: L - 8, y: yy + 4, class: 'tick', 'text-anchor': 'end'}, kurz(v))); });
-    svg.appendChild(el('line', {x1: L, x2: R, y1: B, y2: B, class: 'achse'}));
+    const alle = reihen.flatMap(r => r.werte); const hi = Math.max(0, ...alle), lo = Math.min(0, ...alle);
+    const tk = ticks(Math.max(hi, -lo, 1)); const schritt = tk[1] - tk[0];
+    let oben = hi > 0 ? Math.ceil(hi / schritt - 1e-9) * schritt : 0, unten = lo < 0 ? Math.floor(lo / schritt + 1e-9) * schritt : 0;
+    if (oben === 0 && unten === 0) oben = schritt; if (oben > 0 && unten === 0 && opt.nullLinie) unten = -schritt * 0.15; if (unten < 0 && oben === 0 && opt.nullLinie) oben = schritt * 0.15;
+    const x = i => L + (R - L) * (n === 1 ? 0.5 : i / (n - 1)), y = v => B - (B - T) * (v - unten) / (oben - unten);
+    for (let v = Math.ceil(unten / schritt - 1e-9) * schritt; v <= oben + 1e-9; v += schritt) { const yy = y(v); svg.appendChild(el('line', {x1: L, x2: R, y1: yy, y2: yy, class: 'grid'})); svg.appendChild(el('text', {x: L - 8, y: yy + 4, class: 'tick', 'text-anchor': 'end'}, (v < 0 ? '−' : '') + kurz(Math.abs(v)))); }
+    svg.appendChild(el('line', {x1: L, x2: R, y1: y(0), y2: y(0), class: 'achse'}));
     labels.forEach((lab, i) => svg.appendChild(el('text', {x: x(i), y: B + 18, class: 'tick', 'text-anchor': 'middle'}, lab)));
     if (opt.band && reihen.length > 1) { const A = reihen[opt.band[0]].werte, Bw = reihen[opt.band[1]].werte;
       const d = A.map((v, i) => `${i ? 'L' : 'M'}${x(i)} ${y(v)}`).join(' ') + ' ' + Bw.map((_, i) => `L${x(n - 1 - i)} ${y(Bw[n - 1 - i])}`).join(' ') + ' Z';
       svg.appendChild(el('path', {d, fill: opt.bandFarbe || css('--plus'), opacity: .16})); }
     const belegt = [];
     reihen.forEach(r => {
-      svg.appendChild(el('path', {d: r.werte.map((v, i) => `${i ? 'L' : 'M'}${x(i)} ${y(v)}`).join(' '), fill: 'none', stroke: r.farbe, 'stroke-width': 2.5, 'stroke-linejoin': 'round'}));
-      r.werte.forEach((v, i) => svg.appendChild(el('circle', {cx: x(i), cy: y(v), r: 3.5, fill: '#fff', stroke: r.farbe, 'stroke-width': 2})));
+      const pfad = el('path', {d: r.werte.map((v, i) => `${i ? 'L' : 'M'}${x(i)} ${y(v)}`).join(' '), fill: 'none', stroke: r.farbe, 'stroke-width': r.gestrichelt ? 2 : 2.5, 'stroke-linejoin': 'round'});
+      if (r.gestrichelt) pfad.setAttribute('stroke-dasharray', '7 7'); svg.appendChild(pfad);
+      if (!r.gestrichelt) r.werte.forEach((v, i) => svg.appendChild(el('circle', {cx: x(i), cy: y(v), r: 3.5, fill: '#fff', stroke: r.farbe, 'stroke-width': 2})));
+      if (r.ohneEndwert) return;
       // Endwert über dem letzten Punkt; liegt dort schon ein Wert, darunter ausweichen
-      const letzte = r.werte[n - 1]; let ly = y(letzte) - 9; if (belegt.some(b => Math.abs(b - ly) < 16)) ly = y(letzte) + 20; belegt.push(ly);
-      svg.appendChild(el('text', {x: R, y: ly, class: 'label', 'text-anchor': 'end', style: `fill:${r.farbe};font-weight:700`}, eur(letzte)));
+      // Endwert über dem letzten Punkt, bei fallender Linie darunter; liegt dort schon ein Wert, ausweichen
+      const letzte = r.werte[n - 1], faellt = n > 1 && letzte < r.werte[n - 2]; let ly = faellt ? y(letzte) + 20 : y(letzte) - 9;
+      if (belegt.some(b => Math.abs(b - ly) < 16)) ly = faellt ? y(letzte) - 9 : y(letzte) + 20; belegt.push(ly);
+      svg.appendChild(el('text', {x: R, y: ly, class: 'label', 'text-anchor': 'end', style: `fill:${r.farbe};font-weight:700`}, (letzte < 0 ? '−' : letzte > 0 && opt.nullLinie ? '+' : '') + eur(Math.abs(letzte))));
     });
     const band = (R - L) / Math.max(1, n - 1);
     labels.forEach((lab, i) => { const hit = el('rect', {x: x(i) - band / 2, y: T, width: band, height: B - T, fill: 'transparent'});
-      const kopf = typeof opt.einheit === 'function' ? opt.einheit(lab) : (opt.einheit ? opt.einheit.replace('{n}', lab) : lab); const diff = reihen.length > 1 && opt.band ? reihen[opt.band[0]].werte[i] - reihen[opt.band[1]].werte[i] : null;
-      hit.addEventListener('mousemove', ev => t.zeig(ev, `<b>${esc(kopf)}</b><br>${reihen.map(q => `<i style="background:${q.farbe}"></i>${esc(q.name)}: ${eur(q.werte[i])}`).join('<br>')}${diff != null ? `<br><i style="background:${opt.bandFarbe || css('--plus')}"></i>${esc(opt.bandName || 'Differenz')}: ${eur(diff)}` : ''}`));
+      const kopf = typeof opt.einheit === 'function' ? opt.einheit(lab) : (opt.einheit ? opt.einheit.replace('{n}', lab) : lab);
+      hit.addEventListener('mousemove', ev => t.zeig(ev, `<b>${esc(kopf)}</b><br>${reihen.filter(q => !q.ohneEndwert).map(q => `<i style="background:${q.farbe}"></i>${esc(q.name)}: ${(q.werte[i] < 0 ? '−' : '') + eur(Math.abs(q.werte[i]))}`).join('<br>')}`));
       hit.addEventListener('mouseleave', t.weg); svg.appendChild(hit); });
-    if (legId) { const leg = document.getElementById(legId); if (leg) leg.innerHTML = reihen.map(r => `<span><i style="background:${r.farbe}"></i>${esc(r.name)} <b>${eur(r.werte[n - 1])}</b> nach ${n} Monaten</span>`).join('') + (opt.band ? `<span><i style="background:${opt.bandFarbe || css('--plus')};opacity:.5"></i>${esc(opt.bandName || 'Differenz')} <b>${eur(reihen[opt.band[0]].werte[n - 1] - reihen[opt.band[1]].werte[n - 1])}</b></span>` : ''); }
+    if (legId) { const leg = document.getElementById(legId); if (leg) leg.innerHTML = reihen.map(r => `<span><i style="background:${r.farbe}"></i>${esc(r.name)}${r.ohneEndwert ? '' : ` <b>${(r.werte[n - 1] < 0 ? '−' : '') + eur(Math.abs(r.werte[n - 1]))}</b> nach ${n} Monaten`}</span>`).join(''); }
   }
   return {css, eur, kurz, esc, gruppen, donut, linien, palette};
 })();

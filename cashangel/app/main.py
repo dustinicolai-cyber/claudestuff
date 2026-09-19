@@ -211,19 +211,62 @@ def api_bewegung_kategorie(bid: int, kategorie_id: str = Form(""), person: str =
     s.add(b)
     n = 0
     if lernen == "1" and b.partner and b.kategorie_id:
-        r = s.exec(select(Regel).where(Regel.muster == b.partner)).first() or Regel(muster=b.partner, kategorie_id=b.kategorie_id)
-        r.kategorie_id, r.person = b.kategorie_id, b.person
-        s.add(r)
-        s.commit()
-        s.refresh(r)
-        for o in s.exec(select(Bewegung).where(Bewegung.partner == b.partner, Bewegung.id != b.id)).all():
-            if o.weg != "manuell" and (o.kategorie_id != b.kategorie_id or o.person != b.person):
-                o.kategorie_id, o.person, o.weg = b.kategorie_id, b.person, f"regel:{r.id}"
-                s.add(o)
-                n += 1
+        n = _regel_anwenden(s, b, auch_manuelle=False)
     s.commit()
     s.refresh(b)
     return _html(ui.buchung_zeile(b, kats, config.konfig().get("personen", []), gespeichert=True, hinweis=(f"+{n} gleiche" if n else "")))
+
+
+def _seite(b: Bewegung) -> str:
+    return "einnahme" if b.betrag > 0 else "ausgabe"
+
+
+def _regel_anwenden(s: Session, b: Bewegung, auch_manuelle: bool) -> int:
+    """Zuordnung Partner → Kategorie merken (getrennt nach Einnahme/Ausgabe) und auf gleiche Buchungen derselben Seite anwenden."""
+    seite = _seite(b)
+    r = s.exec(select(Regel).where(Regel.muster == b.partner, Regel.art == seite)).first()
+    if r is None:
+        alt = s.exec(select(Regel).where(Regel.muster == b.partner, Regel.art == "")).first()
+        r = alt or Regel(muster=b.partner, kategorie_id=b.kategorie_id, art=seite)
+    r.kategorie_id, r.person, r.art = b.kategorie_id, b.person, seite
+    s.add(r)
+    s.commit()
+    s.refresh(r)
+    n = 0
+    gesamt = 1
+    for o in s.exec(select(Bewegung).where(Bewegung.partner == b.partner, Bewegung.id != b.id)).all():
+        if _seite(o) != seite:
+            continue
+        gesamt += 1
+        if (o.weg != "manuell" or auch_manuelle) and (o.kategorie_id != b.kategorie_id or o.person != b.person):
+            o.kategorie_id, o.person, o.weg = b.kategorie_id, b.person, f"regel:{r.id}"
+            s.add(o)
+            n += 1
+    s.commit()
+    return n if not auch_manuelle else (n, gesamt)
+
+
+@app.post("/api/bewegung/{bid}/kategorie/alle", response_class=HTMLResponse)
+def api_bewegung_kategorie_alle(bid: int, kategorie_id: str = Form(""), person: str = Form(""), zeitraum: Optional[str] = Form(None), kategorie: str = Form(""),
+                                q: str = Form(""), konto: str = Form(""), nur_offen: str = Form(""), s: Session = Depends(get_session)) -> HTMLResponse:
+    """„Auf alle anwenden“: Kategorie dieser Zeile allen Buchungen desselben Empfängers auf derselben Seite (Einnahme oder Ausgabe) geben,
+    auch von Hand gesetzten. Liefert die Liste mit den aktuellen Filtern zurück."""
+    b = s.get(Bewegung, bid)
+    if not b:
+        raise HTTPException(404)
+    kats = _kats(s)
+    if kategorie_id.isdigit() and int(kategorie_id) in kats:
+        b.kategorie_id = int(kategorie_id)
+    b.person = person.strip()
+    b.weg = "manuell"
+    s.add(b)
+    s.commit()
+    n, gesamt = _regel_anwenden(s, b, auch_manuelle=True) if b.partner and b.kategorie_id else (0, 1)
+    k = kats.get(b.kategorie_id or -1)
+    seite = "Einnahmen" if b.betrag > 0 else "Ausgaben"
+    antwort = ui_buchungen(zeitraum, kategorie, q, konto, nur_offen, s)
+    text = f"„{k.name if k else '?'}“ gilt jetzt für alle {gesamt} {seite} von {b.gegenkonto or b.partner}" + (f", {n} davon geändert." if n else " – die hatten sie schon alle.")
+    return _html(ui.meldung_box(text) + antwort.body.decode("utf-8"))
 
 
 @app.post("/api/bewegungen/aktion", response_class=HTMLResponse)
@@ -338,7 +381,7 @@ def ui_einstellungen(s: Session = Depends(get_session)) -> HTMLResponse:
 def _einstellungen(s: Session, meldung: str = "") -> HTMLResponse:
     cfg = config.konfig()
     regeln = s.exec(select(Regel).order_by(Regel.muster)).all()
-    return _html((ui.meldung_box(meldung) if meldung else "") + ui.einstellungen_view(cfg, list(_kats(s).values()), regeln, str(config.db_path()), config.version()))
+    return _html((ui.meldung_box(meldung) if meldung else "") + ui.einstellungen_view(cfg, list(_kats(s).values()), regeln, str(config.db_path()), config.version(), config.standard_schluessel()))
 
 
 @app.post("/api/einstellungen", response_class=HTMLResponse)
@@ -364,6 +407,63 @@ def api_regel_loeschen(rid: int, s: Session = Depends(get_session)) -> HTMLRespo
         s.commit()
     n = _klassifiziere_neu(s)
     return _einstellungen(s, f"Zuordnung gelöscht, {n} Buchungen neu zugeordnet.")
+
+
+@app.post("/api/regel/{rid}", response_class=HTMLResponse)
+def api_regel_aendern(rid: int, kategorie_id: str = Form(""), person: str = Form(""), s: Session = Depends(get_session)) -> HTMLResponse:
+    """Gelernte Zuordnung neu vergeben: Kategorie (und Person) ändern, betroffene Buchungen ziehen nach."""
+    r = s.get(Regel, rid)
+    if not r:
+        raise HTTPException(404)
+    kats = _kats(s)
+    if kategorie_id.isdigit() and int(kategorie_id) in kats:
+        r.kategorie_id = int(kategorie_id)
+        r.art = kats[r.kategorie_id].art if kats[r.kategorie_id].art in ("einnahme", "ausgabe") else r.art
+    r.person = person.strip()
+    s.add(r)
+    s.commit()
+    n = 0
+    for o in s.exec(select(Bewegung).where(Bewegung.partner == r.muster)).all():
+        if r.art and _seite(o) != r.art:
+            continue
+        if o.kategorie_id != r.kategorie_id or o.person != r.person:
+            o.kategorie_id, o.person, o.weg = r.kategorie_id, r.person, f"regel:{r.id}"
+            s.add(o)
+            n += 1
+    s.commit()
+    n += _klassifiziere_neu(s)
+    return _einstellungen(s, f"Zuordnung geändert, {n} Buchungen angepasst.")
+
+
+@app.post("/api/kategorie/neu", response_class=HTMLResponse)
+def api_kategorie_neu(name: str = Form(""), art: str = Form("ausgabe"), fix: str = Form(""), farbe: str = Form("#38bdf8"), muster: str = Form(""),
+                      s: Session = Depends(get_session)) -> HTMLResponse:
+    if not name.strip():
+        return _einstellungen(s, "Bitte einen Namen für die Kategorie angeben.")
+    schl = config.kategorie_anlegen(name, art, bool(fix), farbe, muster.replace("\n", ",").split(","))
+    kategorien_synchronisieren(s)
+    n = _klassifiziere_neu(s)
+    return _einstellungen(s, f"Kategorie „{name.strip()}“ angelegt ({schl}). {n} Buchungen neu zugeordnet.")
+
+
+@app.post("/api/kategorie/{schluessel}/loeschen", response_class=HTMLResponse)
+def api_kategorie_loeschen(schluessel: str, s: Session = Depends(get_session)) -> HTMLResponse:
+    k = s.exec(select(Kategorie).where(Kategorie.schluessel == schluessel)).first()
+    if not k or not config.kategorie_entfernen(schluessel):
+        return _einstellungen(s, "Standardkategorien lassen sich nicht entfernen.")
+    ks = _kats_nach_schluessel(s)
+    ersatz = ks.get("sonstige_einnahmen" if k.art == "einnahme" else "sonstiges")
+    n = 0
+    for o in s.exec(select(Bewegung).where(Bewegung.kategorie_id == k.id)).all():
+        o.kategorie_id, o.weg = (ersatz.id if ersatz else None), "-"
+        s.add(o)
+        n += 1
+    for r in s.exec(select(Regel).where(Regel.kategorie_id == k.id)).all():
+        s.delete(r)
+    s.delete(k)
+    s.commit()
+    n2 = _klassifiziere_neu(s)
+    return _einstellungen(s, f"Kategorie „{k.name}“ entfernt; {n} Buchungen umgehängt, {n2} neu zugeordnet.")
 
 
 @app.post("/api/neu-klassifizieren", response_class=HTMLResponse)

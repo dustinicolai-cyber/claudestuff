@@ -44,6 +44,7 @@ class Regel(SQLModel, table=True):
     muster: str = Field(index=True)
     kategorie_id: int = Field(foreign_key="kategorie.id")
     person: str = ""
+    art: str = ""                      # einnahme | ausgabe | "" (beide Seiten)
     erstellt_am: datetime = Field(default_factory=datetime.now)
     treffer: int = 0
 

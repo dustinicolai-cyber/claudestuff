@@ -112,44 +112,58 @@ def abos_view(abos: list[dict], status: dict[str, AboStatus], ausgaben_monat: fl
   <div class="karten zwei abo-analyse">
     <div class="karte chart-karte"><div class="row zwischen"><h3 style="margin:0">Abos nach Empfänger</h3><span class="muted klein">pro Monat · laufende Verträge</span></div>
       <div class="chart-wrap donut"><svg id="chart-abos" viewBox="0 0 480 300" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Abos nach Empfänger"></svg><div class="tooltip" id="tip-abos" hidden></div></div></div>
-    <div class="karte spar-sim"><h3 style="margin:0 0 .2rem">Was wäre, wenn ich kündige?</h3>
-      <p class="muted klein" style="margin:0 0 .7rem">Abos antippen, die du kündigen würdest. Ergebnis und Kurve rechnen sofort mit.</p>
+    <div class="karte spar-sim"><h3 style="margin:0 0 .2rem">Was wäre, wenn …?</h3>
+      <p class="muted klein" style="margin:0 0 .7rem">Abos antippen, die du kündigen würdest. Geplante Mehrausgaben (neues Abo, Leasing, Beitrag) trägst du darunter ein.</p>
       <div class="abo-chips" id="abo-chips">{chips}</div>
+      <form class="neu-form" id="neu-form"><input name="name" placeholder="Mehrausgabe, z. B. Fitnessstudio" aria-label="Bezeichnung"><input name="betrag" type="number" step="0.01" min="0" placeholder="€ / Monat" aria-label="Betrag pro Monat" style="width:7.5em" required><button class="btn-secondary klein">+ Mehrausgabe</button></form>
+      <div class="abo-chips" id="neu-chips"></div>
       <div class="spar-ergebnis" id="spar-ergebnis"></div>
     </div>
   </div>
-  <div class="karte chart-karte"><div class="row zwischen"><h3 style="margin:0">Entwicklung über zwölf Monate</h3><span class="muted klein">Abo-Kosten aufsummiert: so wie jetzt und nach der Kündigung</span></div>
-    <div class="chart-wrap"><svg id="chart-spar" viewBox="0 0 960 340" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Entwicklung der Abo-Kosten"></svg><div class="tooltip" id="tip-spar" hidden></div></div>
+  <div class="karte chart-karte"><div class="row zwischen"><h3 style="margin:0">Entwicklung über zwölf Monate</h3><span class="muted klein">Unterschied zu heute, Monat für Monat aufsummiert: grün nach oben = gespart, rot nach unten = mehr ausgegeben</span></div>
+    <div class="chart-wrap"><svg id="chart-spar" viewBox="0 0 960 340" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Entwicklung der Ersparnis"></svg><div class="tooltip" id="tip-spar" hidden></div></div>
     <div class="legende" id="leg-spar"></div></div>
   <script type="application/json" id="abo-daten">{daten_json}</script>
   <script>
   (function(){{
     const wurzel = document.getElementById('abo-daten'); if (!wurzel) return;
-    const D = JSON.parse(wurzel.textContent); const weg = new Set();
-    try {{ (JSON.parse(sessionStorage.getItem('abo-weg') || '[]')).forEach(p => {{ if (D.abos.some(a => a.partner === p)) weg.add(p); }}); }} catch(e) {{}}
+    const D = JSON.parse(wurzel.textContent); const weg = new Set(); let neu = [];
+    try {{ (JSON.parse(sessionStorage.getItem('abo-weg') || '[]')).forEach(p => {{ if (D.abos.some(a => a.partner === p)) weg.add(p); }});
+          neu = JSON.parse(sessionStorage.getItem('abo-neu') || '[]').filter(x => x && x.betrag > 0); }} catch(e) {{}}
+    const merken = () => {{ try {{ sessionStorage.setItem('abo-weg', JSON.stringify([...weg])); sessionStorage.setItem('abo-neu', JSON.stringify(neu)); }} catch(e) {{}} }};
     const pal = CA.palette('aus'), grau = '#64748b';
     const proz = (a, b) => b > 0 ? (a / b * 100).toLocaleString('de-DE', {{maximumFractionDigits: 1}}) + ' %' : '–';
     const liste = n => n.length <= 1 ? n.join('') : n.slice(0, -1).join(', ') + ' und ' + n[n.length - 1];
+    const vz = x => (x > 0 ? '+' : x < 0 ? '−' : '') + CA.eur(Math.abs(x));
     function zeichnen(){{
       const gesamt = D.abos.reduce((s, a) => s + a.monatlich, 0);
       const spar = D.abos.filter(a => weg.has(a.partner)).reduce((s, a) => s + a.monatlich, 0);
-      const rest = gesamt - spar, namen = D.abos.filter(a => weg.has(a.partner)).map(a => a.name);
+      const mehr = neu.reduce((s, x) => s + x.betrag, 0), netto = spar - mehr, rest = gesamt - spar;
+      const namen = D.abos.filter(a => weg.has(a.partner)).map(a => a.name);
       document.querySelectorAll('#abo-chips .chip').forEach(c => c.classList.toggle('aus', weg.has(c.dataset.partner)));
+      document.getElementById('neu-chips').innerHTML = neu.map((x, i) => `<button type="button" class="chip neu" data-i="${{i}}" title="entfernen"><span class="chip-name">${{CA.esc(x.name || 'Mehrausgabe')}}</span><span class="chip-wert">${{CA.eur(x.betrag)}}</span></button>`).join('');
       const erg = document.getElementById('spar-ergebnis');
-      if (!D.abos.length) erg.innerHTML = '<p class="muted">Noch keine laufenden Abos erkannt.</p>';
-      else if (!weg.size) erg.innerHTML = `<div class="gross muted">Noch nichts ausgewählt</div><p class="muted klein">Alle ${{D.abos.length}} Abos zusammen kosten ${{CA.eur(gesamt)}} im Monat, ${{CA.eur(gesamt * 12)}} im Jahr – das sind ${{proz(gesamt, D.ausgaben_monat)}} deiner Ausgaben.</p>`;
-      else erg.innerHTML = `<div class="gross plus">${{CA.eur(spar)}} <small>im Monat</small> · ${{CA.eur(spar * 12)}} <small>im Jahr</small></div>
-        <p>Kündigst du ${{CA.esc(liste(namen))}}, sparst du <b>${{proz(spar, gesamt)}}</b> deiner Abo-Kosten und <b>${{proz(spar, D.ausgaben_monat)}}</b> deiner monatlichen Ausgaben.</p>
-        <p class="muted klein">Es bleiben ${{D.abos.length - weg.size}} Abos mit ${{CA.eur(rest)}} im Monat (${{CA.eur(rest * 12)}} im Jahr).${{D.einnahmen_monat > 0 ? ' Deine Sparquote steigt um ' + proz(spar, D.einnahmen_monat).replace(' %', ' Prozentpunkte') + '.' : ''}}</p>`;
+      if (!D.abos.length && !neu.length) erg.innerHTML = '<p class="muted">Noch keine laufenden Abos erkannt – dafür braucht es mindestens drei Monate Kontoauszüge.</p>';
+      else if (!weg.size && !neu.length) erg.innerHTML = `<div class="gross muted">Noch nichts ausgewählt</div><p class="muted klein">Alle ${{D.abos.length}} Abos zusammen kosten ${{CA.eur(gesamt)}} im Monat, ${{CA.eur(gesamt * 12)}} im Jahr – das sind ${{proz(gesamt, D.ausgaben_monat)}} deiner Ausgaben.</p>`;
+      else {{
+        const farbe = netto >= 0 ? 'plus' : 'minus';
+        let html = `<div class="gross ${{farbe}}">${{vz(netto)}} <small>im Monat</small> · ${{vz(netto * 12)}} <small>im Jahr</small></div>`;
+        if (weg.size) html += `<p>Kündigst du ${{CA.esc(liste(namen))}}, sparst du <b>${{CA.eur(spar)}}</b> im Monat – <b>${{proz(spar, gesamt)}}</b> deiner Abo-Kosten und <b>${{proz(spar, D.ausgaben_monat)}}</b> deiner monatlichen Ausgaben.</p>`;
+        if (neu.length) html += `<p>Neue Ausgaben: <b class="minus">−${{CA.eur(mehr)}}</b> im Monat (${{CA.esc(liste(neu.map(x => x.name || 'Mehrausgabe')))}}).</p>`;
+        html += `<p class="muted klein">Unterm Strich ${{netto >= 0 ? 'bleiben dir' : 'fehlen dir'}} <b>${{CA.eur(Math.abs(netto))}}</b> im Monat, <b>${{CA.eur(Math.abs(netto) * 12)}}</b> im Jahr. Es laufen dann ${{D.abos.length - weg.size}} Abos mit ${{CA.eur(rest)}} im Monat.${{D.einnahmen_monat > 0 ? ' Sparquote ' + (netto >= 0 ? '+' : '−') + proz(Math.abs(netto), D.einnahmen_monat).replace(' %', ' Punkte') + '.' : ''}}</p>`;
+        erg.innerHTML = html;
+      }}
       CA.donut('chart-abos', 'tip-abos', D.abos.map((a, i) => ({{name: (weg.has(a.partner) ? '✕ ' : '') + a.name, wert: a.monatlich, farbe: weg.has(a.partner) ? grau : pal[i % pal.length]}})), 'Abos / Monat', null);
-      const labels = Array.from({{length: 12}}, (_, i) => String(i + 1));
+      const labels = Array.from({{length: 12}}, (_, i) => String(i + 1)), f = netto >= 0 ? CA.css('--plus') : CA.css('--minus');
       CA.linien('chart-spar', 'tip-spar', 'leg-spar', labels, [
-        {{name: 'so wie jetzt', farbe: CA.css('--minus'), werte: labels.map((_, i) => gesamt * (i + 1))}},
-        {{name: 'nach Kündigung', farbe: CA.css('--plus'), werte: labels.map((_, i) => rest * (i + 1))}}],
-        {{band: [0, 1], bandName: 'gespart', einheit: n => 'nach ' + n + (n == 1 ? ' Monat' : ' Monaten')}});
+        {{name: 'so wie jetzt', farbe: CA.css('--muted'), werte: labels.map(() => 0), gestrichelt: true, ohneEndwert: true}},
+        {{name: netto >= 0 ? 'gespart' : 'mehr ausgegeben', farbe: f, werte: labels.map((_, i) => netto * (i + 1))}}],
+        {{band: [1, 0], bandFarbe: f, bandName: 'Unterschied', einheit: n => 'nach ' + n + (n == 1 ? ' Monat' : ' Monaten'), nullLinie: true}});
     }}
-    document.getElementById('abo-chips').addEventListener('click', e => {{ const c = e.target.closest('.chip'); if (!c) return; const p = c.dataset.partner; weg.has(p) ? weg.delete(p) : weg.add(p);
-      try {{ sessionStorage.setItem('abo-weg', JSON.stringify([...weg])); }} catch(e) {{}} zeichnen(); }});
+    document.getElementById('abo-chips').addEventListener('click', e => {{ const c = e.target.closest('.chip'); if (!c) return; const p = c.dataset.partner; weg.has(p) ? weg.delete(p) : weg.add(p); merken(); zeichnen(); }});
+    document.getElementById('neu-chips').addEventListener('click', e => {{ const c = e.target.closest('.chip'); if (!c) return; neu.splice(+c.dataset.i, 1); merken(); zeichnen(); }});
+    document.getElementById('neu-form').addEventListener('submit', e => {{ e.preventDefault(); const f = e.target, b = parseFloat(String(f.betrag.value).replace(',', '.')); if (!(b > 0)) return;
+      neu.push({{name: f.name.value.trim(), betrag: Math.round(b * 100) / 100}}); f.reset(); merken(); zeichnen(); }});
     zeichnen();
   }})();
   </script>"""
@@ -201,14 +215,18 @@ def buchung_zeile(b: Bewegung, kats: dict[int, Kategorie], personen: list[str], 
     person = (f'<select name="person" aria-label="Person"><option value="">–</option>{p_opts}</select>'
               if b.betrag > 0 and k and k.schluessel == "gehalt" else f'<input type="hidden" name="person" value="{h(b.person)}">')
     weg = {"muster": "automatisch", "gehalt": "Gehalt erkannt", "umbuchung": "Umbuchung", "manuell": "von Hand", "-": "unklar"}.get(b.weg.split(":")[0], "gelernt")
+    seite = "Einnahmen" if b.betrag > 0 else "Ausgaben"
+    alle_knopf = (f'<button type="button" class="btn-ghost klein alle-knopf" hx-post="/api/bewegung/{b.id}/kategorie/alle" hx-include="closest tr, #buchungen form.filter" '
+                  f'hx-target="#main" hx-swap="innerHTML" title="Diese Kategorie allen {seite} von „{h(b.gegenkonto or b.partner)}“ zuordnen – auch von Hand gesetzten">auf alle anwenden</button>')
     return (f'<tr id="bw-{b.id}" class="bw {"gespeichert" if gespeichert else ""} {"ignoriert" if b.ignoriert else ""}" data-datum="{b.datum.isoformat()}" data-betrag="{b.betrag:.2f}" '
+            f'data-partner="{h((b.gegenkonto or b.partner or "").lower())} {h(b.verwendungszweck[:60].lower())}" data-kategorie="{h(k.name.lower() if k else "zzz")}" '
             f'hx-post="/api/bewegung/{b.id}/kategorie" hx-trigger="change[target.name!=\'ids\']" hx-include="closest tr" hx-target="this" hx-swap="outerHTML" hx-disinherit="*">'
             f'<td><input type="checkbox" name="ids" value="{b.id}" class="bw-wahl" aria-label="auswählen"></td>'
             f'<td class="nowrap">{d(b.datum)}<div class="klein muted">{["Mo","Di","Mi","Do","Fr","Sa","So"][b.datum.weekday()]}</div></td>'
             f'<td class="num {"plus" if b.betrag > 0 else "minus"}">{eur(b.betrag)}</td>'
             f'<td><b>{h(b.gegenkonto or "–")}</b><div class="klein muted zweck">{h(b.verwendungszweck[:120])}</div></td>'
             f'<td><span class="kat-punkt" style="background:{h(k.farbe if k else "#64748b")}"></span><select name="kategorie_id" aria-label="Kategorie">{opts}</select> {person}'
-            f'<div class="klein muted">{weg}{(" · " + h(hinweis)) if hinweis else ""}{(" · " + h(b.konto)) if b.konto else ""}</div></td></tr>')
+            f'<div class="klein muted zeile-fuss">{weg}{(" · " + h(hinweis)) if hinweis else ""}{(" · " + h(b.konto)) if b.konto else ""} {alle_knopf}</div></td></tr>')
 
 
 def buchungen_view(zeilen: list[Bewegung], kats: dict[int, Kategorie], personen: list[str], zeitraum: str, kategorie: str, q: str, konto: str,
@@ -243,9 +261,9 @@ def buchungen_view(zeilen: list[Bewegung], kats: dict[int, Kategorie], personen:
     <button type="submit" name="aktion" value="loeschen" class="btn-ghost klein gefahr-text" hx-confirm="Ausgewählte Buchungen wirklich löschen?" data-confirm-vorlage="{{n}} Buchungen wirklich löschen? Ein erneuter Import desselben Auszugs bringt sie nicht zurück.">{ICON["x"]}löschen</button>
   </form>
   <div class="scroll"><table class="tabelle kompakt bw-tabelle"><colgroup><col class="c-wahl"><col class="c-datum"><col class="c-betrag"><col class="c-partner"><col class="c-kat"></colgroup>
-    <thead><tr><th><input type="checkbox" class="bw-alle" aria-label="alle auswählen"></th><th class="sortierbar" data-sort="datum">Datum <span class="pfeil"></span></th><th class="num sortierbar" data-sort="betrag">Betrag <span class="pfeil"></span></th><th>Empfänger / Zweck</th><th>Kategorie</th></tr></thead>
+    <thead><tr><th><input type="checkbox" class="bw-alle" aria-label="alle auswählen"></th><th class="sortierbar" data-sort="datum">Datum <span class="pfeil"></span></th><th class="num sortierbar" data-sort="betrag">Betrag <span class="pfeil"></span></th><th class="sortierbar" data-sort="partner">Empfänger / Zweck <span class="pfeil"></span></th><th class="sortierbar" data-sort="kategorie">Kategorie <span class="pfeil"></span></th></tr></thead>
     <tbody>{rows or '<tr><td colspan=5 class="muted">Keine Buchungen in dieser Auswahl.</td></tr>'}</tbody></table></div>
-  <p class="muted klein">Kategorie in der Zeile ändern speichert sofort und lernt die Zuordnung für denselben Empfänger. Ausgeblendete Zeilen zählen in keiner Auswertung. Sparpläne gelten als gespart, nicht als Ausgabe.</p>
+  <p class="muted klein">Kategorie in der Zeile ändern speichert sofort und lernt die Zuordnung für denselben Empfänger – getrennt nach Einnahmen und Ausgaben. „Auf alle anwenden“ überschreibt auch von Hand gesetzte Buchungen dieses Empfängers auf derselben Seite. Ausgeblendete Zeilen zählen in keiner Auswertung. Sparpläne gelten als gespart, nicht als Ausgabe.</p>
 </section>
 <script>
 (function(){{
@@ -262,7 +280,7 @@ def buchungen_view(zeilen: list[Bewegung], kats: dict[int, Kategorie], personen:
   let sortKey = null, sortDir = -1;
   box.querySelectorAll('th.sortierbar').forEach(th => th.addEventListener('click', () => {{
     const key = th.dataset.sort; sortDir = (sortKey === key) ? -sortDir : (key === 'datum' ? -1 : 1); sortKey = key;
-    const rows = [...tbody.querySelectorAll('tr.bw')]; rows.sort((a, b) => {{ const va = a.dataset[key], vb = b.dataset[key]; return (key === 'betrag' ? (+va - +vb) : (va < vb ? -1 : va > vb ? 1 : 0)) * sortDir; }});
+    const rows = [...tbody.querySelectorAll('tr.bw')]; rows.sort((a, b) => {{ const va = a.dataset[key], vb = b.dataset[key]; return (key === 'betrag' ? (+va - +vb) : key === 'datum' ? (va < vb ? -1 : va > vb ? 1 : 0) : va.localeCompare(vb, 'de')) * sortDir; }});
     rows.forEach(r => tbody.appendChild(r));
     box.querySelectorAll('th.sortierbar').forEach(t => {{ const an = t === th; t.classList.toggle('aktiv', an); t.querySelector('.pfeil').textContent = an ? (sortDir > 0 ? '▲' : '▼') : ''; }});
   }}));
@@ -347,29 +365,63 @@ def muster_view(ins: dict, zeitraum: str, beschriftung: str) -> str:
 
 # ---------------------------------------------------------------- Einstellungen
 
-def einstellungen_view(cfg: dict, kats: list[Kategorie], regeln: list[Regel], db_pfad: str, version: str) -> str:
+def einstellungen_view(cfg: dict, kats: list[Kategorie], regeln: list[Regel], db_pfad: str, version: str, standard: set[str] | None = None) -> str:
     kat_by_id = {k.id: k for k in kats}
-    regeln_html = "".join(f'<tr><td><code>{h(r.muster)}</code></td><td>{h(kat_by_id[r.kategorie_id].name) if r.kategorie_id in kat_by_id else "?"}</td><td>{h(r.person)}</td>'
-                          f'<td><button class="klein btn-ghost gefahr-text" hx-post="/api/regel/{r.id}/loeschen" hx-target="#main">entfernen</button></td></tr>' for r in regeln)
-    kat_html = "".join(f'<li><span class="kat-punkt" style="background:{h(k.farbe)}"></span>{h(k.name)} <span class="muted klein">{h(k.art)}{" · fix" if k.fix else ""}</span></li>'
-                       for k in sorted(kats, key=lambda x: x.sortierung))
+    standard = standard or set()
+    personen = cfg.get("personen", [])
+
+    def kat_optionen(gewaehlt: int | None, seite: str) -> str:
+        gruppen = [("Ausgaben", "ausgabe"), ("Einnahmen", "einnahme"), ("Umbuchung", "umbuchung")]
+        if seite == "einnahme":
+            gruppen = [gruppen[1], gruppen[0], gruppen[2]]
+        return "".join(f'<optgroup label="{titel}">' + "".join(f'<option value="{k.id}" {"selected" if k.id == gewaehlt else ""}>{h(k.name)}</option>'
+                                                             for k in sorted(kats, key=lambda x: x.sortierung) if k.art == art) + '</optgroup>' for titel, art in gruppen)
+
+    def regel_zeile(r: Regel) -> str:
+        seite = {"einnahme": '<span class="badge ok">Einnahme</span>', "ausgabe": '<span class="badge">Ausgabe</span>'}.get(r.art, '<span class="badge mid">beide</span>')
+        p_opts = "".join(f'<option value="{h(p)}" {"selected" if p == r.person else ""}>{h(p)}</option>' for p in personen)
+        return (f'<tr><td><code>{h(r.muster)}</code></td><td>{seite}</td>'
+                f'<td><form class="inline" hx-post="/api/regel/{r.id}" hx-target="#main" hx-trigger="change"><select name="kategorie_id" aria-label="Kategorie">{kat_optionen(r.kategorie_id, r.art)}</select> '
+                f'<select name="person" aria-label="Person"><option value="">–</option>{p_opts}</select></form></td>'
+                f'<td><button class="klein btn-ghost gefahr-text" hx-post="/api/regel/{r.id}/loeschen" hx-target="#main">entfernen</button></td></tr>')
+
+    regeln_html = "".join(regel_zeile(r) for r in regeln)
+    kat_defs = {d["schluessel"]: d for d in cfg.get("kategorien", [])}
+
+    def kat_eintrag(k: Kategorie) -> str:
+        muster = ", ".join(kat_defs.get(k.schluessel, {}).get("muster", [])[:12])
+        eigen = k.schluessel not in standard
+        knopf = (f' <button class="klein btn-ghost gefahr-text" hx-post="/api/kategorie/{h(k.schluessel)}/loeschen" hx-target="#main" '
+                 f'hx-confirm="Kategorie „{h(k.name)}“ entfernen? Buchungen darin wandern nach Sonstiges.">entfernen</button>') if eigen else ""
+        return (f'<li title="{h(muster)}"><span class="kat-punkt" style="background:{h(k.farbe)}"></span>{h(k.name)} '
+                f'<span class="muted klein">{h(k.art)}{" · fix" if k.fix else ""}{" · eigene" if eigen else ""}</span>{knopf}</li>')
+
+    kat_html = "".join(kat_eintrag(k) for k in sorted(kats, key=lambda x: (x.art != "einnahme", x.sortierung)))
     return f"""
 <section class="einstellungen">
   <div class="karte"><h3 style="margin-top:0">Haushalt</h3>
     <form hx-post="/api/einstellungen" hx-target="#main" class="stapel">
-      <label>Personen (für „Gehalt Susanne“, „Gehalt Dustin“) <input name="personen" value="{h(', '.join(cfg.get('personen', [])))}" placeholder="Susanne, Dustin"></label>
+      <label>Personen (für „Gehalt Susanne“, „Gehalt Dustin“) <input name="personen" value="{h(', '.join(personen))}" placeholder="Susanne, Dustin"></label>
       <label>Eigene IBANs (Umbuchungen zwischen diesen Konten zählen nicht als Einnahme/Ausgabe) <input name="eigene_ibans" value="{h(', '.join(cfg.get('eigene_ibans', [])))}" placeholder="DE12 …, DE34 …"></label>
       <label>Kleinbetrag-Grenze für den Latte-Faktor (€) <input name="kleinbetrag_grenze" type="number" step="1" value="{cfg.get('kleinbetrag_grenze', 15)}" style="width:8em"></label>
       <div><button class="btn-primary">Speichern und neu zuordnen</button></div>
     </form></div>
   <div class="karte"><h3 style="margin-top:0">Gelernte Zuordnungen ({len(regeln)})</h3>
-    <p class="muted klein">Entstehen, wenn du in der Buchungsliste eine Kategorie änderst. Gelten für alle Buchungen desselben Empfängers, auch künftige.</p>
-    <table class="tabelle kompakt"><thead><tr><th>Empfänger</th><th>Kategorie</th><th>Person</th><th></th></tr></thead><tbody>{regeln_html or '<tr><td colspan=4 class="muted">Noch keine.</td></tr>'}</tbody></table>
+    <p class="muted klein">Entstehen, wenn du in der Buchungsliste eine Kategorie änderst, getrennt nach Einnahmen und Ausgaben. Hier neu vergeben: Die Auswahl gilt sofort für alle Buchungen dieses Empfängers auf dieser Seite, auch künftige.</p>
+    <table class="tabelle kompakt regeln-tabelle"><thead><tr><th>Empfänger</th><th>Seite</th><th>Kategorie · Person</th><th></th></tr></thead><tbody>{regeln_html or '<tr><td colspan=4 class="muted">Noch keine.</td></tr>'}</tbody></table>
     <form class="row" hx-post="/api/neu-klassifizieren" hx-target="#main" style="margin-top:.8rem">
       <button class="btn-secondary klein">Automatik erneut anwenden</button>
       <label class="check klein"><input type="checkbox" name="alle" value="1"> auch von Hand gesetzte überschreiben</label></form></div>
   <div class="karte"><h3 style="margin-top:0">Kategorien ({len(kats)})</h3>
-    <p class="muted klein">Namen, Farben und Erkennungsmuster stehen in <code>kategorien.json</code> im Datenordner. Eigene Muster dort ergänzen, dann „Automatik erneut anwenden“.</p>
+    <form hx-post="/api/kategorie/neu" hx-target="#main" class="kat-neu">
+      <input name="name" placeholder="Neue Kategorie, z. B. Solarenergie" required>
+      <select name="art" aria-label="Einnahme oder Ausgabe"><option value="ausgabe">Ausgabe</option><option value="einnahme">Einnahme</option></select>
+      <input name="farbe" type="color" value="#38bdf8" title="Farbe" aria-label="Farbe">
+      <label class="check klein"><input type="checkbox" name="fix" value="1"> fix</label>
+      <input name="muster" placeholder="Erkennungsmuster, kommagetrennt (z. B. einspeis, solar)" class="breit">
+      <button class="btn-primary klein">Anlegen</button>
+    </form>
+    <p class="muted klein">Eigene Kategorien stehen in <code>kategorien.json</code> im Datenordner; dort lassen sich auch Farben und Muster der Standardkategorien ändern. Muster: Buchungen, deren Empfänger oder Zweck eines der Wörter enthält, landen automatisch hier. Maus über einen Eintrag zeigt die Muster.</p>
     <ul class="kat-ul">{kat_html}</ul></div>
   <div class="karte"><h3 style="margin-top:0">Dateien</h3>
     <p>Datenbank: <code>{h(db_pfad)}</code><br>Version <code>{h(version)}</code> · lokal, offline, keine Telemetrie.</p>

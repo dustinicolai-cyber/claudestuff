@@ -71,10 +71,13 @@ def klassifiziere(b: Bewegung, kategorien: dict[str, Kategorie], regeln: list[Re
     eigene = [i.replace(" ", "").upper() for i in cfg.get("eigene_ibans", []) if i]
     if b.gegen_iban and b.gegen_iban.replace(" ", "").upper() in eigene:
         return kategorien.get("umbuchung"), "", "umbuchung"
+    seite = "einnahme" if b.betrag > 0 else "ausgabe"
     for r in regeln:
+        if r.art and r.art != seite:
+            continue
         if r.muster and r.muster.lower() in text.lower():
             k = next((k for k in kategorien.values() if k.id == r.kategorie_id), None)
-            if k:
+            if k and k.art in (seite, "umbuchung"):
                 return k, r.person or (person_erkennen(text, personen) if k.schluessel == "gehalt" else ""), f"regel:{r.id}"
     if b.betrag > 0 and _enthaelt(text, cfg.get("gehalt_muster", [])):
         return kategorien.get("gehalt"), person_erkennen(text, personen), "gehalt"

@@ -205,3 +205,51 @@ def test_ing_pdf_text_kombinierte_typen():
     assert "431,89" in bs[2].verwendungszweck
     # Spaltenumbruch im Namen repariert
     assert bs[6].gegenkonto == "congstar - eine Marke der Telekom Deutschland"
+
+
+def test_eigene_kategorien_regeln_und_auf_alle_anwenden():
+    with client() as c:
+        c.post("/api/import", files={"datei": ("konto.csv", jahres_csv().encode(), "text/csv")})
+        # Solarenergie ist als Einnahme-Kategorie da; Amazon-Gutschrift (Einnahme) und Amazon-Kauf (Ausgabe) sind getrennt
+        t = c.get("/ui/einstellungen").text
+        assert "Solarenergie" in t
+        # eigene Kategorie anlegen
+        r = c.post("/api/kategorie/neu", data={"name": "Vereinsbeiträge", "art": "ausgabe", "fix": "1", "farbe": "#ff8800", "muster": "verein, tsv"})
+        assert "angelegt (vereinsbeitraege)" in r.text
+        with Session(engine()) as s:
+            k = s.exec(select(Kategorie).where(Kategorie.schluessel == "vereinsbeitraege")).first()
+            assert k and k.art == "ausgabe" and k.fix and k.farbe == "#ff8800"
+            kid = k.id
+            # Standardkategorie lässt sich nicht entfernen
+        assert "nicht entfernen" in c.post("/api/kategorie/lebensmittel/loeschen").text
+        # „Auf alle anwenden“: Starbucks-Ausgaben bekommen die neue Kategorie, auch eine vorher von Hand gesetzte
+        with Session(engine()) as s:
+            sb = s.exec(select(Bewegung).where(Bewegung.gegenkonto == "Starbucks Coffee")).all()
+            erste, zweite = sb[0].id, sb[1].id
+            freizeit = s.exec(select(Kategorie).where(Kategorie.schluessel == "freizeit")).first().id
+        c.post(f"/api/bewegung/{erste}/kategorie", data={"kategorie_id": str(freizeit), "person": "", "lernen": "0"})
+        r = c.post(f"/api/bewegung/{zweite}/kategorie/alle", data={"kategorie_id": str(kid), "person": "", "zeitraum": "jahr:2025"})
+        assert "gilt jetzt für alle 12 Ausgaben von Starbucks Coffee, 11 davon geändert" in r.text
+        with Session(engine()) as s:
+            assert all(x.kategorie_id == kid for x in s.exec(select(Bewegung).where(Bewegung.gegenkonto == "Starbucks Coffee")).all())
+            regel = s.exec(select(Regel).where(Regel.muster == "starbucks coffee")).first()
+            assert regel.art == "ausgabe" and regel.kategorie_id == kid
+            rid = regel.id
+            # Regel gilt nur für Ausgaben: eine Einnahme von Starbucks bleibt Einnahme-Kategorie
+            kats = {k.schluessel: k for k in s.exec(select(Kategorie)).all()}
+            gut = Bewegung(datum=date(2025, 6, 1), betrag=5.0, verwendungszweck="Erstattung", gegenkonto="Starbucks Coffee", partner="starbucks coffee")
+            kk, _, _ = analyse.klassifiziere(gut, kats, [regel], config.konfig())
+            assert kk.art == "einnahme"
+        # Zuordnung in den Einstellungen neu vergeben
+        with Session(engine()) as s:
+            restaurants = s.exec(select(Kategorie).where(Kategorie.schluessel == "restaurants")).first().id
+        r = c.post(f"/api/regel/{rid}", data={"kategorie_id": str(restaurants), "person": ""})
+        assert "Zuordnung geändert" in r.text
+        with Session(engine()) as s:
+            assert all(x.kategorie_id == restaurants for x in s.exec(select(Bewegung).where(Bewegung.gegenkonto == "Starbucks Coffee")).all())
+        # eigene Kategorie entfernen
+        r = c.post("/api/kategorie/vereinsbeitraege/loeschen")
+        assert "entfernt" in r.text and "vereinsbeitraege" not in {d["schluessel"] for d in config.konfig()["kategorien"]}
+        # Sortierköpfe in der Buchungsliste
+        t = c.get("/ui/buchungen?zeitraum=jahr:2025&q=starbucks").text
+        assert 'data-sort="partner"' in t and 'data-sort="kategorie"' in t and "auf alle anwenden" in t
