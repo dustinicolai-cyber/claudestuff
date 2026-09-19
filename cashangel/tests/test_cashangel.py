@@ -281,3 +281,46 @@ def test_dubletten_und_alles_loeschen():
         assert f"{vorher} Buchungen gelöscht" in r.text and "Abo-Markierungen entfernt" in r.text
         assert c.get("/api/status").json()["bewegungen"] == 0
         assert "Willkommen" in c.get("/ui/uebersicht").text
+
+
+def test_abos_bearbeiten_handeintraege_und_reiter():
+    with client() as c:
+        c.post("/api/import", files={"datei": ("konto.csv", jahres_csv().encode(), "text/csv")})
+        vorher = c.get("/api/uebersicht?zeitraum=jahr:2025").json()["abos"]
+        # erkanntes Abo umbenennen und Monatsbetrag anpassen
+        r = c.post("/api/abo/bearbeiten", data={"partner": "netflix international", "name": "Netflix Familie", "monatlich": "19,99", "kategorie_id": "", "status": "ok"})
+        assert "Netflix Familie" in r.text and 'value="19,99"' in r.text
+        # Abo von Hand
+        r = c.post("/api/abo/neu", data={"name": "Fitnessstudio", "betrag": "29,90", "intervall": "monatlich", "kategorie_id": ""})
+        assert "Fitnessstudio" in r.text and "von Hand eingetragen" in r.text
+        r = c.post("/api/abo/neu", data={"name": "Haftpflicht", "betrag": "120", "intervall": "jaehrlich", "kategorie_id": ""})
+        assert "Haftpflicht" in r.text
+        nachher = c.get("/api/uebersicht?zeitraum=jahr:2025").json()["abos"]
+        assert nachher["anzahl"] == vorher["anzahl"] + 2
+        assert abs(nachher["monatlich"] - (vorher["monatlich"] - 17.99 + 19.99 + 29.90 + 10.0)) < 0.02
+        with Session(engine()) as s:
+            from app.models import AboManuell
+            mid = s.exec(select(AboManuell).where(AboManuell.name == "Haftpflicht")).first().id
+        r = c.post("/api/abo/bearbeiten", data={"partner": f"manuell:{mid}", "name": "Haftpflicht", "betrag": "240", "intervall": "jaehrlich", "kategorie_id": "", "status": "ok"})
+        assert "20,00" in r.text
+        assert "Haftpflicht" not in c.post(f"/api/abo/manuell/{mid}/loeschen").text
+        # Einnahme von Hand: Nebenerwerb im März
+        with Session(engine()) as s:
+            neben = s.exec(select(Kategorie).where(Kategorie.schluessel == "nebenerwerb")).first().id
+        r = c.post("/api/bewegung/neu", data={"monat": "2025-03", "betrag": "350", "bezeichnung": "Fotoauftrag", "kategorie_id": str(neben), "zeitraum": "jahr:2025"})
+        assert "Fotoauftrag: 350,00 € für Mär 2025 eingetragen" in r.text
+        u = c.get("/api/uebersicht?zeitraum=jahr:2025").json()
+        assert any(q["name"] == "Nebenerwerb" and q["wert"] == 350 for q in u["einnahmequellen"])
+        assert "Solarenergie" in c.get("/ui/buchungen?zeitraum=jahr:2025").text
+        # Reiter Einnahmen | Ausgaben
+        t = c.get("/ui/buchungen?zeitraum=jahr:2025&seite=einnahme").text
+        assert t.count('class="bw ') == 25 and 'data-seite="einnahme">Einnahmen' in t
+        t = c.get("/ui/buchungen?zeitraum=jahr:2025&seite=ausgabe&q=starbucks").text
+        assert t.count('class="bw ') == 12
+        # Merkliste leeren bringt Gelöschtes zurück
+        with Session(engine()) as s:
+            bid = s.exec(select(Bewegung).where(Bewegung.gegenkonto == "Wolt")).first().id
+        c.post("/api/bewegungen/aktion", data={"aktion": "loeschen", "ids": [str(bid)], "zeitraum": "jahr:2025"})
+        assert "0 neue" in c.post("/api/import", files={"datei": ("konto.csv", jahres_csv().encode(), "text/csv")}).text
+        assert "Merkliste geleert" in c.post("/api/merkliste/leeren").text
+        assert "1 neue" in c.post("/api/import", files={"datei": ("konto.csv", jahres_csv().encode(), "text/csv")}).text

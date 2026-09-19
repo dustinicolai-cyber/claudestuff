@@ -97,6 +97,14 @@ a{color:var(--akzent)}
 .kat-neu{display:flex;gap:.45rem;flex-wrap:wrap;align-items:center;margin:.2rem 0 .6rem} .kat-neu input,.kat-neu select{padding:.4rem .6rem} .kat-neu input[name=name]{flex:1 1 14em} .kat-neu input.breit{flex:2 1 20em} .kat-neu input[type=color]{width:2.6rem;height:2.1rem;padding:.1rem;border-radius:8px}
 .zeile-fuss .alle-knopf{padding:.05rem .4rem;font-size:.95em;color:var(--akzent);opacity:0;transition:opacity .15s} tr.bw:hover .alle-knopf,tr.bw.gespeichert .alle-knopf,.alle-knopf:focus-visible{opacity:1}
 .regeln-tabelle select{padding:.3rem .5rem;font-size:.9em}
+.reiter-leiste{display:flex;gap:.3rem;margin:.2rem 0 .6rem;border-bottom:1px solid var(--line)}
+.reiter-leiste .reiter{background:transparent;color:var(--muted);border:0;border-bottom:2px solid transparent;border-radius:0;padding:.5rem .9rem;font-weight:600;box-shadow:none;margin-bottom:-1px}
+.reiter-leiste .reiter:hover{color:var(--fg);transform:none} .reiter-leiste .reiter.aktiv{color:var(--akzent);border-bottom-color:var(--akzent)}
+.reiter-leiste .reiter .z{font-size:.78em;font-weight:500;color:var(--muted);margin-left:.15rem}
+.abo-tabelle input.abo-feld{width:100%;min-width:9em;padding:.3rem .45rem;font:inherit;font-weight:600;background:transparent;border:1px solid transparent} .abo-tabelle input.abo-feld.num{text-align:right;min-width:6em;max-width:8em}
+.abo-tabelle input.abo-feld:hover{border-color:var(--line);background:var(--card2)} .abo-tabelle input.abo-feld:focus{background:var(--card2)}
+.abo-tabelle select{padding:.3rem .45rem;font-size:.9em;max-width:12em}
+.abo-neu,.hand-form{display:flex;gap:.5rem;flex-wrap:wrap;align-items:center;margin:.6rem 0 .8rem;padding:.7rem 1rem} .abo-neu input,.hand-form input,.abo-neu select,.hand-form select{padding:.4rem .6rem} .abo-neu input[name=name],.hand-form input[name=bezeichnung]{flex:1 1 12em}
 .dub-tabelle .dub-kopf td{background:var(--card2);font-weight:600;padding:.45rem .7rem;border-top:2px solid var(--line)} .dub-tabelle tr.behalten td{opacity:.75}
 .gefahr-zone{border-color:var(--minus)} .gefahr-zone h3{color:var(--minus)}
 button.gefahr-knopf{background:var(--minus);color:#fff} button.gefahr-knopf:hover{background:var(--minus)}

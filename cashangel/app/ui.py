@@ -99,10 +99,19 @@ def uebersicht_view(zeitraum: str, beschriftung: str) -> str:
 
 # ---------------------------------------------------------------- Abos
 
-def abos_view(abos: list[dict], status: dict[str, AboStatus], ausgaben_monat: float = 0.0, einnahmen_monat: float = 0.0) -> str:
+def abos_view(abos: list[dict], status: dict[str, AboStatus], ausgaben_monat: float = 0.0, einnahmen_monat: float = 0.0,
+              kats: dict[int, Kategorie] | None = None) -> str:
+    kats = kats or {}
     aktiv = [a for a in abos if a["aktiv"] and status.get(a["partner"], AboStatus()).status == "ok"]
     inaktiv = [a for a in abos if a not in aktiv]
     monat = sum(a["monatlich"] for a in aktiv)
+    ausgabe_kats = [k for k in sorted(kats.values(), key=lambda x: x.sortierung) if k.art == "ausgabe"]
+
+    def kat_opts(schluessel: str) -> str:
+        return "".join(f'<option value="{k.id}" {"selected" if k.schluessel == schluessel else ""}>{h(k.name)}</option>' for k in ausgabe_kats)
+
+    intervall_opts = lambda gewaehlt: "".join(f'<option value="{w}" {"selected" if w == gewaehlt else ""}>{t}</option>'
+                                             for w, t in (("monatlich", "monatlich"), ("quartal", "vierteljährlich"), ("halbjahr", "halbjährlich"), ("jaehrlich", "jährlich")))
     daten = {"abos": [{"partner": a["partner"], "name": a["name"], "monatlich": a["monatlich"], "kategorie": a["kategorie"], "intervall": a["intervall"]} for a in aktiv],
              "ausgaben_monat": round(ausgaben_monat, 2), "einnahmen_monat": round(einnahmen_monat, 2)}
     daten_json = json.dumps(daten, ensure_ascii=False).replace("</", "<\\/")
@@ -110,8 +119,8 @@ def abos_view(abos: list[dict], status: dict[str, AboStatus], ausgaben_monat: fl
                     f'<span class="chip-name">{h(a["name"])}</span><span class="chip-wert">{eur(a["monatlich"])}</span></button>' for a in aktiv)
     simulator = f"""
   <div class="karten zwei abo-analyse">
-    <div class="karte chart-karte"><div class="row zwischen"><h3 style="margin:0">Abos nach Empfänger</h3><span class="muted klein">pro Monat · laufende Verträge</span></div>
-      <div class="chart-wrap donut"><svg id="chart-abos" viewBox="0 0 480 300" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Abos nach Empfänger"></svg><div class="tooltip" id="tip-abos" hidden></div></div></div>
+    <div class="karte chart-karte"><div class="row zwischen"><h3 style="margin:0">Abos &amp; Verträge (nach Anbieter)</h3><span class="muted klein">pro Monat · laufende Verträge</span></div>
+      <div class="chart-wrap donut"><svg id="chart-abos" viewBox="0 0 480 300" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Abos und Verträge nach Anbieter"></svg><div class="tooltip" id="tip-abos" hidden></div></div></div>
     <div class="karte spar-sim"><h3 style="margin:0 0 .2rem">Was wäre, wenn …?</h3>
       <p class="muted klein" style="margin:0 0 .7rem">Abos antippen, die du kündigen würdest. Geplante Mehrausgaben (neues Abo, Leasing, Beitrag) trägst du darunter ein.</p>
       <div class="abo-chips" id="abo-chips">{chips}</div>
@@ -170,21 +179,40 @@ def abos_view(abos: list[dict], status: dict[str, AboStatus], ausgaben_monat: fl
 
     def zeile(a: dict) -> str:
         st = status.get(a["partner"])
-        st_txt = {"gekuendigt": '<span class="badge ok">gekündigt</span>', "kein_abo": '<span class="badge">kein Abo</span>'}.get(st.status if st else "", "")
+        st_status = st.status if st else ("ok" if a["aktiv"] else "gekuendigt")
+        manuell = a.get("manuell", False)
+        st_txt = {"gekuendigt": '<span class="badge ok">gekündigt</span>', "kein_abo": '<span class="badge">kein Abo</span>'}.get(st_status, "")
         if not st_txt and not a["aktiv"]:
             st_txt = '<span class="badge mid">ausgelaufen?</span>'
-        naechste = f'<span class="muted klein">nächste ca. {d(a["naechste"])}</span>' if a["aktiv"] else ""
-        return (f'<tr class="{"" if a["aktiv"] else "gedaempft"}"><td><b>{h(a["name"])}</b><div class="klein muted">seit {d(a["seit"])} · {a["anzahl"]}× · zuletzt {d(a["zuletzt"])} {naechste}</div></td>'
-                f'<td><span class="kat-punkt" style="background:{h(a["farbe"])}"></span>{h(a["kategorie"])}<div class="klein muted">{h(a["art"])}</div></td>'
-                f'<td>{h(a["intervall"])}{"" if a["stabil"] else " <span class=badge title=Betrag_schwankt>schwankt</span>"}</td>'
-                f'<td class="num">{eur(a["betrag"])}</td><td class="num fett">{eur(a["monatlich"])}</td><td class="num">{eur(a["jaehrlich"])}</td>'
-                f'<td>{st_txt}</td>'
-                f'<td class="aktionen-zelle"><form class="inline" hx-post="/api/abo/status" hx-target="#main"><input type="hidden" name="partner" value="{h(a["partner"])}">'
-                f'<select name="status" hx-post="/api/abo/status" hx-trigger="change" hx-target="#main" hx-include="closest form">'
-                f'<option value="ok" {"selected" if not st or st.status == "ok" else ""}>läuft</option><option value="gekuendigt" {"selected" if st and st.status == "gekuendigt" else ""}>gekündigt</option>'
-                f'<option value="kein_abo" {"selected" if st and st.status == "kein_abo" else ""}>kein Abo</option></select></form></td></tr>')
+        if manuell:
+            info = '<span class="muted klein">von Hand eingetragen</span>'
+        else:
+            naechste = f' · nächste ca. {d(a["naechste"])}' if a["aktiv"] else ""
+            info = f'<span class="muted klein">seit {d(a["seit"])} · {a["anzahl"]}× · zuletzt {d(a["zuletzt"])}{naechste}</span>'
+        if manuell:
+            betrag_txt = f"{a['betrag']:.2f}".replace(".", ",")
+            betrag_zelle = f'<td class="num"><input name="betrag" type="text" inputmode="decimal" value="{betrag_txt}" class="abo-feld num" aria-label="Betrag"></td>'
+            rhythmus = f'<select name="intervall" aria-label="Rhythmus">{intervall_opts(a.get("intervall_schluessel", "monatlich"))}</select>'
+            monat_zelle = f'<td class="num fett">{eur(a["monatlich"])}</td>'
+            status_sel = (f'<select name="status" aria-label="Status"><option value="ok" {"selected" if a["aktiv"] else ""}>läuft</option>'
+                          f'<option value="gekuendigt" {"selected" if not a["aktiv"] else ""}>gekündigt</option></select>')
+            loeschen = f'<button type="button" class="btn-ghost klein gefahr-text" hx-post="/api/abo/manuell/{a["manuell_id"]}/loeschen" hx-target="#main" hx-confirm="Abo „{h(a["name"])}“ entfernen?">{ICON["x"]}</button>'
+        else:
+            betrag_zelle = f'<td class="num">{eur(a["betrag"])}<div class="klein muted">{"" if a["stabil"] else "schwankt"}</div></td>'
+            rhythmus = h(a["intervall"])
+            monat_zelle = f'<td class="num"><input name="monatlich" type="text" inputmode="decimal" value="{format(a["monatlich"], ".2f").replace(".", ",")}" class="abo-feld num fett" aria-label="pro Monat" title="Monatsbetrag anpassen"></td>'
+            status_sel = (f'<select name="status" aria-label="Status"><option value="ok" {"selected" if st_status == "ok" else ""}>läuft</option>'
+                          f'<option value="gekuendigt" {"selected" if st_status == "gekuendigt" else ""}>gekündigt</option>'
+                          f'<option value="kein_abo" {"selected" if st_status == "kein_abo" else ""}>kein Abo</option></select>')
+            loeschen = ""
+        return (f'<tr class="abo-zeile {"" if a["aktiv"] else "gedaempft"}" hx-post="/api/abo/bearbeiten" hx-trigger="change" hx-include="closest tr" hx-target="#main" hx-disinherit="*">'
+                f'<input type="hidden" name="partner" value="{h(a["partner"])}">'
+                f'<td><input name="name" value="{h(a["name"])}" class="abo-feld" aria-label="Anbieter" title="Anbietername ändern"><div>{info}</div></td>'
+                f'<td><span class="kat-punkt" style="background:{h(a["farbe"])}"></span><select name="kategorie_id" aria-label="Kategorie">{kat_opts(a["kategorie_schluessel"])}</select><div class="klein muted">{h(a["art"])}</div></td>'
+                f'<td>{rhythmus}</td>{betrag_zelle}{monat_zelle}<td class="num">{eur(a["jaehrlich"])}</td>'
+                f'<td>{st_txt}</td><td class="aktionen-zelle">{status_sel} {loeschen}</td></tr>')
 
-    rows = "".join(zeile(a) for a in aktiv) or '<tr><td colspan=8 class="muted">Noch keine wiederkehrenden Zahlungen erkannt – dafür braucht es mindestens drei Monate Kontoauszüge.</td></tr>'
+    rows = "".join(zeile(a) for a in aktiv) or '<tr><td colspan=8 class="muted">Noch keine wiederkehrenden Zahlungen erkannt – dafür braucht es mindestens drei Monate Kontoauszüge. Bis dahin: oben von Hand eintragen.</td></tr>'
     rows_inaktiv = "".join(zeile(a) for a in inaktiv)
     return f"""
 <section class="abos">
@@ -197,10 +225,18 @@ def abos_view(abos: list[dict], status: dict[str, AboStatus], ausgaben_monat: fl
     <div class="kpi"><div class="l">Streaming &amp; Abos</div><div class="w">{eur(sum(a["monatlich"] for a in aktiv if a["kategorie_schluessel"] == "abos_streaming"))}</div><div class="klein muted">pro Monat</div></div>
   </div>
   {simulator}
-  <h3>Alle laufenden Abos &amp; Verträge</h3>
-  <div class="scroll"><table class="tabelle kompakt abo-tabelle"><thead><tr><th>Empfänger</th><th>Kategorie</th><th>Rhythmus</th><th class="num">Betrag</th><th class="num">pro Monat</th><th class="num">pro Jahr</th><th>Status</th><th></th></tr></thead>
+  <div class="row zwischen" style="margin-top:1.2rem"><h3 style="margin:0">Alle laufenden Abos &amp; Verträge</h3><span class="muted klein">Anbieter, Kategorie und Monatsbetrag direkt in der Zeile ändern – wird sofort gespeichert</span></div>
+  <form hx-post="/api/abo/neu" hx-target="#main" class="abo-neu karte">
+    <b>Abo oder Vertrag von Hand eintragen</b>
+    <input name="name" placeholder="Anbieter, z. B. Fitnessstudio" required>
+    <input name="betrag" type="text" inputmode="decimal" placeholder="Betrag" style="width:7em" required>
+    <select name="intervall" aria-label="Rhythmus">{intervall_opts("monatlich")}</select>
+    <select name="kategorie_id" aria-label="Kategorie">{kat_opts("abos_streaming")}</select>
+    <button class="btn-primary klein">Hinzufügen</button>
+  </form>
+  <div class="scroll"><table class="tabelle kompakt abo-tabelle"><thead><tr><th>Anbieter</th><th>Kategorie</th><th>Rhythmus</th><th class="num">Betrag</th><th class="num">pro Monat</th><th class="num">pro Jahr</th><th>Status</th><th></th></tr></thead>
     <tbody>{rows}</tbody></table></div>
-  {f'<h3>Ausgelaufen, gekündigt oder kein Abo ({len(inaktiv)})</h3><div class="scroll"><table class="tabelle kompakt abo-tabelle"><thead><tr><th>Empfänger</th><th>Kategorie</th><th>Rhythmus</th><th class="num">Betrag</th><th class="num">pro Monat</th><th class="num">pro Jahr</th><th>Status</th><th></th></tr></thead><tbody>{rows_inaktiv}</tbody></table></div>' if inaktiv else ''}
+  {f'<h3>Ausgelaufen, gekündigt oder kein Abo ({len(inaktiv)})</h3><div class="scroll"><table class="tabelle kompakt abo-tabelle"><thead><tr><th>Anbieter</th><th>Kategorie</th><th>Rhythmus</th><th class="num">Betrag</th><th class="num">pro Monat</th><th class="num">pro Jahr</th><th>Status</th><th></th></tr></thead><tbody>{rows_inaktiv}</tbody></table></div>' if inaktiv else ''}
 </section>"""
 
 
@@ -230,7 +266,10 @@ def buchung_zeile(b: Bewegung, kats: dict[int, Kategorie], personen: list[str], 
 
 
 def buchungen_view(zeilen: list[Bewegung], kats: dict[int, Kategorie], personen: list[str], zeitraum: str, kategorie: str, q: str, konto: str,
-                   konten: list[str], nur_offen: bool) -> str:
+                   konten: list[str], nur_offen: bool, seite: str = "", zaehler: dict | None = None) -> str:
+    zaehler = zaehler or {}
+    reiter = "".join(f'<button type="button" class="reiter {"aktiv" if seite == w else ""}" data-seite="{w}">{t} <span class="z">{zaehler.get(w, "")}</span></button>'
+                     for w, t in (("", "Alle"), ("einnahme", "Einnahmen"), ("ausgabe", "Ausgaben")))
     rows = "".join(buchung_zeile(b, kats, personen) for b in zeilen)
     kat_opts = "".join(f'<option value="{h(k.schluessel)}" {"selected" if k.schluessel == kategorie else ""}>{h(k.name)}</option>'
                        for k in sorted(kats.values(), key=lambda x: (x.art != "einnahme", x.sortierung)))
@@ -238,12 +277,17 @@ def buchungen_view(zeilen: list[Bewegung], kats: dict[int, Kategorie], personen:
     sammel_opts = (f'<optgroup label="Ausgaben">{"".join(f"<option value={k.id}>{h(k.name)}</option>" for k in sorted(kats.values(), key=lambda x: x.sortierung) if k.art == "ausgabe")}</optgroup>'
                    f'<optgroup label="Einnahmen">{"".join(f"<option value={k.id}>{h(k.name)}</option>" for k in sorted(kats.values(), key=lambda x: x.sortierung) if k.art == "einnahme")}</optgroup>'
                    f'<optgroup label="Umbuchung">{"".join(f"<option value={k.id}>{h(k.name)}</option>" for k in kats.values() if k.art == "umbuchung")}</optgroup>')
+    def hand_gruppe(titel: str, art: str, vorwahl: str) -> str:
+        opts = "".join(f'<option value="{k.id}" {"selected" if k.schluessel == vorwahl else ""}>{h(k.name)}</option>' for k in sorted(kats.values(), key=lambda x: x.sortierung) if k.art == art)
+        return f'<optgroup label="{titel}">{opts}</optgroup>'
+    hand_opts = hand_gruppe("Einnahmen", "einnahme", "nebenerwerb") + hand_gruppe("Ausgaben", "ausgabe", "")
     ein = sum(b.betrag for b in zeilen if b.betrag > 0 and not b.ignoriert)
     aus = sum(-b.betrag for b in zeilen if b.betrag < 0 and not b.ignoriert)
     return f"""
 <section class="buchungen" id="buchungen">
+  <div class="reiter-leiste" id="bw-reiter">{reiter}</div>
   <form class="filter row" hx-get="/ui/buchungen" hx-target="#main" hx-trigger="change, submit, input changed delay:350ms from:input[name=q]">
-    <input type="hidden" name="zeitraum" value="{h(zeitraum)}">
+    <input type="hidden" name="zeitraum" value="{h(zeitraum)}"><input type="hidden" name="seite" value="{h(seite)}">
     <input type="search" name="q" value="{h(q)}" placeholder="Suchen … (Empfänger, Zweck, Betrag)" class="suchfeld">
     <select name="kategorie"><option value="">alle Kategorien</option>{kat_opts}</select>
     {f'<select name="konto"><option value="">alle Konten</option>{konto_opts}</select>' if konten else ''}
@@ -252,7 +296,7 @@ def buchungen_view(zeilen: list[Bewegung], kats: dict[int, Kategorie], personen:
     <a class="btn-ghost klein" href="/api/export/buchungen.csv?zeitraum={h(zeitraum)}" download>CSV</a>
   </form>
   <form class="bw-aktion" hx-post="/api/bewegungen/aktion" hx-target="#main" hx-include="#buchungen .bw-wahl:checked" aria-hidden="true">
-    <input type="hidden" name="zeitraum" value="{h(zeitraum)}"><input type="hidden" name="kategorie" value="{h(kategorie)}"><input type="hidden" name="q" value="{h(q)}"><input type="hidden" name="konto" value="{h(konto)}"><input type="hidden" name="nur_offen" value="{"1" if nur_offen else ""}">
+    <input type="hidden" name="zeitraum" value="{h(zeitraum)}"><input type="hidden" name="kategorie" value="{h(kategorie)}"><input type="hidden" name="q" value="{h(q)}"><input type="hidden" name="konto" value="{h(konto)}"><input type="hidden" name="nur_offen" value="{"1" if nur_offen else ""}"><input type="hidden" name="seite" value="{h(seite)}">
     <label for="bw-kat">Kategorie für die Auswahl <span class="anzahl muted"></span></label>
     <select name="kategorie_id" id="bw-kat"><option value="">– wählen –</option>{sammel_opts}</select>
     <button type="submit" name="aktion" value="kategorie" class="btn-primary klein">Anwenden</button>
@@ -263,11 +307,22 @@ def buchungen_view(zeilen: list[Bewegung], kats: dict[int, Kategorie], personen:
   <div class="scroll"><table class="tabelle kompakt bw-tabelle"><colgroup><col class="c-wahl"><col class="c-datum"><col class="c-betrag"><col class="c-partner"><col class="c-kat"></colgroup>
     <thead><tr><th><input type="checkbox" class="bw-alle" aria-label="alle auswählen"></th><th class="sortierbar" data-sort="datum">Datum <span class="pfeil"></span></th><th class="num sortierbar" data-sort="betrag">Betrag <span class="pfeil"></span></th><th class="sortierbar" data-sort="partner">Empfänger / Zweck <span class="pfeil"></span></th><th class="sortierbar" data-sort="kategorie">Kategorie <span class="pfeil"></span></th></tr></thead>
     <tbody>{rows or '<tr><td colspan=5 class="muted">Keine Buchungen in dieser Auswahl.</td></tr>'}</tbody></table></div>
+  <form hx-post="/api/bewegung/neu" hx-target="#main" class="hand-form karte">
+    <b>Von Hand eintragen</b> <span class="muted klein">z. B. Nebenerwerb oder Bareinnahmen, die auf keinem Auszug stehen</span>
+    <input type="hidden" name="zeitraum" value="{h(zeitraum)}">
+    <input name="monat" type="month" required aria-label="Monat">
+    <input name="betrag" type="text" inputmode="decimal" placeholder="Betrag" style="width:7em" required>
+    <input name="bezeichnung" placeholder="Bezeichnung (optional)">
+    <select name="kategorie_id" aria-label="Kategorie">{hand_opts}</select>
+    <button class="btn-primary klein">Eintragen</button>
+  </form>
   <p class="muted klein">Kategorie in der Zeile ändern speichert sofort und lernt die Zuordnung für denselben Empfänger – getrennt nach Einnahmen und Ausgaben. „Auf alle anwenden“ überschreibt auch von Hand gesetzte Buchungen dieses Empfängers auf derselben Seite. Ausgeblendete Zeilen zählen in keiner Auswertung. Sparpläne gelten als gespart, nicht als Ausgabe.</p>
 </section>
 <script>
 (function(){{
   const box = document.getElementById('buchungen'), tbody = box.querySelector('tbody'), leiste = box.querySelector('.bw-aktion'), alle = box.querySelector('.bw-alle');
+  const filter = box.querySelector('form.filter');
+  box.querySelector('#bw-reiter').addEventListener('click', e => {{ const r = e.target.closest('.reiter'); if (!r) return; filter.querySelector('[name=seite]').value = r.dataset.seite; htmx.trigger(filter, 'submit'); }});
   const wahl = () => [...box.querySelectorAll('.bw-wahl')];
   function zaehlen(){{ const n = wahl().filter(b => b.checked).length; leiste.classList.toggle('aktiv', n > 0); leiste.setAttribute('aria-hidden', n ? 'false' : 'true');
     leiste.querySelector('.anzahl').textContent = n ? '(' + n + ')' : ''; if (alle) alle.checked = n > 0 && n === wahl().length;
@@ -473,7 +528,9 @@ def einstellungen_view(cfg: dict, kats: list[Kategorie], regeln: list[Regel], db
       <label class="check klein"><input type="checkbox" name="zuordnungen" value="1"> auch gelernte Zuordnungen und Abo-Markierungen</label>
       <label class="check klein"><input type="checkbox" name="merkliste" value="1"> auch die Merkliste gelöschter Buchungen (dann kommen sie beim nächsten Import wieder)</label>
       <button class="gefahr">Alle Buchungen löschen</button>
-    </form></div>
+    </form>
+    <div class="row" style="margin-top:.6rem"><span class="muted klein">Fehlt eine Buchung, die du früher gelöscht hast?</span>
+      <button class="btn-secondary klein" hx-post="/api/merkliste/leeren" hx-target="#main" hx-confirm="Merkliste gelöschter Buchungen leeren? Früher gelöschte Buchungen kommen dann beim nächsten Einlesen des Auszugs wieder.">Merkliste leeren</button></div></div>
   <div class="karte"><h3 style="margin-top:0">Dateien</h3>
     <p>Datenbank: <code>{h(db_pfad)}</code><br>Version <code>{h(version)}</code> · lokal, offline, keine Telemetrie.</p>
     <div class="row"><button class="gefahr" hx-post="/api/beenden" hx-target="#main" hx-confirm="Cash Angel beenden? Der Server wird gestoppt; alle Daten sind gespeichert.">Cash Angel beenden</button></div></div>

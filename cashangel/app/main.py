@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import signal
 import threading
 from datetime import date
@@ -15,7 +16,7 @@ from sqlmodel import Session, select
 from . import analyse, config, ui
 from .db import engine, init_db, kategorien_synchronisieren
 from .kontoauszug import lese_kontoauszug
-from .models import AboStatus, Bewegung, Geloescht, Kategorie, Regel
+from .models import AboManuell, AboStatus, Bewegung, Geloescht, Kategorie, Regel
 
 app = FastAPI(title="Cash Angel")
 init_db()
@@ -140,9 +141,7 @@ def api_uebersicht(zeitraum: Optional[str] = None, s: Session = Depends(get_sess
     kats = _kats(s)
     alle = _alle(s)
     bilanz = analyse.monatsbilanz(alle, kats, monate)
-    abos = analyse.abos_finden(alle, kats, _letztes_datum(s))
-    status = {a.partner: a.status for a in s.exec(select(AboStatus)).all()}
-    abos = [a for a in abos if status.get(a["partner"], "ok") == "ok"]
+    abos = _abos_laufend(s)
     ks = {k.schluessel: k for k in kats.values()}
     kategorien = [{"schluessel": sk, "name": ks[sk].name if sk in ks else sk, "farbe": ks[sk].farbe if sk in ks else "#64748b", "wert": v,
                    "fix": ks[sk].fix if sk in ks else False} for sk, v in bilanz["kategorien"].items()]
@@ -152,14 +151,107 @@ def api_uebersicht(zeitraum: Optional[str] = None, s: Session = Depends(get_sess
             "abos": {"anzahl": sum(1 for a in abos if a["aktiv"]), "monatlich": round(sum(a["monatlich"] for a in abos if a["aktiv"]), 2)}}
 
 
+INTERVALLE = {"monatlich": ("monatlich", 1.0), "quartal": ("vierteljährlich", 1 / 3), "halbjahr": ("halbjährlich", 1 / 6), "jaehrlich": ("jährlich", 1 / 12)}
+
+
+def _abos(s: Session) -> tuple[list[dict], dict[str, AboStatus]]:
+    """Erkannte Abos mit eigenen Änderungen (Name, Betrag, Kategorie) plus von Hand eingetragene."""
+    kats = _kats(s)
+    status = {a.partner: a for a in s.exec(select(AboStatus)).all()}
+    abos = analyse.abos_finden(_alle(s), kats, _letztes_datum(s))
+    for a in abos:
+        st = status.get(a["partner"])
+        if not st:
+            continue
+        if st.name.strip():
+            a["name"] = st.name.strip()
+        if st.monatlich is not None and st.monatlich >= 0:
+            a["monatlich"] = round(st.monatlich, 2)
+            a["jaehrlich"] = round(st.monatlich * 12, 2)
+            a["stabil"] = True
+        k = kats.get(st.kategorie_id or -1)
+        if k:
+            a["kategorie"], a["kategorie_schluessel"], a["farbe"] = k.name, k.schluessel, k.farbe
+            a["art"] = "Abo" if k.schluessel in ("abos_streaming", "mobilfunk") else ("Fixkosten" if k.fix else "Dauerauftrag")
+    for m in s.exec(select(AboManuell).order_by(AboManuell.name)).all():
+        k = kats.get(m.kategorie_id or -1)
+        txt, faktor = INTERVALLE.get(m.intervall, INTERVALLE["monatlich"])
+        abos.append({"partner": f"manuell:{m.id}", "manuell_id": m.id, "name": m.name, "kategorie": k.name if k else "–",
+                     "kategorie_schluessel": k.schluessel if k else "", "farbe": k.farbe if k else "#64748b", "intervall": txt, "intervall_schluessel": m.intervall,
+                     "betrag": round(m.betrag, 2), "monatlich": round(m.betrag * faktor, 2), "jaehrlich": round(m.betrag * faktor * 12, 2),
+                     "anzahl": 0, "seit": None, "zuletzt": None, "naechste": None, "aktiv": m.aktiv, "stabil": True, "letzter_betrag": round(m.betrag, 2),
+                     "art": "von Hand", "manuell": True})
+    abos.sort(key=lambda a: (-a["aktiv"], -a["monatlich"]))
+    return abos, status
+
+
+def _abos_laufend(s: Session) -> list[dict]:
+    abos, status = _abos(s)
+    return [a for a in abos if a["aktiv"] and (a["partner"] not in status or status[a["partner"]].status == "ok")]
+
+
 @app.get("/ui/abos", response_class=HTMLResponse)
 def ui_abos(zeitraum: Optional[str] = None, s: Session = Depends(get_session)) -> HTMLResponse:
     kats = _kats(s)
-    alle = _alle(s)
-    abos = analyse.abos_finden(alle, kats, _letztes_datum(s))
-    status = {a.partner: a for a in s.exec(select(AboStatus)).all()}
-    bilanz = analyse.monatsbilanz(alle, kats, _monate(s, _zeitraum(s, zeitraum)))
-    return _html(ui.abos_view(abos, status, bilanz["schnitt"].get("ausgaben", 0.0), bilanz["schnitt"].get("einnahmen", 0.0)))
+    abos, status = _abos(s)
+    bilanz = analyse.monatsbilanz(_alle(s), kats, _monate(s, _zeitraum(s, zeitraum)))
+    return _html(ui.abos_view(abos, status, bilanz["schnitt"].get("ausgaben", 0.0), bilanz["schnitt"].get("einnahmen", 0.0), kats))
+
+
+@app.post("/api/abo/bearbeiten", response_class=HTMLResponse)
+def api_abo_bearbeiten(partner: str = Form(...), name: str = Form(""), monatlich: str = Form(""), kategorie_id: str = Form(""), status: str = Form("ok"),
+                       betrag: str = Form(""), intervall: str = Form(""), s: Session = Depends(get_session)) -> HTMLResponse:
+    """Zeile in der Abo-Tabelle geändert: Anbietername, Monatsbetrag, Kategorie, Status – bei von Hand eingetragenen auch Betrag und Rhythmus."""
+    kats = _kats(s)
+    kid = int(kategorie_id) if kategorie_id.isdigit() and int(kategorie_id) in kats else None
+    if partner.startswith("manuell:"):
+        m = s.get(AboManuell, int(partner.split(":", 1)[1]))
+        if not m:
+            raise HTTPException(404)
+        m.name = name.strip() or m.name
+        m.betrag = abs(_zahl(betrag, m.betrag))
+        m.intervall = intervall if intervall in INTERVALLE else m.intervall
+        m.kategorie_id = kid or m.kategorie_id
+        m.aktiv = status != "gekuendigt"
+        s.add(m)
+    else:
+        a = s.exec(select(AboStatus).where(AboStatus.partner == partner)).first() or AboStatus(partner=partner)
+        a.status = status if status in ("ok", "gekuendigt", "kein_abo") else "ok"
+        a.name = name.strip()
+        a.monatlich = abs(_zahl(monatlich, -1.0)) if monatlich.strip() else None
+        if a.monatlich is not None and a.monatlich < 0:
+            a.monatlich = None
+        a.kategorie_id = kid
+        s.add(a)
+    s.commit()
+    return ui_abos(None, s)
+
+
+@app.post("/api/abo/neu", response_class=HTMLResponse)
+def api_abo_neu(name: str = Form(""), betrag: str = Form(""), intervall: str = Form("monatlich"), kategorie_id: str = Form(""), s: Session = Depends(get_session)) -> HTMLResponse:
+    kats = _kats(s)
+    if not name.strip() or _zahl(betrag, 0.0) <= 0:
+        return _html(ui.meldung_box("Bitte Anbieter und Betrag angeben.", "fehler-box") + ui_abos(None, s).body.decode("utf-8"))
+    kid = int(kategorie_id) if kategorie_id.isdigit() and int(kategorie_id) in kats else next((k.id for k in kats.values() if k.schluessel == "abos_streaming"), None)
+    s.add(AboManuell(name=name.strip(), betrag=abs(_zahl(betrag, 0.0)), intervall=intervall if intervall in INTERVALLE else "monatlich", kategorie_id=kid))
+    s.commit()
+    return ui_abos(None, s)
+
+
+@app.post("/api/abo/manuell/{mid}/loeschen", response_class=HTMLResponse)
+def api_abo_manuell_loeschen(mid: int, s: Session = Depends(get_session)) -> HTMLResponse:
+    m = s.get(AboManuell, mid)
+    if m:
+        s.delete(m)
+        s.commit()
+    return ui_abos(None, s)
+
+
+def _zahl(text: str, standard: float) -> float:
+    try:
+        return float(str(text).replace(".", "").replace(",", ".")) if "," in str(text) else float(text)
+    except (TypeError, ValueError):
+        return standard
 
 
 @app.post("/api/abo/status", response_class=HTMLResponse)
@@ -172,7 +264,7 @@ def api_abo_status(partner: str = Form(...), status: str = Form("ok"), s: Sessio
 
 
 @app.get("/ui/buchungen", response_class=HTMLResponse)
-def ui_buchungen(zeitraum: Optional[str] = None, kategorie: str = "", q: str = "", konto: str = "", nur_offen: str = "",
+def ui_buchungen(zeitraum: Optional[str] = None, kategorie: str = "", q: str = "", konto: str = "", nur_offen: str = "", seite: str = "",
                  s: Session = Depends(get_session)) -> HTMLResponse:
     z = _zeitraum(s, zeitraum)
     monate = set(_monate(s, z))
@@ -192,8 +284,13 @@ def ui_buchungen(zeitraum: Optional[str] = None, kategorie: str = "", q: str = "
         if ql and ql not in f"{b.gegenkonto} {b.verwendungszweck} {b.betrag:.2f} {b.konto}".lower().replace(".", ","):
             continue
         zeilen.append(b)
+    zaehler = {"": len(zeilen), "einnahme": sum(1 for b in zeilen if b.betrag > 0), "ausgabe": sum(1 for b in zeilen if b.betrag < 0)}
+    if seite == "einnahme":
+        zeilen = [b for b in zeilen if b.betrag > 0]
+    elif seite == "ausgabe":
+        zeilen = [b for b in zeilen if b.betrag < 0]
     konten = sorted({b.konto for b in s.exec(select(Bewegung)).all() if b.konto})
-    return _html(ui.buchungen_view(zeilen, kats, config.konfig().get("personen", []), z, kategorie, q, konto, konten, bool(nur_offen)))
+    return _html(ui.buchungen_view(zeilen, kats, config.konfig().get("personen", []), z, kategorie, q, konto, konten, bool(nur_offen), seite, zaehler))
 
 
 @app.post("/api/bewegung/{bid}/kategorie", response_class=HTMLResponse)
@@ -248,7 +345,7 @@ def _regel_anwenden(s: Session, b: Bewegung, auch_manuelle: bool) -> int:
 
 @app.post("/api/bewegung/{bid}/kategorie/alle", response_class=HTMLResponse)
 def api_bewegung_kategorie_alle(bid: int, kategorie_id: str = Form(""), person: str = Form(""), zeitraum: Optional[str] = Form(None), kategorie: str = Form(""),
-                                q: str = Form(""), konto: str = Form(""), nur_offen: str = Form(""), s: Session = Depends(get_session)) -> HTMLResponse:
+                                q: str = Form(""), konto: str = Form(""), nur_offen: str = Form(""), seite: str = Form(""), s: Session = Depends(get_session)) -> HTMLResponse:
     """„Auf alle anwenden“: Kategorie dieser Zeile allen Buchungen desselben Empfängers auf derselben Seite (Einnahme oder Ausgabe) geben,
     auch von Hand gesetzten. Liefert die Liste mit den aktuellen Filtern zurück."""
     b = s.get(Bewegung, bid)
@@ -264,9 +361,41 @@ def api_bewegung_kategorie_alle(bid: int, kategorie_id: str = Form(""), person: 
     n, gesamt = _regel_anwenden(s, b, auch_manuelle=True) if b.partner and b.kategorie_id else (0, 1)
     k = kats.get(b.kategorie_id or -1)
     seite = "Einnahmen" if b.betrag > 0 else "Ausgaben"
-    antwort = ui_buchungen(zeitraum, kategorie, q, konto, nur_offen, s)
+    antwort = ui_buchungen(zeitraum, kategorie, q, konto, nur_offen, seite, s)
     text = f"„{k.name if k else '?'}“ gilt jetzt für alle {gesamt} {seite} von {b.gegenkonto or b.partner}" + (f", {n} davon geändert." if n else " – die hatten sie schon alle.")
     return _html(ui.meldung_box(text) + antwort.body.decode("utf-8"))
+
+
+@app.post("/api/bewegung/neu", response_class=HTMLResponse)
+def api_bewegung_neu(monat: str = Form(""), betrag: str = Form(""), bezeichnung: str = Form(""), kategorie_id: str = Form(""), zeitraum: Optional[str] = Form(None),
+                     s: Session = Depends(get_session)) -> HTMLResponse:
+    """Buchung von Hand (z. B. Nebenerwerb in bar): Monat + Betrag + Bezeichnung + Kategorie. Vorzeichen folgt der Kategorie."""
+    import uuid
+    kats = _kats(s)
+    k = kats.get(int(kategorie_id)) if kategorie_id.isdigit() else None
+    wert = _zahl(betrag, 0.0)
+    m = re.fullmatch(r"(\d{4})-(\d{2})", monat.strip())
+    if not k or wert == 0 or not m:
+        return _html(ui.meldung_box("Bitte Monat, Betrag und Kategorie angeben.", "fehler-box") + ui_buchungen(zeitraum, "", "", "", "", "", s).body.decode("utf-8"))
+    wert = -abs(wert) if k.art == "ausgabe" else abs(wert)
+    name = bezeichnung.strip() or k.name
+    b = Bewegung(datum=date(int(m.group(1)), int(m.group(2)), 1), betrag=round(wert, 2), verwendungszweck=f"von Hand eingetragen · {analyse.monat_name(monat.strip())}",
+                 gegenkonto=name, konto="von Hand", quelle_datei="von Hand", fingerprint=f"manuell:{uuid.uuid4()}", partner=analyse.partner_schluessel(name),
+                 kategorie_id=k.id, weg="manuell")
+    s.add(b)
+    s.commit()
+    antwort = ui_buchungen(zeitraum, "", "", "", "", "", s)
+    return _html(ui.meldung_box(f"{name}: {ui.eur(b.betrag)} für {analyse.monat_name(monat.strip())} eingetragen.") + antwort.body.decode("utf-8"))
+
+
+@app.post("/api/merkliste/leeren", response_class=HTMLResponse)
+def api_merkliste_leeren(s: Session = Depends(get_session)) -> HTMLResponse:
+    n = 0
+    for g in s.exec(select(Geloescht)).all():
+        s.delete(g)
+        n += 1
+    s.commit()
+    return _einstellungen(s, f"Merkliste geleert ({n} Einträge). Früher gelöschte Buchungen kommen beim nächsten Einlesen des Auszugs wieder.")
 
 
 @app.post("/api/bewegungen/aktion", response_class=HTMLResponse)
@@ -295,7 +424,7 @@ async def api_bewegungen_aktion(request: Request, s: Session = Depends(get_sessi
     s.commit()
     text = {"kategorie": f"{n} Buchungen umkategorisiert.", "ignorieren": f"{n} ausgeblendet (zählen nicht mehr).", "freigeben": f"{n} wieder eingeblendet.",
             "loeschen": f"{n} gelöscht – ein erneuter Import bringt sie nicht zurück."}.get(aktion, "Nichts geändert.")
-    antwort = ui_buchungen(str(form.get("zeitraum", "")) or None, str(form.get("kategorie", "")), str(form.get("q", "")), str(form.get("konto", "")), str(form.get("nur_offen", "")), s)
+    antwort = ui_buchungen(str(form.get("zeitraum", "")) or None, str(form.get("kategorie", "")), str(form.get("q", "")), str(form.get("konto", "")), str(form.get("nur_offen", "")), str(form.get("seite", "")), s)
     return _html(ui.meldung_box(text) + antwort.body.decode())
 
 
@@ -406,9 +535,7 @@ def ui_muster(zeitraum: Optional[str] = None, s: Session = Depends(get_session))
         return _html(ui.leer_view())
     kats = _kats(s)
     alle = _alle(s)
-    abos = analyse.abos_finden(alle, kats, _letztes_datum(s))
-    status = {a.partner: a.status for a in s.exec(select(AboStatus)).all()}
-    abos = [a for a in abos if status.get(a["partner"], "ok") == "ok"]
+    abos = _abos_laufend(s)
     ins = analyse.insights(alle, kats, _monate(s, z), abos, config.konfig())
     return _html(ui.muster_view(ins, z, analyse.zeitraum_beschriftung(z)))
 

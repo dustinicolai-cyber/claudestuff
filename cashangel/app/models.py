@@ -55,7 +55,21 @@ class AboStatus(SQLModel, table=True):
     partner: str = Field(index=True, unique=True)
     status: str = "ok"                 # ok | gekuendigt | kein_abo
     notiz: str = ""
+    name: str = ""                     # eigener Anbietername (überschreibt den erkannten)
+    monatlich: Optional[float] = None  # eigener Monatsbetrag (überschreibt den erkannten)
+    kategorie_id: Optional[int] = None # eigene Kategorie (überschreibt die erkannte)
     geaendert_am: datetime = Field(default_factory=datetime.now)
+
+
+class AboManuell(SQLModel, table=True):
+    """Von Hand eingetragenes Abo oder Vertrag – z. B. wenn noch zu wenige Auszüge für die Erkennung da sind."""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    name: str
+    betrag: float = 0.0
+    intervall: str = "monatlich"       # monatlich | quartal | halbjahr | jaehrlich
+    kategorie_id: Optional[int] = None
+    aktiv: bool = True
+    erstellt_am: datetime = Field(default_factory=datetime.now)
 
 
 class Geloescht(SQLModel, table=True):
