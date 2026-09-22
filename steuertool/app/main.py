@@ -92,7 +92,7 @@ def _f(v: Optional[str]) -> float:
 
 def _meta_aus_form(form) -> dict:
     m = {}
-    for k in ("anlass", "teilnehmer", "km", "tage", "empfaenger", "privatanteil_prozent", "nutzungsdauer_jahre"):
+    for k in ("anlass", "teilnehmer", "km", "tage", "tage_voll", "tage_teil", "empfaenger", "privatanteil_prozent", "nutzungsdauer_jahre"):
         v = form.get(f"meta_{k}")
         if v not in (None, ""):
             m[k] = v
@@ -1070,7 +1070,8 @@ def ui_jahresabschluss(jahr: Optional[int] = None, s: Session = Depends(get_sess
             sk = kats[b.kategorie_id].schluessel
             summen[sk] = summen.get(sk, 0.0) + b.betrag_brutto
     ksk = steuerlogik.ksk_uebersicht(_aktive(s), kats, s.exec(select(Anlagegut)).all(), jahr, cfg)
-    return _html(ui.jahresabschluss_view(jahr, cfg["jahresabschluss_fragen"], status, list(kats.values()), summen, cfg, ksk))
+    pauschalen = steuerlogik.pauschalen_stand(_aktive(s), kats, jahr, cfg)
+    return _html(ui.jahresabschluss_view(jahr, cfg["jahresabschluss_fragen"], status, list(kats.values()), summen, cfg, ksk, pauschalen))
 
 
 @app.post("/api/fragebogen/{jahr}/{key}/toggle", response_class=HTMLResponse)
@@ -1091,9 +1092,15 @@ def ui_export(jahr: Optional[int] = None, s: Session = Depends(get_session)) -> 
     jahr = jahr or _standardjahr(s)
     cfg = config.regeln()
     buchungen = _aktive(s)
-    eur = steuerlogik.eur_zeilen(buchungen, _kats(s), s.exec(select(Anlagegut)).all(), jahr, cfg)
+    kats = _kats(s)
+    anlagen = s.exec(select(Anlagegut)).all()
+    eur = steuerlogik.eur_zeilen(buchungen, kats, anlagen, jahr, cfg)
     ustva = [steuerlogik.ustva(buchungen, jahr, q, cfg) for q in (1, 2, 3, 4)]
-    return _html(ui.export_view(jahr, eur, ustva, _jahre(s)))
+    posten = steuerlogik.eur_posten(buchungen, kats, anlagen, jahr, cfg)
+    ust = steuerlogik.ust_abgleich(buchungen, kats, jahr, cfg)
+    punkte = steuerlogik.vollstaendigkeit(buchungen, kats, s.exec(select(Kontobewegung)).all(), anlagen, jahr, cfg, ust)
+    pauschalen = steuerlogik.pauschalen_stand(buchungen, kats, jahr, cfg)
+    return _html(ui.export_view(jahr, eur, ustva, _jahre(s), posten, punkte, pauschalen))
 
 
 def _download(inhalt: bytes | str, name: str, typ: str) -> Response:

@@ -72,6 +72,12 @@ def _zusammenfuehren(standard, nutzer):
         for k, v in nutzer.items():
             out[k] = _zusammenfuehren(standard.get(k), v) if k in standard else v
         return out
+    if isinstance(standard, list) and isinstance(nutzer, list) and standard and isinstance(standard[0], dict) and "key" in standard[0]:
+        # Listen mit „key“ (z. B. die Fragen des Jahresabschlusses): eigene Texte bleiben, neue Fragen kommen dazu
+        nutzer_map = {d.get("key"): d for d in nutzer if isinstance(d, dict)}
+        out = [{**d, **nutzer_map[d["key"]]} if d.get("key") in nutzer_map else d for d in standard]
+        std_keys = {d.get("key") for d in standard}
+        return out + [d for d in nutzer if isinstance(d, dict) and d.get("key") not in std_keys]
     if isinstance(standard, list) and isinstance(nutzer, list) and standard and isinstance(standard[0], dict) and "schluessel" in standard[0]:
         # Kategorien: je Schlüssel zusammenführen (Nutzerwerte gewinnen, fehlende Felder wie „beispiele“ kommen aus dem Standard),
         # Nutzer-eigene Kategorien bleiben, neue Standard-Kategorien werden ergänzt – Reihenfolge des Standards

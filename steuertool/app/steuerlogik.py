@@ -24,6 +24,9 @@ RC_HINWEISE = re.compile(
 )
 
 
+MONATSNAMEN = ("Januar", "Februar", "März", "April", "Mai", "Juni", "Juli", "August", "September", "Oktober", "November", "Dezember")
+
+
 def runde(x: float) -> float:
     return round(x + 0.0, 2)
 
@@ -305,6 +308,20 @@ def bewerte(b: Buchung, k: Kategorie | None, cfg: dict,
         else:
             bw.warnungen.append("Keine Kilometer erfasst – Fahrtkosten werden mit 0,30 €/km berechnet, nicht aus dem Belegbetrag.")
 
+    elif sonderfall == "verpflegung":
+        voll = int(m.get("tage_voll") or 0)
+        teil = int(m.get("tage_teil") or 0)
+        bw.abzugsfaehig = runde(voll * cfg["verpflegung_voll"] + teil * cfg["verpflegung_teil"])
+        if voll or teil:
+            teile = []
+            if voll:
+                teile.append(f"{voll} volle Tage × {cfg['verpflegung_voll']:.2f} €")
+            if teil:
+                teile.append(f"{teil} Tage über 8 Stunden oder An-/Abreise × {cfg['verpflegung_teil']:.2f} €")
+            bw.hinweise.append(" + ".join(teile) + f" = {bw.abzugsfaehig:.2f} €. Der Belegbetrag zählt nicht, nur die Pauschale.")
+        else:
+            bw.warnungen.append("Keine Reisetage erfasst – Verpflegungsmehraufwand wird aus Tagen berechnet, nicht aus dem Belegbetrag.")
+
     elif sonderfall == "homeoffice":
         tage = int(m.get("tage") or 0)
         bisher = int(ctx.get("homeoffice_tage_bisher", 0))
@@ -521,6 +538,178 @@ def eur_zeilen(buchungen: list[Buchung], kategorien: dict[int, Kategorie],
     out.append({"zeile": None, "bezeichnung": "Summe Betriebsausgaben", "betrag": runde(ue["ausgaben"][4].abzugsfaehig + s13b)})
     out.append({"zeile": None, "bezeichnung": "Gewinn / Verlust", "betrag": runde(ue["einnahmen"][4].abzugsfaehig - ue["ausgaben"][4].abzugsfaehig - s13b)})
     return out
+
+
+def eur_posten(buchungen: list[Buchung], kategorien: dict[int, Kategorie], anlagegueter: list[Anlagegut],
+               jahr: int, cfg: dict) -> dict[int, list[dict]]:
+    """Je EÜR-Zeile die einzelnen Posten dahinter – damit vor dem Eintragen jede Zahl nachvollziehbar ist.
+    Dieselbe Reihenfolge und dieselben Beträge wie quartalsuebersicht(), damit die Summen exakt zusammenpassen."""
+    out: dict[int, list[dict]] = {}
+    jahres = [b for b in buchungen if b.datum.year == jahr and b.status == "bestaetigt"]
+    homeoffice_tage = 0
+    geschenke: dict[str, float] = {}
+    for b in sorted(jahres, key=lambda x: (x.datum, x.id or 0)):
+        k = kategorien.get(b.kategorie_id or -1)
+        if k is None:
+            continue
+        bw = bewerte(b, k, cfg, {"homeoffice_tage_bisher": homeoffice_tage, "geschenke_je_empfaenger": dict(geschenke)})
+        m = meta(b)
+        if k.sonderfall == "homeoffice":
+            homeoffice_tage += int(m.get("tage") or 0)
+        if k.sonderfall == "geschenk":
+            e = str(m.get("empfaenger", "")).strip()
+            geschenke[e] = geschenke.get(e, 0.0) + b.betrag_brutto
+        if k.eur_zeile is None or abs(bw.abzugsfaehig) < 0.005:
+            continue
+        out.setdefault(k.eur_zeile, []).append(
+            {"datum": b.datum, "text": b.lieferant or b.beschreibung[:40] or "–", "zusatz": k.name,
+             "betrag": runde(bw.abzugsfaehig), "roh": runde(b.betrag_brutto), "buchung_id": b.id})
+    afa_kat = next((k for k in kategorien.values() if k.schluessel == "afa"), None)
+    if afa_kat and afa_kat.eur_zeile is not None:
+        for a in anlagegueter:
+            betrag = afa_fuer_jahr(a, jahr)
+            if betrag:
+                out.setdefault(afa_kat.eur_zeile, []).append(
+                    {"datum": a.anschaffung, "text": a.bezeichnung, "zusatz": f"AfA über {a.nutzungsdauer_jahre} Jahre",
+                     "betrag": runde(betrag), "roh": runde(a.anschaffungskosten), "buchung_id": a.buchung_id})
+    if ust_basis(cfg) == "rechnung":
+        for b in jahres:
+            steuer = ust_13b(b, cfg)
+            if steuer:
+                out.setdefault(48, []).append({"datum": b.datum, "text": b.lieferant or "–", "zusatz": "§13b-Steuer aus Rechnung",
+                                               "betrag": runde(steuer), "roh": runde(b.betrag_netto), "buchung_id": b.id})
+    for liste in out.values():
+        liste.sort(key=lambda x: x["datum"])
+    return out
+
+
+def pauschalen_stand(buchungen: list[Buchung], kategorien: dict[int, Kategorie], jahr: int, cfg: dict) -> list[dict]:
+    """Womit gerechnet wird und was noch geht: Homeoffice-Tage, Kilometer, Reisetage, Geschenke, Bewirtung."""
+    jahres = [b for b in buchungen if b.datum.year == jahr and b.status == "bestaetigt"]
+    tage = km = voll = teil = bewirtung_roh = bewirtung_ab = 0.0
+    geschenke: dict[str, float] = {}
+    for b in jahres:
+        k = kategorien.get(b.kategorie_id or -1)
+        if k is None:
+            continue
+        m = meta(b)
+        if k.sonderfall == "homeoffice":
+            tage += int(m.get("tage") or 0)
+        elif k.sonderfall == "fahrtkosten":
+            km += float(m.get("km") or 0)
+        elif k.sonderfall == "verpflegung":
+            voll += int(m.get("tage_voll") or 0)
+            teil += int(m.get("tage_teil") or 0)
+        elif k.sonderfall == "bewirtung":
+            bewirtung_roh += b.betrag_brutto
+            bewirtung_ab += bewerte(b, k, cfg).abzugsfaehig
+        elif k.sonderfall == "geschenk":
+            e = str(m.get("empfaenger", "")).strip() or "ohne Empfänger"
+            geschenke[e] = geschenke.get(e, 0.0) + b.betrag_brutto
+    ho_pausch, ho_max = cfg["homeoffice_tagespauschale"], cfg["homeoffice_max_jahr"]
+    ho_wert = min(tage * ho_pausch, ho_max)
+    grenze = cfg["geschenk_grenze_je_empfaenger"]
+    ueber = [f"{e} ({_geld(v)})" for e, v in sorted(geschenke.items(), key=lambda kv: -kv[1]) if v > grenze]
+    out = [
+        {"titel": "Homeoffice-Tagespauschale", "wert": runde(ho_wert),
+         "detail": f"{int(tage)} Tage × {ho_pausch:.2f} €" + (f" · Deckel {ho_max:.0f} € erreicht" if tage * ho_pausch >= ho_max else f" · noch {max(0, int((ho_max - ho_wert) // ho_pausch))} Tage bis {ho_max:.0f} €"),
+         "warnung": tage * ho_pausch > ho_max},
+        {"titel": "Fahrtkosten (privates Kfz)", "wert": runde(km * cfg["km_pauschale"]),
+         "detail": f"{km:g} km × {cfg['km_pauschale']:.2f} €", "warnung": False},
+        {"titel": "Verpflegungsmehraufwand", "wert": runde(voll * cfg["verpflegung_voll"] + teil * cfg["verpflegung_teil"]),
+         "detail": f"{int(voll)} volle Tage × {cfg['verpflegung_voll']:.0f} € · {int(teil)} Tage über 8 Stunden × {cfg['verpflegung_teil']:.0f} €", "warnung": False},
+        {"titel": "Bewirtung", "wert": runde(bewirtung_ab),
+         "detail": f"{cfg['bewirtung_abzug_prozent']:.0f} % von {_geld(bewirtung_roh)} Rechnungsbetrag", "warnung": False},
+        {"titel": "Geschenke", "wert": runde(sum(geschenke.values())),
+         "detail": (f"über der Grenze von {grenze:.0f} €: " + ", ".join(ueber)) if ueber else f"{len(geschenke)} Empfänger, alle unter {grenze:.0f} €",
+         "warnung": bool(ueber)},
+    ]
+    return out
+
+
+def _geld(x: float) -> str:
+    return f"{x:,.2f}".replace(",", "~").replace(".", ",").replace("~", ".") + " €"
+
+
+def _mehrzahl(n: int, eins: str, viele: str) -> str:
+    return f"{n} {eins if n == 1 else viele}"
+
+
+def vollstaendigkeit(buchungen: list[Buchung], kategorien: dict[int, Kategorie], kontobewegungen: list,
+                     anlagegueter: list[Anlagegut], jahr: int, cfg: dict, ust: dict | None = None) -> list[dict]:
+    """Checkliste vor dem Eintragen in Elster. Je Punkt: Stufe, Text und wohin es zum Erledigen geht."""
+    punkte: list[dict] = []
+
+    def punkt(stufe: str, titel: str, text: str, ziel: str = "", anzahl: int = 0) -> None:
+        punkte.append({"stufe": stufe, "titel": titel, "text": text, "ziel": ziel, "anzahl": anzahl})
+
+    im_jahr = [b for b in buchungen if b.datum.year == jahr and not b.storniert]
+    bestaetigt = [b for b in im_jahr if b.status == "bestaetigt"]
+    offen = [b for b in im_jahr if b.status != "bestaetigt"]
+    if offen:
+        punkt("fehler", _mehrzahl(len(offen), "Beleg noch nicht geprüft", "Belege noch nicht geprüft"),
+              "Zählt in keiner Zahl mit, solange nicht bestätigt." if len(offen) == 1 else "Sie zählen in keiner Zahl mit, solange sie nicht bestätigt sind.", "pruefen", len(offen))
+    konto_offen = [k for k in kontobewegungen if k.datum.year == jahr and not k.ignoriert and k.buchung_id is None]
+    if konto_offen:
+        summe = sum(abs(k.betrag) for k in konto_offen)
+        punkt("fehler", _mehrzahl(len(konto_offen), "Kontobewegung ohne Buchung", "Kontobewegungen ohne Buchung"),
+              f"Zusammen {_geld(summe)}. Beleg zuordnen, ohne Beleg buchen oder als privat ignorieren.", "abgleich", len(konto_offen))
+    ohne_beleg = [b for b in bestaetigt if b.beleg_id is None and not b.privat_verauslagt and b.betrag_brutto >= 25]
+    if ohne_beleg:
+        punkt("warnung", _mehrzahl(len(ohne_beleg), "Buchung ohne Beleg", "Buchungen ohne Beleg"),
+              "Ab 25 € erwartet das Finanzamt einen Nachweis. Beleg nachreichen oder als privat verauslagt markieren.", "suche", len(ohne_beleg))
+    monate = {b.datum.month for b in bestaetigt}
+    fehlend = [m for m in range(1, 13) if m not in monate] if bestaetigt else []
+    if fehlend and len(fehlend) <= 11:
+        namen = ", ".join(MONATSNAMEN[m - 1] for m in fehlend)
+        punkt("warnung", _mehrzahl(len(fehlend), "Monat ohne Buchung", "Monate ohne Buchung"),
+              f"Keine bestätigten Buchungen in: {namen}. Fehlt ein Kontoauszug?", "import", len(fehlend))
+
+    fehlende_felder: list[str] = []
+    for b in bestaetigt:
+        k = kategorien.get(b.kategorie_id or -1)
+        if k is None:
+            continue
+        m = meta(b)
+        if k.sonderfall == "bewirtung" and not (str(m.get("anlass", "")).strip() and str(m.get("teilnehmer", "")).strip()):
+            fehlende_felder.append(f"{b.datum:%d.%m.}: Bewirtung ohne Anlass oder Teilnehmer ({b.lieferant})")
+        if k.sonderfall == "fahrtkosten" and not float(m.get("km") or 0):
+            fehlende_felder.append(f"{b.datum:%d.%m.}: Fahrtkosten ohne Kilometer ({b.lieferant})")
+        if k.sonderfall == "homeoffice" and not int(m.get("tage") or 0):
+            fehlende_felder.append(f"{b.datum:%d.%m.}: Homeoffice ohne Tage")
+        if k.sonderfall == "verpflegung" and not (int(m.get("tage_voll") or 0) + int(m.get("tage_teil") or 0)):
+            fehlende_felder.append(f"{b.datum:%d.%m.}: Verpflegungsmehraufwand ohne Reisetage")
+    if fehlende_felder:
+        punkt("fehler", _mehrzahl(len(fehlende_felder), "Buchung mit fehlenden Pflichtangaben", "Buchungen mit fehlenden Pflichtangaben"),
+              "; ".join(fehlende_felder[:6]) + (" …" if len(fehlende_felder) > 6 else "") + ". Ohne diese Angaben ist der Abzug angreifbar.", "pruefen", len(fehlende_felder))
+
+    ohne_kategorie = [b for b in bestaetigt if b.kategorie_id is None]
+    if ohne_kategorie:
+        punkt("fehler", _mehrzahl(len(ohne_kategorie), "Buchung ohne Kategorie", "Buchungen ohne Kategorie"),
+              "Landet in keiner EÜR-Zeile." if len(ohne_kategorie) == 1 else "Sie landen in keiner EÜR-Zeile.", "pruefen", len(ohne_kategorie))
+
+    if ust and abs(ust.get("offen", 0.0)) > 1:
+        rest = ust["offen"]
+        punkt("warnung", "Umsatzsteuer stimmt nicht überein",
+              (f"Aus Rechnungen entstanden {_geld(ust['entstanden'])}, gezahlt {_geld(ust['gezahlt'])}. Differenz {_geld(rest)} – fehlt eine Zahlung ans Finanzamt?"
+               if rest > 0 else f"Es wurde {_geld(-rest)} mehr gezahlt als entstanden – Nachzahlung fürs Vorjahr oder ein §13b-Haken fehlt."), "quartale")
+
+    afa_kat = next((k for k in kategorien.values() if k.schluessel == "afa"), None)
+    direkt_afa = [b for b in bestaetigt if afa_kat and b.kategorie_id == afa_kat.id]
+    if direkt_afa and anlagegueter:
+        punkt("warnung", "Abschreibung könnte doppelt zählen",
+              f"{_mehrzahl(len(direkt_afa), 'Buchung steht', 'Buchungen stehen')} direkt in der Kategorie „Abschreibungen (AfA)“. "
+              "Die AfA-Zeile wird aus den Anlagegütern gerechnet – Anschaffungen gehören in „Geringwertige Wirtschaftsgüter“, "
+              "darüber legt der Steuerfuchs das Anlagegut selbst an.", "pruefen", len(direkt_afa))
+
+    ohne_afa = [a for a in anlagegueter if a.aktiv and afa_fuer_jahr(a, jahr) == 0 and a.anschaffung.year <= jahr]
+    if ohne_afa:
+        punkt("warnung", _mehrzahl(len(ohne_afa), f"Anlagegut ohne AfA in {jahr}", f"Anlagegüter ohne AfA in {jahr}"),
+              "Nutzungsdauer abgelaufen oder Anschaffung in einem anderen Jahr – kurz prüfen.", "quartale", len(ohne_afa))
+
+    if not punkte:
+        punkt("ok", "Alles vollständig", f"Für {jahr} sind alle Belege geprüft, alle Kontobewegungen zugeordnet und alle Pflichtangaben da.")
+    return punkte
 
 
 def ustva(buchungen: list[Buchung], jahr: int, q: int, cfg: dict) -> dict:

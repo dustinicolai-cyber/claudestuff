@@ -18,6 +18,7 @@ ICON = {
     "x": '<svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg>',
     "plus": '<svg viewBox="0 0 24 24"><path d="M12 5v14m-7-7h14"/></svg>',
     "minus": '<svg viewBox="0 0 24 24"><path d="M5 12h14"/></svg>',
+    "kopie": '<svg viewBox="0 0 24 24"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M6 15H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v1"/></svg>',
     "stift": '<svg viewBox="0 0 24 24"><path d="M4 20h4l10.5-10.5a2 2 0 0 0 0-2.8l-1.2-1.2a2 2 0 0 0-2.8 0L4 16v4z"/><path d="M13 7l4 4"/></svg>',
     "upload": '<svg viewBox="0 0 24 24"><path d="M12 16V4m-5 5l5-5 5 5"/><path d="M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3"/></svg>',
     "datei_plus": '<svg viewBox="0 0 24 24"><path d="M14 3H7a1 1 0 0 0-1 1v16a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1V8z"/><path d="M14 3v5h5"/><path d="M12 11v6m-3-3h6"/></svg>',
@@ -375,6 +376,10 @@ def buchung_formular(b: Buchung, kategorien: list[Kategorie], cfg: dict, action:
     <label>Teilnehmer <input name="meta_teilnehmer" value="{h(str(m.get("teilnehmer", "")))}"></label></fieldset>
   <fieldset class="sonderfall" data-fuer="fahrtkosten"><legend>Fahrtkosten</legend>
     <label>gefahrene km <input type="number" step="1" name="meta_km" value="{h(str(m.get("km", "")))}"></label> <span class="muted">× {cfg["km_pauschale"]:.2f} €</span></fieldset>
+  <fieldset class="sonderfall" data-fuer="verpflegung"><legend>Verpflegungsmehraufwand</legend>
+    <label>volle Tage (24 h) <input type="number" step="1" min="0" name="meta_tage_voll" value="{h(str(m.get("tage_voll", "")))}"></label>
+    <label>Tage über 8 h / An- und Abreise <input type="number" step="1" min="0" name="meta_tage_teil" value="{h(str(m.get("tage_teil", "")))}"></label>
+    <span class="muted">{cfg["verpflegung_voll"]:.0f} € bzw. {cfg["verpflegung_teil"]:.0f} € je Tag – der Belegbetrag zählt hier nicht</span></fieldset>
   <fieldset class="sonderfall" data-fuer="homeoffice"><legend>Homeoffice</legend>
     <label>Tage <input type="number" step="1" name="meta_tage" value="{h(str(m.get("tage", "")))}"></label> <span class="muted">× {cfg["homeoffice_tagespauschale"]:.2f} €, max. {cfg["homeoffice_max_jahr"]:.0f} €/Jahr</span></fieldset>
   <fieldset class="sonderfall" data-fuer="privatanteil"><legend>Privatanteil</legend>
@@ -667,7 +672,7 @@ def ksk_block(jahr: int, ksk: dict | None) -> str:
 
 
 def jahresabschluss_view(jahr: int, fragen: list[dict], status: dict[str, dict], kategorien: list[Kategorie], summen: dict[str, float], cfg: dict,
-                         ksk: dict | None = None) -> str:
+                         ksk: dict | None = None, pauschalen: list[dict] | None = None) -> str:
     bloecke = []
     for fr in fragen:
         st = status.get(fr["key"], {})
@@ -678,6 +683,9 @@ def jahresabschluss_view(jahr: int, fragen: list[dict], status: dict[str, dict],
             extra = '<input type="number" name="meta_km" placeholder="km" style="width:6em">'
         elif sf == "homeoffice":
             extra = '<input type="number" name="meta_tage" placeholder="Tage" style="width:6em">'
+        elif sf == "verpflegung":
+            extra = ('<input type="number" name="meta_tage_voll" placeholder="volle Tage" style="width:7em" title="Tage mit 24 Stunden Abwesenheit"> '
+                     '<input type="number" name="meta_tage_teil" placeholder="Tage > 8 h" style="width:7em" title="Tage über 8 Stunden sowie An- und Abreisetage">')
         elif sf == "privatanteil":
             extra = f'<input type="number" name="meta_privatanteil_prozent" value="{cfg["privatanteil_standard_prozent"]}" title="Privatanteil %" style="width:5em">%'
         betrag = summen.get(fr["kategorie"], 0.0)
@@ -711,6 +719,7 @@ def jahresabschluss_view(jahr: int, fragen: list[dict], status: dict[str, dict],
   </div>
   <p class="muted erkl">Typische vergessene Posten. Haken setzen, wenn geprüft – auch wenn es nichts zu erfassen gab. Datum ist das Zahlungsdatum (Abflussprinzip).</p>
   {''.join(bloecke)}
+  {pauschalen_karte(pauschalen) if pauschalen else ""}
   {ksk_block(jahr, ksk)}
   <div class="row aktionen"><a class="button btn-primary" href="#" hx-get="/ui/export?jahr={jahr}" hx-target="#main">Jahresabschluss abschließen → Exporte für Elster</a></div>
 </section>"""
@@ -718,14 +727,70 @@ def jahresabschluss_view(jahr: int, fragen: list[dict], status: dict[str, dict],
 
 # --------------------------------------------------------------- Export
 
-def export_view(jahr: int, eur: list[dict], ustva_liste: list[dict], jahre: list[int]) -> str:
+def check_karte(punkte: list[dict], jahr: int) -> str:
+    """Checkliste vor dem Eintragen: was noch fehlt und wohin es zum Erledigen geht."""
+    ziel_name = {"pruefen": "Belege prüfen", "abgleich": "Kontoauszug abgleichen", "suche": "Buchungen durchsuchen",
+                 "import": "Import", "quartale": "Quartale"}
+    ikon = {"fehler": "✕", "warnung": "!", "ok": "✓"}
+
+    def zeile(p: dict) -> str:
+        ziel = (f' <button class="btn-ghost klein" hx-get="/ui/{p["ziel"]}" hx-target="#main">{ziel_name.get(p["ziel"], p["ziel"])} →</button>'
+                if p.get("ziel") else "")
+        return (f'<li class="pruef-punkt {p["stufe"]}"><span class="p-ikon" aria-hidden="true">{ikon[p["stufe"]]}</span>'
+                f'<span><b>{h(p["titel"])}</b><span class="muted"> {h(p["text"])}</span>{ziel}</span></li>')
+
+    fehler = sum(1 for p in punkte if p["stufe"] == "fehler")
+    warn = sum(1 for p in punkte if p["stufe"] == "warnung")
+    if fehler:
+        stand, cls = f"{fehler} offen, bevor die Zahlen stimmen", "fehler-box"
+    elif warn:
+        stand, cls = f"{warn} Punkte zum Nachschauen", "warn-box"
+    else:
+        stand, cls = "vollständig", "ok-box"
+    return f"""
+<div class="karte pruef-karte">
+  <div class="row zwischen"><h3 style="margin:0">Vor dem Eintragen prüfen</h3><span class="{cls} klein pruef-stand"><span>{h(stand)}</span></span></div>
+  <p class="muted klein" style="margin:.2rem 0 .6rem">Diese Liste entsteht aus deinen Daten für {jahr}. Erst wenn hier nichts Rotes mehr steht, sind die Zahlen unten vollständig.</p>
+  <ul class="pruef-liste">{"".join(zeile(p) for p in punkte)}</ul>
+</div>"""
+
+
+def pauschalen_karte(stand: list[dict]) -> str:
+    """Was aus Tagen und Kilometern gerechnet wird – und wie viel vom Jahresdeckel noch übrig ist."""
+    zeilen = "".join(
+        f'<tr class="{"warn" if p.get("warnung") else ""}"><td>{h(p["titel"])}<div class="klein muted">{h(p["detail"])}</div></td>'
+        f'{eur_zelle(p["wert"])}</tr>' for p in stand)
+    return f"""
+<div class="karte">
+  <div class="row zwischen"><h3 style="margin:0">Pauschalen und Grenzen</h3><span class="muted klein">aus Tagen, Kilometern und Anlässen gerechnet – nicht aus Belegbeträgen</span></div>
+  <div class="scroll"><table class="tabelle kompakt"><tbody>{zeilen}</tbody></table></div>
+</div>"""
+
+
+def export_view(jahr: int, eur: list[dict], ustva_liste: list[dict], jahre: list[int],
+                posten: dict[int, list[dict]] | None = None, punkte: list[dict] | None = None,
+                pauschalen: list[dict] | None = None) -> str:
+    posten = posten or {}
     def zeile(z: dict) -> str:
         summe = z["zeile"] is None
         gewinn = z["bezeichnung"].startswith("Gewinn")
         cls = ("summe " if summe else "") + ("fett " if gewinn else "")
         wert_cls = ("plus" if z["betrag"] >= 0 else "minus") if gewinn else ""
+        liste = posten.get(z["zeile"] or -1, [])
         name = f'<span class="muted">{z["zeile"]} ·</span> {h(z["bezeichnung"])}' if not summe else h(z["bezeichnung"])
-        return f'<tr class="{cls.strip()}"><td>{name}</td>{eur_zelle(z["betrag"], wert_cls)}</tr>'
+        if liste:
+            name = (f'<button type="button" class="zeile-auf" aria-expanded="false" title="{len(liste)} Posten anzeigen">'
+                    f'<span class="pfeil" aria-hidden="true">▸</span>{name} <span class="muted klein">{len(liste)}</span></button>')
+        wert = f'{z["betrag"]:.2f}'.replace(".", ",")
+        kopie = (f'<button type="button" class="kopier" data-wert="{wert}" title="{wert} kopieren" '
+                 f'aria-label="Betrag kopieren">{ICON["kopie"]}</button>')
+        haupt = f'<tr class="{cls.strip()} eur-zeile"><td>{name}</td>{eur_zelle(z["betrag"], wert_cls)}<td class="kopier-zelle">{kopie}</td></tr>'
+        if not liste:
+            return haupt
+        posten_html = "".join(
+            f'<tr class="posten"><td><span class="muted">{d(p["datum"])}</span> {h(p["text"])}'
+            f'<span class="muted klein"> · {h(p["zusatz"])}</span></td>{eur_zelle(p["betrag"])}<td></td></tr>' for p in liste)
+        return haupt + f'<tr class="posten-huelle" hidden><td colspan="3"><table class="tabelle kompakt posten-tabelle"><tbody>{posten_html}</tbody></table></td></tr>'
     eur_html = "".join(zeile(z) for z in eur)
     ustva_html = ""
     for u in ustva_liste:
@@ -738,9 +803,12 @@ def export_view(jahr: int, eur: list[dict], ustva_liste: list[dict], jahre: list
     return f"""
 <section>
   <p class="muted erkl">Kein Elster-Direktversand – die Zahlen werden von Hand eingetragen. Nur bestätigte, nicht stornierte Buchungen fließen ein.</p>
+  {check_karte(punkte, jahr) if punkte else ""}
+  {pauschalen_karte(pauschalen) if pauschalen else ""}
 
   <h3>Anlage EÜR {jahr}</h3>
-  <table class="tabelle kompakt eur-tabelle"><thead><tr><th>Zeile · Bezeichnung</th><th class="num">Betrag</th></tr></thead><tbody>{eur_html}</tbody></table>
+  <p class="muted klein" style="margin:.1rem 0 .5rem">Zeile anklicken zeigt die einzelnen Posten dahinter. Das Symbol rechts kopiert die Zahl im deutschen Format zum Einfügen in Elster.</p>
+  <div class="scroll"><table class="tabelle kompakt eur-tabelle"><thead><tr><th>Zeile · Bezeichnung</th><th class="num">Betrag</th><th></th></tr></thead><tbody>{eur_html}</tbody></table></div>
   <div class="row"><a class="button btn-secondary" href="/export/eur.csv?jahr={jahr}">CSV</a> <a class="button btn-secondary" href="/export/eur.pdf?jahr={jahr}" target="_blank">PDF</a> <a class="button btn-secondary" href="/export/eur.json?jahr={jahr}">JSON</a></div>
 
   <h3>UStVA je Quartal – nur §13b</h3>

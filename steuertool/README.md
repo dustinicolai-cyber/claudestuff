@@ -58,8 +58,15 @@ Sichern = diese Dateien kopieren. Pfad überschreibbar per `STEUERTOOL_HOME`.
    (zusammenführen / sind unterschiedlich). Bestätigte Buchungen werden nie gelöscht, nur storniert;
    jeder Eingriff steht im Protokoll am Ende des Belegjournals.
 6. **Jahresabschluss** – Fragebogen gegen vergessene Posten, pro Frage Direkterfassung.
-7. **Export** – Anlage EÜR (Zeile, Bezeichnung, Betrag – abtippfertig), UStVA je Quartal
-   (nur §13b, Kz 46/47 bzw. 84/85), Quartalstabelle CSV/PDF, Belegjournal.
+   Darunter „Pauschalen und Grenzen“: wie viele Homeoffice-Tage, Kilometer und Reisetage schon
+   erfasst sind, was daraus gerechnet wird und wie viel vom Jahresdeckel noch übrig ist.
+7. **Export** – zuerst „Vor dem Eintragen prüfen“: eine aus den eigenen Daten gerechnete Liste
+   dessen, was noch fehlt (ungeprüfte Belege, Kontobewegungen ohne Buchung, Buchungen ohne Beleg
+   ab 25 €, Monate ohne Buchung, fehlende Pflichtangaben bei Bewirtung, Fahrt, Homeoffice und
+   Verpflegung, USt-Differenz, doppelte Abschreibung). Jeder Punkt führt direkt zur passenden Ansicht.
+   Danach die Anlage EÜR (Zeile, Bezeichnung, Betrag): jede Zeile lässt sich aufklappen und zeigt
+   die Einzelposten dahinter, ein Knopf kopiert die Zahl im deutschen Format für Elster.
+   Dazu UStVA je Quartal (nur §13b, Kz 46/47 bzw. 84/85), Quartalstabelle CSV/PDF, Belegjournal.
 
 Kontoauszüge (CSV deutscher Banken oder CAMT.053) unter Import einlesen; Matching läuft
 über Betrag exakt und Datum ±5 Tage.
@@ -67,6 +74,8 @@ Kontoauszüge (CSV deutscher Banken oder CAMT.053) unter Import einlesen; Matchi
 ## Steuerregeln im Code (Werte in `steuerregeln.json`)
 
 - **§19**: kein Vorsteuerabzug, Brutto ist die Betriebsausgabe.
+- **Verpflegungsmehraufwand**: aus Reisetagen gerechnet, nicht aus dem Belegbetrag – 28 € je vollem
+  Tag, 14 € bei mehr als 8 Stunden sowie am An- und Abreisetag (Inland, Zeile 53).
 - **§13b Reverse-Charge** (Adobe, Figma, Google …): Erkennung über ausländische USt-IdNr,
   Hinweistext, bekannte Anbieter. 19 % auf den Nettobetrag werden als Zahllast (Kz 47) ausgewiesen.
 - **Umsatzsteuer ans Finanzamt (EÜR Zeile 48)**: Standard ist das Abflussprinzip – Zeile 48 ist die

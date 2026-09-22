@@ -181,7 +181,7 @@ def test_offene_punkte_aktionen_und_status():
             s.commit()
             ids = [b.id for b in s.exec(select(Buchung).order_by(Buchung.id)).all()]
         st = c.get("/api/status?jahr=2025").json()
-        assert st["offen_gesamt"] == 4 and st["jahresabschluss"]["gesamt"] == 13 and st["ki"] in ("aktiv", "aus", "nicht_erreichbar")
+        assert st["offen_gesamt"] == 4 and st["jahresabschluss"]["gesamt"] == 14 and st["ki"] in ("aktiv", "aus", "nicht_erreichbar")
         o = c.get("/ui/offen")
         assert "Zusammenführen" in o.text and "Privat verauslagt" in o.text and "Alle Kontobewegungen haben einen Beleg." in o.text
         # privat verauslagt

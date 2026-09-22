@@ -158,7 +158,7 @@ button:disabled:hover{background:transparent;color:inherit;box-shadow:none}
 .ring{display:flex;align-items:center;gap:.9rem}
 .ring .kreis{width:64px;height:64px;border-radius:50%;display:grid;place-items:center;font-weight:700;font-size:.85rem;background:conic-gradient(var(--gruen) calc(var(--p)*1%),var(--line) 0);flex:none}
 .ring .kreis span{width:50px;height:50px;border-radius:50%;background:var(--card);display:grid;place-items:center}
-.tabs{display:flex;background:var(--card2);border:1px solid var(--line);border-radius:12px;padding:.25rem;gap:.2rem}
+.tabs{display:flex;background:var(--card2);border:1px solid var(--line);border-radius:12px;padding:.25rem;gap:.2rem;flex-wrap:wrap;max-width:100%}
 .tabs button{background:transparent;color:var(--muted);border:0;border-radius:9px;box-shadow:none;font-weight:600;padding:.45rem .9rem}
 .tabs button.aktiv{background:var(--orange);color:#fff}
 .tabs button.leer:not(.aktiv){color:var(--muted);opacity:.6}
@@ -276,6 +276,33 @@ a.btn-ghost svg,.aktionen-zelle a svg{width:1em;height:1em;vertical-align:-.12em
 .klebe-leiste{position:sticky;top:0;z-index:4;background:var(--bg);padding:.3rem 0 .4rem;margin-bottom:.3rem}
 .klebe-leiste .row{margin:.2rem 0}
 /* Nach oben */
+/* Kopfzeile: Daten neu laden */
+#neu-laden{background:transparent;border:1px solid var(--line);color:var(--muted);border-radius:10px;padding:.42rem;line-height:0;box-shadow:none;filter:none}
+#neu-laden svg{margin:0;width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;transform-origin:50% 50%}
+#neu-laden:hover{color:var(--orange);border-color:var(--orange);filter:none}
+#neu-laden.laedt{color:var(--orange);border-color:var(--orange)} #neu-laden.laedt svg{animation:dreh .85s cubic-bezier(.4,.1,.3,1) infinite}
+@keyframes dreh{to{transform:rotate(360deg)}}
+/* EÜR-Zeilen: aufklappen und kopieren */
+.eur-tabelle .zeile-auf{background:transparent;border:0;padding:0;color:inherit;font:inherit;text-align:left;box-shadow:none;filter:none;cursor:pointer}
+.eur-tabelle .zeile-auf:hover{color:var(--orange);filter:none} .eur-tabelle .zeile-auf .pfeil{display:inline-block;width:1em;color:var(--muted)}
+.eur-tabelle .kopier-zelle{width:2.6rem;text-align:right}
+.kopier{position:relative;background:transparent;border:0;color:var(--muted);padding:.2rem;line-height:0;box-shadow:none;filter:none;border-radius:6px;opacity:0;transition:opacity .15s}
+.eur-zeile:hover .kopier,.kopier:focus-visible{opacity:1}
+.kopier svg{margin:0;width:15px;height:15px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.kopier:hover{color:var(--orange);background:var(--orange-hell);filter:none}
+.kopier.kopiert{opacity:1;color:var(--gruen)}
+.kopier.kopiert::after{content:"kopiert";position:absolute;right:0;bottom:calc(100% + .3rem);font-size:.68rem;font-weight:600;line-height:1.5;background:var(--gruen);color:#fff;padding:.05rem .4rem;border-radius:5px;white-space:nowrap;pointer-events:none}
+.posten-huelle > td{padding:0 0 .4rem 1.6rem;background:var(--card2)}
+.posten-tabelle{border:0;border-radius:0;background:transparent} .posten-tabelle td{border:0;padding:.22rem .6rem;font-size:.88em}
+.posten-tabelle tr:hover{background:transparent}
+/* Vor dem Eintragen prüfen */
+.pruef-stand{display:inline-flex;margin:0;padding:.25rem .7rem;font-weight:600}
+.pruef-liste{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:.45rem}
+.pruef-punkt{display:flex;gap:.6rem;align-items:flex-start;line-height:1.5}
+.p-ikon{flex:none;width:19px;height:19px;border-radius:50%;display:grid;place-items:center;font-weight:700;font-size:.78em;color:#fff;margin-top:.15em}
+.pruef-punkt.fehler .p-ikon{background:var(--rot)} .pruef-punkt.warnung .p-ikon{background:var(--gelb);color:#1a1a22} .pruef-punkt.ok .p-ikon{background:var(--gruen)}
+.pruef-punkt .btn-ghost{padding:.05rem .35rem;white-space:nowrap}
+.tabelle tr.warn td{background:var(--gelb-hell)}
 #nach-oben{position:fixed;right:1.4rem;bottom:1.4rem;z-index:20;width:44px;height:44px;border-radius:50%;padding:0;display:grid;place-items:center;background:var(--card);color:var(--fg);border:1px solid var(--line);box-shadow:var(--schatten);opacity:0;pointer-events:none;transition:opacity .2s}
 #nach-oben.sichtbar{opacity:1;pointer-events:auto} #nach-oben:hover{border-color:var(--orange);color:var(--orange);filter:none}
 #nach-oben svg{margin:0;width:20px;height:20px}
@@ -339,11 +366,34 @@ footer{color:var(--muted);font-size:.78em;padding:1.4rem 0 0}
       <input id="suche-feld" name="q" type="search" placeholder="Buchung suchen … (Lieferant, Betrag, Nr.)" autocomplete="off">
     </form>
     <label class="jahr-wahl" title="Steuerjahr – gilt für alle Ansichten">Jahr <select id="jahr-select"></select></label>
+    <button id="neu-laden" type="button" title="Daten neu laden" aria-label="Daten neu laden"><svg viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-1.6 5.6"/><path d="M20 4v7h-7"/></svg></button>
     <a id="ki-status" class="ki-badge" href="#" hx-get="/ui/einstellungen" hx-target="#main" title="Lokale KI (Ollama)"><span class="punkt"></span><span class="txt">KI</span></a>
     <span class="zusicherung">offline · lokal</span>
   </div>
 </header>
 <main id="main" hx-history="false"><p class="muted">Lade…</p></main>
+<script>
+// Zahl einer EÜR-Zeile kopieren und Posten dahinter aufklappen
+document.addEventListener('click', e => {
+  const k = e.target.closest('.kopier');
+  if (k) {
+    const wert = k.dataset.wert || '';
+    const fertig = () => { k.classList.add('kopiert'); setTimeout(() => k.classList.remove('kopiert'), 1400); };
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(wert).then(fertig).catch(() => {});
+    else { const t = document.createElement('textarea'); t.value = wert; document.body.appendChild(t); t.select();
+           try { document.execCommand('copy'); fertig(); } catch (x) {} t.remove(); }
+    return;
+  }
+  const auf = e.target.closest('.zeile-auf');
+  if (auf) {
+    const zeile = auf.closest('tr'), huelle = zeile.nextElementSibling;
+    if (!huelle || !huelle.classList.contains('posten-huelle')) return;
+    const offen = huelle.hidden;
+    huelle.hidden = !offen; auf.setAttribute('aria-expanded', offen ? 'true' : 'false');
+    auf.querySelector('.pfeil').textContent = offen ? '▾' : '▸';
+  }
+});
+</script>
 <button id="nach-oben" type="button" title="Nach oben" aria-label="Nach oben"><svg viewBox="0 0 24 24"><path d="M12 19V5m-7 7l7-7 7 7"/></svg></button>
 <script>
 (function(){
@@ -388,6 +438,10 @@ footer{color:var(--muted);font-size:.78em;padding:1.4rem 0 0}
     const map = {'1':'import','2':'pruefen','3':'abgleich','4':'quartale','5':'auswertung','6':'offen','7':'jahresabschluss','8':'export'};
     if (map[e.key]) { const b = nav.querySelector('[data-ansicht="'+map[e.key]+'"]'); if (b) b.click(); }
   });
+  const laden = document.getElementById('neu-laden');
+  laden.addEventListener('click', () => { if (laden.classList.contains('laedt')) return; laden.classList.add('laedt');
+    const b = document.querySelector('#nav button.aktiv') || document.querySelector('#nav button'); if (b) b.click();
+    setTimeout(() => laden.classList.remove('laedt'), 850); });
   const nachOben = document.getElementById('nach-oben');
   window.addEventListener('scroll', () => nachOben.classList.toggle('sichtbar', window.scrollY > 240), {passive: true});
   nachOben.addEventListener('click', () => window.scrollTo({top: 0, behavior: 'smooth'}));

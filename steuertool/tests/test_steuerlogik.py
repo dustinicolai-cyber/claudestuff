@@ -1,8 +1,8 @@
 from datetime import date
 
 from app.models import Anlagegut, Buchung
-from app.steuerlogik import (afa_fuer_jahr, betraege_vervollstaendigen, bewerte, erkenne_finanzamt, erkenne_reverse_charge, eur_zeilen, ust_abgleich,
-                             konfidenz_aus_feldern, quartalsuebersicht, ust_13b, ustva)
+from app.steuerlogik import (afa_fuer_jahr, betraege_vervollstaendigen, bewerte, erkenne_finanzamt, erkenne_reverse_charge, eur_posten, eur_zeilen,
+                             konfidenz_aus_feldern, pauschalen_stand, quartalsuebersicht, ust_13b, ust_abgleich, ustva, vollstaendigkeit)
 
 
 def b(**kw) -> Buchung:
@@ -217,3 +217,69 @@ def test_ksk_uebersicht_und_vorsorge(cfg, kats):
     assert k["arbeitseinkommen"] == round(9000 - 1785 - 952, 2)      # Vorsorge zählt nicht als Betriebsausgabe
     klein = ksk_uebersicht(buchungen[:4], kd, [], 2025, {**cfg, "ksk_bagatellgrenze": 2000}) 
     assert klein["abgabe"] == 0.0
+
+
+# ---------------------------------------------------------------- Verpflegung, Herkunft, Vollständigkeit
+
+def test_verpflegungsmehraufwand_aus_tagen_nicht_aus_beleg(cfg, kats):
+    bw = bewerte(b(betrag_brutto=250.0, betrag_netto=250.0, ust_betrag=0.0,
+                   meta_json='{"tage_voll": 3, "tage_teil": 2}'), kats["verpflegung"], cfg)
+    assert bw.abzugsfaehig == 3 * 28 + 2 * 14 and bw.eur_zeile == 53
+    assert "Belegbetrag zählt nicht" in " ".join(bw.hinweise)
+
+
+def test_verpflegung_ohne_tage_warnt(cfg, kats):
+    bw = bewerte(b(), kats["verpflegung"], cfg)
+    assert bw.abzugsfaehig == 0.0 and bw.warnungen
+
+
+def test_eur_posten_summieren_sich_zu_den_zeilen(cfg, kats):
+    buchungen = [b(datum=date(2025, 2, 3), lieferant="Adobe", kategorie_id=kats["software"].id),
+                 b(datum=date(2025, 5, 9), lieferant="Figma", betrag_brutto=59.0, kategorie_id=kats["software"].id),
+                 b(datum=date(2025, 7, 1), lieferant="Kunde", richtung="einnahme", betrag_brutto=1190.0, kategorie_id=kats["einnahmen"].id)]
+    kd = {k.id: k for k in kats.values()}
+    zeilen = eur_zeilen(buchungen, kd, [], 2025, cfg)
+    posten = eur_posten(buchungen, kd, [], 2025, cfg)
+    for z in zeilen:
+        if z["zeile"] is None:
+            continue
+        assert round(sum(p["betrag"] for p in posten[z["zeile"]]), 2) == z["betrag"], z
+    assert [p["text"] for p in posten[50]] == ["Adobe", "Figma"]      # nach Datum sortiert
+    assert posten[11][0]["text"] == "Kunde"
+
+
+def test_pauschalen_stand_zeigt_deckel_und_grenze(cfg, kats):
+    kd = {k.id: k for k in kats.values()}
+    buchungen = [b(kategorie_id=kats["arbeitszimmer"].id, meta_json='{"tage": 230}'),
+                 b(kategorie_id=kats["fahrtkosten"].id, meta_json='{"km": 500}'),
+                 b(kategorie_id=kats["geschenke"].id, betrag_brutto=80.0, meta_json='{"empfaenger": "Kunde Meier"}')]
+    stand = {p["titel"]: p for p in pauschalen_stand(buchungen, kd, 2025, cfg)}
+    ho = stand["Homeoffice-Tagespauschale"]
+    assert ho["wert"] == 1260.0 and ho["warnung"] and "Deckel" in ho["detail"]
+    assert stand["Fahrtkosten (privates Kfz)"]["wert"] == 150.0
+    assert stand["Geschenke"]["warnung"] and "Kunde Meier" in stand["Geschenke"]["detail"]
+
+
+def test_vollstaendigkeit_findet_offene_punkte(cfg, kats):
+    kd = {k.id: k for k in kats.values()}
+    buchungen = [b(status="vorschlag", kategorie_id=kats["software"].id),
+                 b(datum=date(2025, 4, 2), kategorie_id=kats["bewirtung"].id, betrag_brutto=90.0),
+                 b(datum=date(2025, 4, 3), kategorie_id=kats["fahrtkosten"].id)]
+    punkte = {p["titel"]: p for p in vollstaendigkeit(buchungen, kd, [], [], 2025, cfg)}
+    assert "1 Beleg noch nicht geprüft" in punkte
+    assert punkte["2 Buchungen mit fehlenden Pflichtangaben"]["stufe"] == "fehler"
+    assert any(t.startswith("11 Monate ohne Buchung") for t in punkte)   # nur April hat bestätigte Buchungen
+    # alles sauber → ein einziger ok-Punkt
+    sauber = [b(datum=date(2025, m, 5), kategorie_id=kats["software"].id, beleg_id=1) for m in range(1, 13)]
+    assert [p["stufe"] for p in vollstaendigkeit(sauber, kd, [], [], 2025, cfg)] == ["ok"]
+
+
+def test_neue_fragen_kommen_in_bestehende_konfiguration(tmp_path, monkeypatch):
+    """Eine bestehende Nutzerdatei darf neue Fragen des Jahresabschlusses nicht verschlucken."""
+    from app import config
+    standard = {"jahresabschluss_fragen": [{"key": "a", "frage": "A?", "kategorie": "x"},
+                                           {"key": "neu", "frage": "Neu?", "kategorie": "y"}]}
+    nutzer = {"jahresabschluss_fragen": [{"key": "a", "frage": "Eigener Text?", "kategorie": "x"}]}
+    zusammen = config._zusammenfuehren(standard, nutzer)["jahresabschluss_fragen"]
+    assert [f["key"] for f in zusammen] == ["a", "neu"]
+    assert zusammen[0]["frage"] == "Eigener Text?"      # eigene Formulierung bleibt
