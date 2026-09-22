@@ -68,6 +68,51 @@ def betraege_vervollstaendigen(netto: float | None, ust_satz: float | None,
     return runde(netto), 0.0, 0.0, runde(netto)
 
 
+def empfaenger_abweichung(b: Buchung, cfg: dict) -> str:
+    """Leerer String, wenn die Rechnung auf einen eigenen Namen lautet oder nichts erfasst ist.
+    Sonst der abweichende Name: dann ist der Vorsteuerabzug verloren."""
+    an = str(meta(b).get("rechnung_an", "")).strip()
+    if not an:
+        return ""
+    eigene = [n.strip().lower() for n in cfg.get("eigene_namen", []) if n.strip()]
+    kurz = an.lower()
+    if any(n in kurz or kurz in n for n in eigene):
+        return ""
+    return an
+
+
+def ist_kleinunternehmer(cfg: dict, jahr: int) -> bool:
+    """§19 gilt je Steuerjahr. 2025 regelbesteuert, ab 2026 wieder Kleinunternehmer – das steht in der Konfiguration."""
+    je_jahr = cfg.get("kleinunternehmer_je_jahr") or {}
+    wert = je_jahr.get(str(jahr), je_jahr.get(jahr))
+    return bool(cfg.get("kleinunternehmer", True) if wert is None else wert)
+
+
+def ust_grenze(cfg: dict) -> float:
+    """Höchster plausibler Anteil der Umsatzsteuer am Bruttobetrag. Bei 19 % sind es rechnerisch 15,97 %;
+    alles über rund 20 % ist ein Erkennungsfehler, meist wurde der Nettobetrag ins USt-Feld geschrieben."""
+    hoechster = max(cfg.get("ust_saetze") or [19]) or 19
+    return hoechster / (100 + hoechster) * 1.25
+
+
+def ust_plausibel(ust_betrag: float, brutto: float, cfg: dict) -> bool:
+    if not brutto or not ust_betrag:
+        return True
+    return abs(ust_betrag) <= abs(brutto) * ust_grenze(cfg) + 0.01
+
+
+def betraege_pruefen(netto: float, satz: float, ust: float, brutto: float, cfg: dict) -> tuple[float, float, float, float, list[str]]:
+    """Nach dem Auslesen: unplausible Umsatzsteuer verwerfen und aus dem Bruttobetrag neu rechnen.
+    Fängt den häufigsten Erkennungsfehler ab, bei dem der Nettobetrag im USt-Feld landet."""
+    if ust_plausibel(ust, brutto, cfg):
+        return netto, satz, ust, brutto, []
+    hinweis = [f"Umsatzsteuer {ust:.2f} € passt nicht zum Bruttobetrag {brutto:.2f} € und wurde neu berechnet."]
+    if satz and satz in (cfg.get("ust_saetze") or []) and satz > 0:
+        n, s2, u, b = betraege_vervollstaendigen(None, satz, None, brutto)
+        return n, s2, u, b, hinweis
+    return runde(brutto), 0.0, 0.0, runde(brutto), hinweis + ["Kein sicherer Steuersatz erkannt – bitte von Hand eintragen."]
+
+
 # ------------------------------------------------------- Reverse Charge
 
 def ist_eu_ustid(ust_idnr: str, cfg: dict) -> bool:
@@ -89,7 +134,11 @@ def erkenne_reverse_charge(text: str, ust_idnr: str, lieferant: str, ust_betrag:
             break
     treffer = bool(gruende) and (ust_betrag or 0) == 0
     if gruende and (ust_betrag or 0) > 0:
-        gruende.append("aber USt ist auf dem Beleg ausgewiesen – kein §13b, bitte prüfen")
+        gruende.append("aber USt ist auf dem Beleg ausgewiesen – kein §13b, sondern normale Vorsteuer")
+        treffer = False
+    if ust_idnr.startswith("DE") and treffer:
+        # Entscheidend ist nicht der Firmensitz, sondern die Rechnung: deutsche USt-IdNr heißt deutsche Rechnung
+        gruende = [f"deutsche USt-IdNr {ust_idnr} – kein §13b, auch wenn der Anbieter im Ausland sitzt"]
         treffer = False
     return treffer, gruende
 
@@ -215,12 +264,29 @@ def bewerte(b: Buchung, k: Kategorie | None, cfg: dict,
     """
     ctx = jahres_kontext or {}
     m = meta(b)
-    basis = b.betrag_brutto if cfg["kleinunternehmer"] else b.betrag_netto
+    klein = ist_kleinunternehmer(cfg, b.datum.year)
+    ohne_ust = bool(k is not None and k.ohne_ust)
+    # Versicherung, Bankgebühr, KSK, Rundfunkbeitrag und Zahlungen ans Finanzamt enthalten nie Vorsteuer.
+    # Dort ist der volle Rechnungsbetrag die Betriebsausgabe, auch bei Regelbesteuerung.
+    basis = b.betrag_brutto if (klein or ohne_ust) else b.betrag_netto
     bw = Bewertung(basis=basis, abzugsfaehig=basis, eur_zeile=k.eur_zeile if k else None)
     sonderfall = k.sonderfall if k else None
 
+    if not ust_plausibel(b.ust_betrag, b.betrag_brutto, cfg):
+        bw.warnungen.append(f"Umsatzsteuer {b.ust_betrag:.2f} € ist mehr als {ust_grenze(cfg) * 100:.0f} % vom Bruttobetrag "
+                            f"{b.betrag_brutto:.2f} € – vermutlich wurde der Nettobetrag ins USt-Feld übernommen.")
+    anderer = empfaenger_abweichung(b, cfg)
+    if anderer and b.richtung == "ausgabe":
+        bw.warnungen.append(f"Die Rechnung lautet auf „{anderer}“ und nicht auf dich – damit ist der Vorsteuerabzug verloren. "
+                            f"Beim Aussteller eine berichtigte Rechnung anfordern.")
+    if ohne_ust and b.ust_betrag:
+        bw.warnungen.append(f"„{k.name}“ enthält keine Umsatzsteuer – die ausgewiesenen {b.ust_betrag:.2f} € sind keine Vorsteuer. "
+                            f"Gerechnet wird mit dem vollen Betrag von {b.betrag_brutto:.2f} €.")
+
     if b.richtung == "einnahme":
-        bw.eur_zeile = k.eur_zeile if k else 11
+        bw.eur_zeile = k.eur_zeile if k else (11 if klein else 14)
+        if not klein and bw.eur_zeile == 11:
+            bw.eur_zeile = 14      # regelbesteuert: Einnahmen netto in Zeile 14, die vereinnahmte USt steht in Zeile 16
         if sonderfall == "privat":
             bw.abzugsfaehig = 0.0
             bw.eur_zeile = None
@@ -234,7 +300,7 @@ def bewerte(b: Buchung, k: Kategorie | None, cfg: dict,
             bw.eur_zeile = None
             bw.hinweise.append("Erstattung von KSK/Krankenkasse/Rentenversicherung: keine Betriebseinnahme – mindert die Sonderausgaben in der Anlage Vorsorgeaufwand.")
             return bw
-        if b.ust_betrag:
+        if b.ust_betrag and klein:
             bw.warnungen.append("Einnahme mit USt-Ausweis – als Kleinunternehmer darf keine USt ausgewiesen werden (§19 UStG).")
         return bw
 
@@ -513,13 +579,23 @@ def monatsverlauf(buchungen: list[Buchung], kategorien: dict[int, Kategorie],
     return monate
 
 
+def effektive_zeile(k: Kategorie | None, cfg: dict, jahr: int) -> int | None:
+    """Die EÜR-Zeile der Kategorie, angepasst an den Modus des Jahres: Betriebseinnahmen stehen als
+    Kleinunternehmer in Zeile 11, bei Regelbesteuerung netto in Zeile 14."""
+    if k is None or k.eur_zeile is None:
+        return None
+    if k.eur_zeile == 11 and not ist_kleinunternehmer(cfg, jahr):
+        return 14
+    return k.eur_zeile
+
+
 def eur_zeilen(buchungen: list[Buchung], kategorien: dict[int, Kategorie],
                anlagegueter: list[Anlagegut], jahr: int, cfg: dict) -> list[dict]:
     """Abtippfertige Liste: Zeilennummer, Bezeichnung, Betrag."""
     summen: dict[int, float] = {}
     ue = quartalsuebersicht(buchungen, kategorien, anlagegueter, jahr, cfg)
     for r in ue["zeilen"]:
-        z = r["kategorie"].eur_zeile
+        z = effektive_zeile(r["kategorie"], cfg, jahr)
         if z is None:
             continue
         summen[z] = summen.get(z, 0.0) + r["jahr"].abzugsfaehig
@@ -531,12 +607,30 @@ def eur_zeilen(buchungen: list[Buchung], kategorien: dict[int, Kategorie],
         if s13b:
             summen[48] = summen.get(48, 0.0) + s13b
     # Geschenke-Zeile: nicht abziehbare Anteile sind bereits durch bewerte() auf 0 gesetzt
+    if not ist_kleinunternehmer(cfg, jahr):
+        vereinnahmt = vorsteuer = 0.0
+        for b in buchungen:
+            if b.datum.year != jahr or b.status != "bestaetigt" or not b.ust_betrag:
+                continue
+            k = kategorien.get(b.kategorie_id or -1)
+            if k is not None and k.ohne_ust:
+                continue
+            if b.richtung == "einnahme":
+                vereinnahmt += b.ust_betrag
+            elif not b.reverse_charge:
+                vorsteuer += b.ust_betrag
+        if vereinnahmt:
+            summen[16] = summen.get(16, 0.0) + vereinnahmt
+        if vorsteuer:
+            summen[45] = summen.get(45, 0.0) + vorsteuer
     bez = cfg["eur_zeilen"]
     out = [{"zeile": z, "bezeichnung": bez.get(str(z), f"Zeile {z}"), "betrag": runde(v)}
            for z, v in sorted(summen.items()) if abs(v) >= 0.005]
-    out.append({"zeile": None, "bezeichnung": "Summe Betriebseinnahmen", "betrag": runde(ue["einnahmen"][4].abzugsfaehig)})
-    out.append({"zeile": None, "bezeichnung": "Summe Betriebsausgaben", "betrag": runde(ue["ausgaben"][4].abzugsfaehig + s13b)})
-    out.append({"zeile": None, "bezeichnung": "Gewinn / Verlust", "betrag": runde(ue["einnahmen"][4].abzugsfaehig - ue["ausgaben"][4].abzugsfaehig - s13b)})
+    ein = ue["einnahmen"][4].abzugsfaehig + summen.get(16, 0.0)
+    aus = ue["ausgaben"][4].abzugsfaehig + s13b + summen.get(45, 0.0)
+    out.append({"zeile": None, "bezeichnung": "Summe Betriebseinnahmen", "betrag": runde(ein)})
+    out.append({"zeile": None, "bezeichnung": "Summe Betriebsausgaben", "betrag": runde(aus)})
+    out.append({"zeile": None, "bezeichnung": "Gewinn / Verlust", "betrag": runde(ein - aus)})
     return out
 
 
@@ -559,9 +653,10 @@ def eur_posten(buchungen: list[Buchung], kategorien: dict[int, Kategorie], anlag
         if k.sonderfall == "geschenk":
             e = str(m.get("empfaenger", "")).strip()
             geschenke[e] = geschenke.get(e, 0.0) + b.betrag_brutto
-        if k.eur_zeile is None or abs(bw.abzugsfaehig) < 0.005:
+        zeile = effektive_zeile(k, cfg, jahr)
+        if zeile is None or abs(bw.abzugsfaehig) < 0.005:
             continue
-        out.setdefault(k.eur_zeile, []).append(
+        out.setdefault(zeile, []).append(
             {"datum": b.datum, "text": b.lieferant or b.beschreibung[:40] or "–", "zusatz": k.name,
              "betrag": runde(bw.abzugsfaehig), "roh": runde(b.betrag_brutto), "buchung_id": b.id})
     afa_kat = next((k for k in kategorien.values() if k.schluessel == "afa"), None)
@@ -572,6 +667,16 @@ def eur_posten(buchungen: list[Buchung], kategorien: dict[int, Kategorie], anlag
                 out.setdefault(afa_kat.eur_zeile, []).append(
                     {"datum": a.anschaffung, "text": a.bezeichnung, "zusatz": f"AfA über {a.nutzungsdauer_jahre} Jahre",
                      "betrag": runde(betrag), "roh": runde(a.anschaffungskosten), "buchung_id": a.buchung_id})
+    if not ist_kleinunternehmer(cfg, jahr):
+        for b in jahres:
+            k = kategorien.get(b.kategorie_id or -1)
+            if not b.ust_betrag or (k is not None and k.ohne_ust):
+                continue
+            zeile = 16 if b.richtung == "einnahme" else (45 if not b.reverse_charge else None)
+            if zeile:
+                out.setdefault(zeile, []).append(
+                    {"datum": b.datum, "text": b.lieferant or "–", "zusatz": "vereinnahmte USt" if zeile == 16 else "Vorsteuer",
+                     "betrag": runde(b.ust_betrag), "roh": runde(b.betrag_brutto), "buchung_id": b.id})
     if ust_basis(cfg) == "rechnung":
         for b in jahres:
             steuer = ust_13b(b, cfg)
@@ -635,6 +740,32 @@ def _mehrzahl(n: int, eins: str, viele: str) -> str:
     return f"{n} {eins if n == 1 else viele}"
 
 
+def luecken_wiederkehrend(buchungen: list[Buchung], jahr: int, mindest_monate: int = 3) -> list[dict]:
+    """Lieferanten mit monatlicher Rechnung: welche Monate fehlen? Findet „Adobe fehlt im April“, ohne dass
+    man die Liste selbst durchgeht. Gewertet werden nur Lieferanten mit mindestens drei Monaten im Jahr."""
+    je_lieferant: dict[str, dict[int, float]] = {}
+    for b in buchungen:
+        if b.datum.year != jahr or b.status != "bestaetigt" or b.storniert or not b.lieferant.strip():
+            continue
+        je_lieferant.setdefault(b.lieferant.strip(), {})[b.datum.month] = b.betrag_brutto
+    heute = date.today()
+    letzter = 12 if jahr < heute.year else heute.month
+    out = []
+    for name, monate in sorted(je_lieferant.items()):
+        wenn = sorted(monate)
+        if len(wenn) < mindest_monate:
+            continue
+        spanne = range(wenn[0], min(wenn[-1], letzter) + 1)
+        fehlend = [m for m in spanne if m not in monate]
+        if not fehlend or len(fehlend) > len(wenn):
+            continue
+        schnitt = sum(monate.values()) / len(monate)
+        out.append({"lieferant": name, "fehlend": fehlend, "vorhanden": len(wenn), "schnitt": runde(schnitt),
+                    "text": ", ".join(MONATSNAMEN[m - 1] for m in fehlend)})
+    out.sort(key=lambda x: (-len(x["fehlend"]), x["lieferant"]))
+    return out
+
+
 def vollstaendigkeit(buchungen: list[Buchung], kategorien: dict[int, Kategorie], kontobewegungen: list,
                      anlagegueter: list[Anlagegut], jahr: int, cfg: dict, ust: dict | None = None) -> list[dict]:
     """Checkliste vor dem Eintragen in Elster. Je Punkt: Stufe, Text und wohin es zum Erledigen geht."""
@@ -682,6 +813,19 @@ def vollstaendigkeit(buchungen: list[Buchung], kategorien: dict[int, Kategorie],
     if fehlende_felder:
         punkt("fehler", _mehrzahl(len(fehlende_felder), "Buchung mit fehlenden Pflichtangaben", "Buchungen mit fehlenden Pflichtangaben"),
               "; ".join(fehlende_felder[:6]) + (" …" if len(fehlende_felder) > 6 else "") + ". Ohne diese Angaben ist der Abzug angreifbar.", "pruefen", len(fehlende_felder))
+
+    luecken = luecken_wiederkehrend(buchungen, jahr)
+    if luecken:
+        beispiele = "; ".join(f"{l['lieferant']}: {l['text']}" for l in luecken[:4])
+        fehlend_gesamt = sum(len(l["fehlend"]) for l in luecken)
+        punkt("warnung", f"{_mehrzahl(fehlend_gesamt, 'fehlende Rechnung', 'fehlende Rechnungen')} bei wiederkehrenden Zahlungen",
+              f"{beispiele}{' …' if len(luecken) > 4 else ''}. Diese Lieferanten zahlst du sonst monatlich.", "suche", fehlend_gesamt)
+
+    falscher_empfaenger = [b for b in bestaetigt if empfaenger_abweichung(b, cfg)]
+    if falscher_empfaenger:
+        namen = "; ".join(f"{b.lieferant} (lautet auf {empfaenger_abweichung(b, cfg)})" for b in falscher_empfaenger[:4])
+        punkt("fehler", _mehrzahl(len(falscher_empfaenger), "Rechnung läuft auf einen anderen Namen", "Rechnungen laufen auf einen anderen Namen"),
+              f"{namen}. Ohne deinen Namen auf der Rechnung ist der Vorsteuerabzug verloren, beim Aussteller eine Korrektur anfordern.", "pruefen", len(falscher_empfaenger))
 
     ohne_kategorie = [b for b in bestaetigt if b.kategorie_id is None]
     if ohne_kategorie:

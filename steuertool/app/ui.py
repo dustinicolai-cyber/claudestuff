@@ -376,6 +376,8 @@ def buchung_formular(b: Buchung, kategorien: list[Kategorie], cfg: dict, action:
     <label>Teilnehmer <input name="meta_teilnehmer" value="{h(str(m.get("teilnehmer", "")))}"></label></fieldset>
   <fieldset class="sonderfall" data-fuer="fahrtkosten"><legend>Fahrtkosten</legend>
     <label>gefahrene km <input type="number" step="1" name="meta_km" value="{h(str(m.get("km", "")))}"></label> <span class="muted">× {cfg["km_pauschale"]:.2f} €</span></fieldset>
+  <label>Rechnung lautet auf <input name="meta_rechnung_an" value="{h(str(m.get("rechnung_an", "")))}" placeholder="leer lassen, wenn sie auf dich lautet"
+    title="Nur ausfüllen, wenn ein anderer Name auf der Rechnung steht – dann ist der Vorsteuerabzug verloren"></label>
   <fieldset class="sonderfall" data-fuer="verpflegung"><legend>Verpflegungsmehraufwand</legend>
     <label>volle Tage (24 h) <input type="number" step="1" min="0" name="meta_tage_voll" value="{h(str(m.get("tage_voll", "")))}"></label>
     <label>Tage über 8 h / An- und Abreise <input type="number" step="1" min="0" name="meta_tage_teil" value="{h(str(m.get("tage_teil", "")))}"></label>
@@ -769,7 +771,7 @@ def pauschalen_karte(stand: list[dict]) -> str:
 
 def export_view(jahr: int, eur: list[dict], ustva_liste: list[dict], jahre: list[int],
                 posten: dict[int, list[dict]] | None = None, punkte: list[dict] | None = None,
-                pauschalen: list[dict] | None = None) -> str:
+                pauschalen: list[dict] | None = None, klein: bool = True) -> str:
     posten = posten or {}
     def zeile(z: dict) -> str:
         summe = z["zeile"] is None
@@ -806,8 +808,8 @@ def export_view(jahr: int, eur: list[dict], ustva_liste: list[dict], jahre: list
   {check_karte(punkte, jahr) if punkte else ""}
   {pauschalen_karte(pauschalen) if pauschalen else ""}
 
-  <h3>Anlage EÜR {jahr}</h3>
-  <p class="muted klein" style="margin:.1rem 0 .5rem">Zeile anklicken zeigt die einzelnen Posten dahinter. Das Symbol rechts kopiert die Zahl im deutschen Format zum Einfügen in Elster.</p>
+  <h3>Anlage EÜR {jahr} <span class="badge {"ok" if klein else "mid"}">{"Kleinunternehmer §19" if klein else "regelbesteuert"}</span></h3>
+  <p class="muted klein" style="margin:.1rem 0 .5rem">{"Der Bruttobetrag ist die Betriebsausgabe, es wird keine Vorsteuer abgezogen." if klein else "Der Nettobetrag ist die Betriebsausgabe, die gezahlte Vorsteuer steht in Zeile 45."} Umstellen in den Einstellungen. Zeile anklicken zeigt die einzelnen Posten dahinter. Das Symbol rechts kopiert die Zahl im deutschen Format zum Einfügen in Elster.</p>
   <div class="scroll"><table class="tabelle kompakt eur-tabelle"><thead><tr><th>Zeile · Bezeichnung</th><th class="num">Betrag</th><th></th></tr></thead><tbody>{eur_html}</tbody></table></div>
   <div class="row"><a class="button btn-secondary" href="/export/eur.csv?jahr={jahr}">CSV</a> <a class="button btn-secondary" href="/export/eur.pdf?jahr={jahr}" target="_blank">PDF</a> <a class="button btn-secondary" href="/export/eur.json?jahr={jahr}">JSON</a></div>
 
@@ -827,7 +829,17 @@ def export_view(jahr: int, eur: list[dict], ustva_liste: list[dict], jahre: list
 # --------------------------------------------------------- Einstellungen
 
 def einstellungen_view(ollama_status: dict, mail: dict, hat_pw: bool, regeln: list[Regel], kategorien: dict[int, Kategorie],
-                       pfade: dict, meldung: str = "", meldung_typ: str = "ok-box", ust_basis: str = "zahlung") -> str:
+                       pfade: dict, meldung: str = "", meldung_typ: str = "ok-box", ust_basis: str = "zahlung",
+                       modus_jahre: list[dict] | None = None) -> str:
+    modus_jahre = modus_jahre or []
+    modus_zeilen = "".join(
+        f'<tr><td>{m["jahr"]}</td><td>'
+        f'<form class="inline" hx-post="/api/einstellungen/modus" hx-target="#main" hx-trigger="change">'
+        f'<input type="hidden" name="jahr" value="{m["jahr"]}">'
+        f'<select name="modus"><option value="klein" {"selected" if m["klein"] else ""}>Kleinunternehmer (§19)</option>'
+        f'<option value="regel" {"" if m["klein"] else "selected"}>regelbesteuert</option></select></form></td>'
+        f'<td class="muted klein">{"Brutto ist Betriebsausgabe, keine Vorsteuer, Einnahmen in Zeile 11" if m["klein"] else "Netto ist Betriebsausgabe, Vorsteuer in Zeile 45, Einnahmen in Zeile 14"}</td></tr>'
+        for m in modus_jahre)
     regeln_html = "".join(
         f'<tr><td><code>{h(r.muster)}</code>{" <span class=muted>(regex)</span>" if r.ist_regex else ""}</td><td>{h(kategorien[r.kategorie_id].name) if r.kategorie_id in kategorien else "?"}</td>'
         f'<td>{r.prioritaet}</td><td>{"aus Korrektur" if r.erstellt_aus_korrektur else "manuell"}</td><td>{r.treffer}</td>'
@@ -844,6 +856,10 @@ def einstellungen_view(ollama_status: dict, mail: dict, hat_pw: bool, regeln: li
     <p class="muted">Sichern heißt: diese drei Dinge kopieren. Kein Cloud-Sync durch das Tool.</p>
     <div class="row"><button class="gefahr" hx-post="/api/beenden" hx-target="#main" hx-confirm="Steuerfuchs beenden? Der Server wird gestoppt; alle Daten sind gespeichert.">Steuerfuchs beenden</button></div></div>
 
+  <div class="karte"><h3>Umsatzsteuer-Modus je Jahr</h3>
+    <p class="muted klein">Der Modus entscheidet über die ganze Rechnung: als Kleinunternehmer zählt der Bruttobetrag als Betriebsausgabe,
+    bei Regelbesteuerung der Nettobetrag, und die Vorsteuer wird abgezogen. Umgestellt wird je Steuerjahr, nicht global.</p>
+    <table class="tabelle kompakt"><thead><tr><th>Jahr</th><th>Modus</th><th>Wirkung</th></tr></thead><tbody>{modus_zeilen or '<tr><td colspan=3 class="muted">Noch keine Buchungen.</td></tr>'}</tbody></table></div>
   <div class="karte"><h3>Umsatzsteuer ans Finanzamt (EÜR Zeile 48)</h3>
     <p class="muted klein">Als Kleinunternehmer schuldest du bei §13b-Rechnungen (Adobe, Figma, Google …) die Umsatzsteuer selbst und überweist sie ans Finanzamt. Überweisungen ans Finanzamt werden aus dem Kontoauszug automatisch als „Umsatzsteuer gezahlt“ erkannt, Erstattungen als Betriebseinnahme (Zeile 17), Einkommensteuer/Soli als privat.</p>
     <form hx-post="/api/einstellungen/ust-basis" hx-target="#main" class="stapel">
@@ -1161,7 +1177,9 @@ def abgleich_view(zeilen: list[dict], regeln: list[IgnorRegel], jahr: int, filte
             return (f'<span class="badge ok">zugeordnet</span><div class="klein"><a href="#" hx-get="/ui/pruefen/{b.id}" hx-target="#main">{h(b.lieferant or "Buchung")} · {d(b.datum)}</a></div>'
                     if b else '<span class="badge ok">zugeordnet</span>')
         if st == "ignoriert":
-            return '<span class="badge">ignoriert</span>'
+            grund = f'<div class="muted klein">{h(k.notiz)}</div>' if getattr(k, "notiz", "") else ""
+            marke = '<span class="badge">Rückbuchung</span>' if "Rückbuchung" in (getattr(k, "notiz", "") or "") else '<span class="badge">ignoriert</span>'
+            return marke + grund
         if st == "rueckfrage":
             return f'<span class="badge mid">Rückfrage</span><div class="muted klein">Betrag passt zu {len(z["kandidaten"])} Rechnung(en), Datum weicht ab</div>'
         vs = vorschlag.get(k.id, "")

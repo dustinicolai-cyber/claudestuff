@@ -63,16 +63,33 @@ Sichern = diese Dateien kopieren. Pfad überschreibbar per `STEUERTOOL_HOME`.
 7. **Export** – zuerst „Vor dem Eintragen prüfen“: eine aus den eigenen Daten gerechnete Liste
    dessen, was noch fehlt (ungeprüfte Belege, Kontobewegungen ohne Buchung, Buchungen ohne Beleg
    ab 25 €, Monate ohne Buchung, fehlende Pflichtangaben bei Bewirtung, Fahrt, Homeoffice und
-   Verpflegung, USt-Differenz, doppelte Abschreibung). Jeder Punkt führt direkt zur passenden Ansicht.
+   Verpflegung, USt-Differenz, doppelte Abschreibung, Rechnungen auf fremden Namen sowie fehlende Monate bei
+   Lieferanten, die sonst monatlich abrechnen). Jeder Punkt führt direkt zur passenden Ansicht.
    Danach die Anlage EÜR (Zeile, Bezeichnung, Betrag): jede Zeile lässt sich aufklappen und zeigt
    die Einzelposten dahinter, ein Knopf kopiert die Zahl im deutschen Format für Elster.
    Dazu UStVA je Quartal (nur §13b, Kz 46/47 bzw. 84/85), Quartalstabelle CSV/PDF, Belegjournal.
 
 Kontoauszüge (CSV deutscher Banken oder CAMT.053) unter Import einlesen; Matching läuft
-über Betrag exakt und Datum ±5 Tage.
+über Betrag exakt und Datum ±5 Tage. Lastschrift und Retoure mit gleichem Betrag beim selben Partner
+innerhalb von 14 Tagen heben sich auf und werden beim Import ausgeblendet, der Grund steht in der Zeile.
+Als Dublette gilt nur, was Datum und Betrag teilt; gleicher Lieferant allein reicht nicht, sonst würden
+monatliche Abos zusammengeführt.
 
 ## Steuerregeln im Code (Werte in `steuerregeln.json`)
 
+- **Modus je Steuerjahr**: `kleinunternehmer_je_jahr` legt pro Jahr fest, ob §19 gilt oder Regelbesteuerung.
+  Umstellbar in den Einstellungen. Bei §19 ist der Bruttobetrag die Betriebsausgabe und die Einnahmen stehen
+  in Zeile 11. Regelbesteuert zählt der Nettobetrag, die Einnahmen stehen netto in Zeile 14, die vereinnahmte
+  Umsatzsteuer in Zeile 16 und die gezahlte Vorsteuer in Zeile 45.
+- **Umsatzsteuer-Plausibilität**: Ist die ausgelesene USt größer als rund 20 % vom Bruttobetrag, wird sie
+  verworfen und aus dem Bruttobetrag neu gerechnet. Das fängt den häufigsten Erkennungsfehler ab, bei dem
+  der Nettobetrag im USt-Feld landet.
+- **Kategorien ohne Vorsteuer** (`ohne_ust`): Versicherungen, Bankgebühren, KSK, Rundfunkbeitrag, Zahlungen
+  ans Finanzamt. Dort zählt immer der volle Betrag, eine ausgewiesene USt wird als Fehler gemeldet.
+- **§13b**: entscheidend ist die Rechnung, nicht der Firmensitz. Eine deutsche USt-IdNr oder ausgewiesene
+  Umsatzsteuer schließt §13b aus, auch bei bekannten Auslandsanbietern.
+- **Rechnungsempfänger**: Lautet eine Eingangsrechnung auf einen anderen Namen als in `eigene_namen`, meldet
+  der Steuerfuchs den verlorenen Vorsteuerabzug.
 - **§19**: kein Vorsteuerabzug, Brutto ist die Betriebsausgabe.
 - **Verpflegungsmehraufwand**: aus Reisetagen gerechnet, nicht aus dem Belegbetrag – 28 € je vollem
   Tag, 14 € bei mehr als 8 Stunden sowie am An- und Abreisetag (Inland, Zeile 53).

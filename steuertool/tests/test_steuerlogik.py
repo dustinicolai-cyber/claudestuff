@@ -283,3 +283,76 @@ def test_neue_fragen_kommen_in_bestehende_konfiguration(tmp_path, monkeypatch):
     zusammen = config._zusammenfuehren(standard, nutzer)["jahresabschluss_fragen"]
     assert [f["key"] for f in zusammen] == ["a", "neu"]
     assert zusammen[0]["frage"] == "Eigener Text?"      # eigene Formulierung bleibt
+
+
+# ---------------------------------------------------------------- Regelbesteuerung, USt-Plausibilität, §13b
+
+def test_modus_je_jahr(cfg):
+    from app.steuerlogik import ist_kleinunternehmer
+    c = dict(cfg, kleinunternehmer=True, kleinunternehmer_je_jahr={"2025": False, "2026": True})
+    assert ist_kleinunternehmer(c, 2025) is False
+    assert ist_kleinunternehmer(c, 2026) is True
+    assert ist_kleinunternehmer(c, 2024) is True        # nicht genannt → globaler Standard
+
+
+def test_regelbesteuert_rechnet_netto(cfg_regel, kats):
+    bw = bewerte(b(), kats["software"], cfg_regel)
+    assert bw.abzugsfaehig == 100.0                     # netto statt brutto
+    ein = bewerte(b(richtung="einnahme", kategorie_id=kats["einnahmen"].id), kats["einnahmen"], cfg_regel)
+    assert ein.eur_zeile == 14 and not ein.warnungen     # Zeile 14 statt 11, USt-Ausweis ist erlaubt
+
+
+def test_regelbesteuert_zeigt_vereinnahmte_ust_und_vorsteuer(cfg_regel, kats):
+    kd = {k.id: k for k in kats.values()}
+    buchungen = [b(richtung="einnahme", betrag_netto=1000.0, ust_betrag=190.0, betrag_brutto=1190.0, kategorie_id=kats["einnahmen"].id),
+                 b(kategorie_id=kats["software"].id)]
+    zeilen = {z["zeile"]: z["betrag"] for z in eur_zeilen(buchungen, kd, [], 2025, cfg_regel)}
+    assert zeilen[14] == 1000.0 and zeilen[16] == 190.0 and zeilen[50] == 100.0 and zeilen[45] == 19.0
+    summen = {z["bezeichnung"]: z["betrag"] for z in eur_zeilen(buchungen, kd, [], 2025, cfg_regel) if z["zeile"] is None}
+    assert summen["Summe Betriebseinnahmen"] == 1190.0 and summen["Gewinn / Verlust"] == 1071.0
+
+
+def test_ust_groesser_als_zwanzig_prozent_wird_verworfen(cfg):
+    from app.steuerlogik import betraege_pruefen, ust_plausibel
+    # Figma: Netto 20 € landete im USt-Feld, Brutto 23,80 €
+    assert not ust_plausibel(20.0, 23.80, cfg)
+    netto, satz, ust, brutto, hinweise = betraege_pruefen(20.0, 19.0, 20.0, 23.80, cfg)
+    assert (netto, ust, brutto) == (20.0, 3.8, 23.8) and hinweise
+    assert ust_plausibel(3.80, 23.80, cfg)              # der richtige Wert bleibt unangetastet
+
+
+def test_kategorie_ohne_vorsteuer_warnt(cfg, kats):
+    bw = bewerte(b(kategorie_id=kats["bankgebuehren"].id), kats["bankgebuehren"], cfg)
+    assert any("keine Umsatzsteuer" in w for w in bw.warnungen)
+    assert kats["vorsorge"].ohne_ust and kats["versicherungen"].ohne_ust
+
+
+def test_deutsche_ustid_ist_kein_reverse_charge(cfg):
+    treffer, gruende = erkenne_reverse_charge("", "DE811569869", "Adobe Systems Software Ireland", 0.0, cfg)
+    assert treffer is False and any("deutsche USt-IdNr" in g for g in gruende)
+    treffer, _ = erkenne_reverse_charge("", "IE6364992H", "Fiverr International", 0.0, cfg)
+    assert treffer is True
+
+
+def test_rechnung_auf_anderen_namen_warnt(cfg, kats):
+    c = dict(cfg, eigene_namen=["Dustin Nicolai"])
+    eigen = bewerte(b(kategorie_id=kats["software"].id, meta_json='{"rechnung_an": "Dustin Nicolai"}'), kats["software"], c)
+    fremd = bewerte(b(kategorie_id=kats["software"].id, meta_json='{"rechnung_an": "Susanne Nicolai"}'), kats["software"], c)
+    assert not eigen.warnungen
+    assert any("Vorsteuerabzug verloren" in w for w in fremd.warnungen)
+
+
+def test_ohne_ust_kategorie_rechnet_mit_dem_vollen_betrag(cfg_regel, kats):
+    """Versicherungen und Bankgebühren haben keine Vorsteuer – auch regelbesteuert zählt der ganze Betrag."""
+    bw = bewerte(b(kategorie_id=kats["versicherungen"].id), kats["versicherungen"], cfg_regel)
+    assert bw.abzugsfaehig == 119.0
+
+
+def test_luecken_bei_monatlichen_rechnungen(cfg, kats):
+    from app.steuerlogik import luecken_wiederkehrend
+    monate = [1, 2, 3, 5, 6, 7, 8, 9, 10, 11, 12]          # April fehlt
+    buchungen = [b(datum=date(2025, m, 3), lieferant="Adobe", kategorie_id=kats["software"].id) for m in monate]
+    buchungen += [b(datum=date(2025, m, 9), lieferant="Einmalig", kategorie_id=kats["software"].id) for m in (2, 3)]
+    luecken = luecken_wiederkehrend(buchungen, 2025)
+    assert len(luecken) == 1
+    assert luecken[0]["lieferant"] == "Adobe" and luecken[0]["fehlend"] == [4] and luecken[0]["text"] == "April"

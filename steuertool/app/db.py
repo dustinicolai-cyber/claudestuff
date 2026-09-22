@@ -58,6 +58,7 @@ def kategorien_synchronisieren(s: Session) -> None:
         k.eur_zeile = d.get("eur_zeile")
         k.ustva_kennzahl = d.get("ustva_kennzahl")
         k.sonderfall = d.get("sonderfall")
+        k.ohne_ust = bool(d.get("ohne_ust", False))
         k.aktiv = True
     s.commit()
 

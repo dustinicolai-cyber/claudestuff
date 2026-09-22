@@ -401,7 +401,13 @@ def test_finanzamt_aus_kontoauszug_und_rueckbuchung():
         c.post("/api/konto/import", files={"datei": ("umsaetze.csv", csv.encode(), "text/csv")})
         a = c.get("/ui/abgleich?jahr=2025&filter=alle").text
         assert "Umsatzsteuer ans Finanzamt gezahlt" in a          # Vorschlag in der Abgleich-Spalte
-        assert a.count("Rückbuchung</span>") == 2 and "beide ignorieren" in a
+        # Lastschrift und Storno heben sich auf: beide Zeilen werden beim Import ausgeblendet, der Grund steht dabei
+        assert a.count("Rückbuchung</span>") == 2 and a.count("hebt sich mit der Buchung") == 2
+        assert "Zeitschrift XY" in a
+        from app.models import Kontobewegung as KB
+        with Session(engine()) as s:
+            paar = [k for k in s.exec(select(KB)).all() if k.gegenkonto == "Zeitschrift XY"]
+            assert len(paar) == 2 and all(k.ignoriert and k.buchung_id is None for k in paar)
         from app.models import Kontobewegung
         with Session(engine()) as s:
             fa = s.exec(select(Kontobewegung).where(Kontobewegung.gegenkonto == "Finanzamt Giessen")).first()

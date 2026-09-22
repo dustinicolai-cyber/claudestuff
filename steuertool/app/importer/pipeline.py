@@ -17,7 +17,7 @@ from sqlmodel import Session, select
 
 from .. import config
 from ..models import Beleg, Buchung
-from ..steuerlogik import betraege_vervollstaendigen, erkenne_reverse_charge, konfidenz_aus_feldern
+from ..steuerlogik import betraege_pruefen, betraege_vervollstaendigen, erkenne_reverse_charge, konfidenz_aus_feldern
 from . import klassifizierung, ocr, pdftext, zugferd
 from .textfelder import extrahiere_felder
 
@@ -133,6 +133,8 @@ def importiere_datei(s: Session, daten: bytes, original_name: str, herkunft: str
 
     netto, satz, ust, brutto = betraege_vervollstaendigen(
         felder.get("betrag_netto"), felder.get("ust_satz"), felder.get("ust_betrag"), felder.get("betrag_brutto"))
+    # Häufigster Erkennungsfehler: der Nettobetrag landet im USt-Feld. Dann lieber aus dem Brutto neu rechnen.
+    netto, satz, ust, brutto, ust_hinweise = betraege_pruefen(netto, satz, ust, brutto, cfg)
     lieferant = (felder.get("lieferant") or "").strip()
     rc, rc_gruende = erkenne_reverse_charge(text or felder.get("volltext", ""), felder.get("ust_idnr", ""), lieferant, ust, cfg)
     if felder.get("reverse_charge_hinweis") and ust == 0:
@@ -151,7 +153,7 @@ def importiere_datei(s: Session, daten: bytes, original_name: str, herkunft: str
     kategorie, weg, k_konf = klassifizierung.klassifiziere(s, {**felder, "lieferant": lieferant}, cfg, text) \
         if ki_erlaubt or True else (None, "-", 0.0)
 
-    hinweise = list(rc_gruende)
+    hinweise = list(ust_hinweise) + list(rc_gruende)
     waehrung = felder.get("waehrung", "EUR")
     betrag_fremd = 0.0
     if waehrung == "USD" and brutto:

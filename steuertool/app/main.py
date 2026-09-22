@@ -92,7 +92,7 @@ def _f(v: Optional[str]) -> float:
 
 def _meta_aus_form(form) -> dict:
     m = {}
-    for k in ("anlass", "teilnehmer", "km", "tage", "tage_voll", "tage_teil", "empfaenger", "privatanteil_prozent", "nutzungsdauer_jahre"):
+    for k in ("anlass", "teilnehmer", "km", "tage", "tage_voll", "tage_teil", "empfaenger", "rechnung_an", "privatanteil_prozent", "nutzungsdauer_jahre"):
         v = form.get(f"meta_{k}")
         if v not in (None, ""):
             m[k] = v
@@ -147,10 +147,10 @@ def _bestaetigen(s: Session, b: Buchung, vorher_kat: Optional[int], vorher_weg: 
         nd = int(json.loads(b.meta_json or "{}").get("nutzungsdauer_jahre") or cfg["afa_nutzungsdauer_standard_jahre"])
         if not vorhanden:
             s.add(Anlagegut(buchung_id=b.id, bezeichnung=(b.beschreibung or b.lieferant or "Wirtschaftsgut")[:80],
-                            anschaffung=b.datum, anschaffungskosten=b.betrag_brutto if cfg["kleinunternehmer"] else b.betrag_netto,
+                            anschaffung=b.datum, anschaffungskosten=b.betrag_brutto if steuerlogik.ist_kleinunternehmer(cfg, b.datum.year) else b.betrag_netto,
                             nutzungsdauer_jahre=nd))
         else:
-            vorhanden.anschaffungskosten = b.betrag_brutto if cfg["kleinunternehmer"] else b.betrag_netto
+            vorhanden.anschaffungskosten = b.betrag_brutto if steuerlogik.ist_kleinunternehmer(cfg, b.datum.year) else b.betrag_netto
             vorhanden.anschaffung = b.datum
             vorhanden.nutzungsdauer_jahre = nd
             s.add(vorhanden)
@@ -268,9 +268,11 @@ async def api_konto_import(datei: UploadFile = File(...), s: Session = Depends(g
         return _html(ui.meldung_box("Keine Buchungen erkannt – Spalten Datum/Betrag nicht gefunden.", "fehler-box"))
     neu, dup = matching.kontobewegungen_speichern(s, bewegungen, datei.filename or "")
     ign = matching.ignorregeln_anwenden(s)
+    rueck = matching.rueckbuchungen_neutralisieren(s)
     treffer = matching.matche(s)
     meldung = (f"{neu} neue Kontobewegungen eingelesen ({dup} bereits bekannt), {treffer} automatisch einer Rechnung zugeordnet, "
-               f"{ign} per Regel ignoriert.")
+               f"{ign} per Regel ignoriert."
+               + (f" {rueck} Lastschriften mit Rückbuchung heben sich auf und wurden ausgeblendet." if rueck else ""))
     jahr = max((b.datum.year for b in bewegungen), default=None)
     return _html(ui.meldung_box(meldung) + ui_abgleich(jahr, "offen", s).body.decode())
 
@@ -1100,7 +1102,7 @@ def ui_export(jahr: Optional[int] = None, s: Session = Depends(get_session)) -> 
     ust = steuerlogik.ust_abgleich(buchungen, kats, jahr, cfg)
     punkte = steuerlogik.vollstaendigkeit(buchungen, kats, s.exec(select(Kontobewegung)).all(), anlagen, jahr, cfg, ust)
     pauschalen = steuerlogik.pauschalen_stand(buchungen, kats, jahr, cfg)
-    return _html(ui.export_view(jahr, eur, ustva, _jahre(s), posten, punkte, pauschalen))
+    return _html(ui.export_view(jahr, eur, ustva, _jahre(s), posten, punkte, pauschalen, steuerlogik.ist_kleinunternehmer(cfg, jahr)))
 
 
 def _download(inhalt: bytes | str, name: str, typ: str) -> Response:
@@ -1161,7 +1163,10 @@ def _einstellungen(s: Session, meldung: str = "", typ: str = "ok-box") -> HTMLRe
     pfade = {"db": str(config.db_path()), "belege": str(config.beleg_dir()), "regeln": str(config.regeln_path()),
              "vision": cfg["ollama"]["vision_modell"], "text": cfg["ollama"]["text_modell"], "version": config.version()}
     hat_pw = bool(e["imap"].get("user") and mail.passwort_lesen(e["imap"]["user"]))
-    return _html(ui.einstellungen_view(ollama.verfuegbar(cfg), e, hat_pw, regeln_, _kats(s), pfade, meldung, typ, steuerlogik.ust_basis(cfg)))
+    jahre = _jahre(s) or [date.today().year]
+    modus = [{"jahr": j, "klein": steuerlogik.ist_kleinunternehmer(cfg, j)} for j in sorted(set(jahre) | {date.today().year}, reverse=True)]
+    return _html(ui.einstellungen_view(ollama.verfuegbar(cfg), e, hat_pw, regeln_, _kats(s), pfade, meldung, typ,
+                                       steuerlogik.ust_basis(cfg), modus))
 
 
 @app.post("/api/einstellungen/ust-basis", response_class=HTMLResponse)
@@ -1171,6 +1176,19 @@ def api_ust_basis(basis: str = Form("zahlung"), s: Session = Depends(get_session
     text = ("Zeile 48 wird jetzt aus den Zahlungen an das Finanzamt gebildet (Abflussprinzip)." if basis == "zahlung"
             else "Zeile 48 wird jetzt aus der §13b-Steuer je Rechnung gebildet; Zahlungen ans Finanzamt zählen nicht doppelt.")
     return _einstellungen(s, text)
+
+
+@app.post("/api/einstellungen/modus", response_class=HTMLResponse)
+def api_modus(jahr: int = Form(...), modus: str = Form("klein"), s: Session = Depends(get_session)) -> HTMLResponse:
+    """Kleinunternehmer oder Regelbesteuerung für ein einzelnes Steuerjahr festlegen."""
+    cfg = config.regeln()
+    je_jahr = dict(cfg.get("kleinunternehmer_je_jahr") or {})
+    je_jahr[str(jahr)] = modus != "regel"
+    config.regeln_setzen(kleinunternehmer_je_jahr=je_jahr)
+    text = (f"{jahr}: Kleinunternehmer nach §19 – der Bruttobetrag ist die Betriebsausgabe."
+            if modus != "regel" else
+            f"{jahr}: regelbesteuert – der Nettobetrag ist die Betriebsausgabe, die Vorsteuer wird abgezogen.")
+    return _einstellungen(s, text + " Alle Zahlen dieses Jahres wurden neu gerechnet.")
 
 
 @app.get("/ui/einstellungen", response_class=HTMLResponse)

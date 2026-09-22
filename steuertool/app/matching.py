@@ -113,12 +113,44 @@ def offene_punkte(s: Session) -> dict:
         for b in buchungen[i + 1:]:
             if (min(a.id, b.id), max(a.id, b.id)) in geprueft:
                 continue
-            if a.betrag_brutto and abs(a.betrag_brutto - b.betrag_brutto) < 0.005 and (
+            # Nur identisches Datum und identischer Betrag gelten als Dublette. Gleicher Lieferant mit
+            # wenigen Tagen Abstand reicht nicht: monatliche Abos (Midjourney, Adobe) wurden so fälschlich
+            # zusammengeführt und fehlten anschließend in der Vorsteuer.
+            if a.betrag_brutto and abs(a.betrag_brutto - b.betrag_brutto) < 0.005 and a.datum == b.datum and (
                 (a.rechnungsnummer and a.rechnungsnummer == b.rechnungsnummer) or
-                (a.lieferant and a.lieferant.lower() == b.lieferant.lower() and abs((a.datum - b.datum).days) <= 3)
+                (a.lieferant and a.lieferant.lower() == b.lieferant.lower())
             ):
                 doppel.append((a, b))
     return {"ohne_beleg": ohne_beleg, "ohne_konto": ohne_konto, "doppel": doppel}
+
+
+def rueckbuchungen_neutralisieren(s: Session, toleranz_tage: int = 14) -> int:
+    """Lastschrift und Retoure mit gleichem Betrag beim selben Partner heben sich auf. Beide Zeilen werden
+    ausgeblendet, damit weder eine Ausgabe noch eine Einnahme daraus entsteht. Gibt die Anzahl der Paare."""
+    offen = s.exec(select(Kontobewegung).where(Kontobewegung.buchung_id == None, Kontobewegung.ignoriert == False)).all()  # noqa: E711,E712
+    offen.sort(key=lambda k: (k.datum, k.id or 0))
+    erledigt: set[int] = set()
+    paare = 0
+    for i, a in enumerate(offen):
+        if a.id in erledigt:
+            continue
+        for b in offen[i + 1:]:
+            if b.id in erledigt or abs(a.betrag + b.betrag) > 0.005 or not a.betrag:
+                continue
+            if a.gegenkonto.strip().lower() != b.gegenkonto.strip().lower():
+                continue
+            if abs((b.datum - a.datum).days) > toleranz_tage:
+                continue
+            for x, y in ((a, b), (b, a)):
+                x.ignoriert = True
+                x.notiz = f"Rückbuchung: hebt sich mit der Buchung vom {y.datum:%d.%m.%Y} über {y.betrag:.2f} € auf"
+                s.add(x)
+            erledigt.update({a.id, b.id})
+            paare += 1
+            break
+    if paare:
+        s.commit()
+    return paare
 
 
 def ignorregeln_anwenden(s: Session, nur_ids: list[int] | None = None) -> int:

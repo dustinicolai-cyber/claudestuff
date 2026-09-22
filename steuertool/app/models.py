@@ -28,6 +28,7 @@ class Kategorie(SQLModel, table=True):
     eur_zeile: Optional[int] = None
     ustva_kennzahl: Optional[str] = None
     sonderfall: Optional[str] = None   # reverse_charge|bewirtung|gwg|fahrtkosten|homeoffice|privatanteil|geschenk|afa|privat
+    ohne_ust: bool = False             # enthält nie Vorsteuer (Versicherung, Bankgebühr, KSK, Rundfunkbeitrag, Zahlung ans Finanzamt)
     aktiv: bool = True
 
 
@@ -90,6 +91,7 @@ class Kontobewegung(SQLModel, table=True):
     fingerprint: str = Field(default="", index=True)  # zur Duplikatvermeidung
     buchung_id: Optional[int] = Field(default=None, foreign_key="buchung.id", index=True)
     ignoriert: bool = False            # z.B. Privatbuchungen auf gemischtem Konto
+    notiz: str = ""                    # warum ignoriert, z. B. „Rückbuchung zu #123“
 
 
 class Regel(SQLModel, table=True):
