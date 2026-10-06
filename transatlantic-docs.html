@@ -217,6 +217,16 @@ body.editmode .ublock:hover>.uctrl{display:flex}
 .uctrl button{width:18px;height:18px;border:1px solid var(--line);background:#fff;color:var(--grey);border-radius:5px;font-size:11px;line-height:1;cursor:pointer;display:flex;align-items:center;justify-content:center;box-shadow:0 1px 2px rgba(0,0,0,.12)}
 .uctrl button:hover{border-color:var(--accent);color:var(--accent)}
 
+/* Schwebende Hover-Steuerung (verschieben/löschen) fuer bestehende Bloecke */
+.hovctrl{position:absolute;right:3px;display:none;gap:3px;z-index:15}
+.hovctrl.show{display:flex}
+.hovctrl button{width:19px;height:19px;border:1px solid var(--line);background:#fff;color:var(--grey);
+  border-radius:5px;font-size:12px;line-height:1;cursor:pointer;display:flex;align-items:center;justify-content:center;
+  box-shadow:0 1px 3px rgba(0,0,0,.15)}
+.hovctrl button:hover{border-color:var(--accent);color:var(--accent)}
+.hovctrl.ischap button:last-child{background:#c0392b;color:#fff;border-color:#c0392b}
+body:not(.editmode) .hovctrl{display:none!important}
+
 .imgblock{display:flex;gap:5mm;align-items:flex-start;margin:2mm 0 3mm}
 .ibimg{flex:0 0 45mm;width:45mm;position:relative;border-radius:8px;overflow:hidden;background:#eef6f8}
 .ibimg img{width:100%;height:auto;max-height:70mm;object-fit:contain;display:block}
@@ -243,7 +253,7 @@ body.editmode .ibimg .repl{display:flex}
 @page p3mm {size:210mm 297mm;margin:0;bleed:3mm}   /* 3 mm Beschnittzugabe */
 @media print{
   html,body{margin:0!important;padding:0!important}
-  .topbar,.sidebar,.pagelabel,.zoom,.tbtns,.stepbtns,.pagetools,.gapadd,.uctrl,.repl,.menubtn,.overlay,#flashNote{display:none!important}
+  .topbar,.sidebar,.pagelabel,.zoom,.tbtns,.stepbtns,.pagetools,.gapadd,.hovctrl,.uctrl,.repl,.menubtn,.overlay,#flashNote{display:none!important}
   body{background:#fff}.shell{padding-top:0}
   .canvas{padding:0;gap:0;display:block;overflow:visible;height:auto}
   .pagewrap{transform:none!important;margin:0!important;position:relative;background:#fff;
@@ -814,13 +824,74 @@ function addBlock(btn,kind){
   afterStructureChange();
   const t=node.querySelector('[contenteditable="true"]'); if(t) t.focus();
 }
-function uMove(btn,dir){
-  const b=btn.closest('.ublock'); if(!b)return;
-  if(dir<0){ const p=b.previousElementSibling; if(p&&p.classList.contains('ublock')) b.parentNode.insertBefore(b,p); }
-  else { const n=b.nextElementSibling; if(n&&n.classList.contains('ublock')) b.parentNode.insertBefore(n,b); }
+function prevBlock(b){ let p=b.previousElementSibling; while(p && (p.classList.contains('gapadd')||p.classList.contains('addhere'))) p=p.previousElementSibling; return p; }
+function nextBlock(b){ let n=b.nextElementSibling; while(n && (n.classList.contains('gapadd')||n.classList.contains('addhere'))) n=n.nextElementSibling; return n; }
+function isChapterBlock(b){ return !!(b && (b.matches&&b.matches('h2.chapter') || (b.querySelector&&b.querySelector(':scope > h2.chapter')))); }
+function allBlocks(){ let r=[]; contentPages().forEach(c=>{ r=r.concat(blockList(c)); }); return r; }
+function blockMove(b,dir){
+  if(!b) return;
+  if(dir<0){ const p=prevBlock(b); if(p) b.parentNode.insertBefore(b,p); }
+  else { const n=nextBlock(b); if(n) b.parentNode.insertBefore(n,b); }
   afterStructureChange();
 }
-function uDel(btn){ const b=btn.closest('.ublock'); if(b){ b.remove(); afterStructureChange(); } }
+function blockDelete(b){
+  if(!b) return;
+  if(isChapterBlock(b)){
+    if(!confirm('Dieses Kapitel inkl. aller folgenden Inhalte bis zum nächsten Kapitel löschen?')) return;
+    const all=allBlocks(); const i=all.indexOf(b); const toDel=[b];
+    for(let j=i+1;j<all.length;j++){ if(isChapterBlock(all[j])) break; toDel.push(all[j]); }
+    toDel.forEach(x=>x.remove());
+  } else { if(!confirm('Diesen Block löschen?')) return; b.remove(); }
+  afterStructureChange();
+}
+// Controls an Nutzer-Bloecken (uctrl)
+function uMove(btn,dir){ blockMove(btn.closest('.ublock'),dir); }
+function uDel(btn){ blockDelete(btn.closest('.ublock')); }
+
+/* Schwebende Hover-Steuerung (verschieben/löschen) fuer ALLE Bloecke, auch die
+   bestehenden Original-Kapitel – ohne die Bloecke zu wrappen (kein Layout-Eingriff). */
+let _curBlock=null;
+function topBlockOf(target,content){
+  let b=target; while(b && b.parentElement!==content) b=b.parentElement; return b;
+}
+function ensureHoverCtrl(){
+  contentPages().forEach(c=>{
+    if(![...c.children].some(x=>x.classList&&x.classList.contains('hovctrl'))){
+      const h=el('<div class="hovctrl" contenteditable="false">'+
+        '<button type="button" title="nach oben" onmousedown="event.preventDefault()" onclick="hovAct(this,\'up\')">↑</button>'+
+        '<button type="button" title="nach unten" onmousedown="event.preventDefault()" onclick="hovAct(this,\'down\')">↓</button>'+
+        '<button type="button" title="Kapitel/Block löschen" onmousedown="event.preventDefault()" onclick="hovAct(this,\'del\')">✕</button>'+
+        '</div>');
+      c.appendChild(h);
+    }
+  });
+}
+function hovShow(content,blk){
+  const h=[...content.children].find(x=>x.classList&&x.classList.contains('hovctrl'));
+  if(!h||!blk) return;
+  _curBlock=blk;
+  h.style.top=Math.max(0,blk.offsetTop)+'px';
+  h.classList.add('show');
+  h.classList.toggle('ischap', isChapterBlock(blk));
+}
+function hovAct(btn,what){
+  const b=_curBlock; if(!b) return;
+  if(what==='up') blockMove(b,-1); else if(what==='down') blockMove(b,1); else blockDelete(b);
+}
+document.addEventListener('mouseover',e=>{
+  if(!editing || !e.target.closest) return;
+  const content=e.target.closest('.page .content'); if(!content){ return; }
+  if(e.target.closest('.hovctrl')) return;                 // Steuerung selbst: Anzeige halten
+  const blk=topBlockOf(e.target,content);
+  if(blk && blk.classList && !blk.classList.contains('gapadd') && !blk.classList.contains('hovctrl') && !blk.classList.contains('addhere')){
+    hovShow(content,blk);
+  }
+});
+document.addEventListener('mouseleave',e=>{
+  if(e.target&&e.target.classList&&e.target.classList.contains('content')){
+    const h=[...e.target.children].find(x=>x.classList&&x.classList.contains('hovctrl')); if(h) h.classList.remove('show');
+  }
+},true);
 
 function makeContentPage(){
   return el('<div class="pagewrap"><div class="page">'+
@@ -860,7 +931,7 @@ function refreshChrome(){
    wortgenau geteilt bzw. der letzte Block auf die naechste Seite verschoben.
    Beim Loeschen fliesst der Inhalt zurueck (Fortsetzungen werden gemergt). */
 let _reflowing=false, _reflowT=null;
-function blockList(c){ return [...c.children].filter(x=>x.nodeType===1 && !x.classList.contains('addhere') && !x.classList.contains('gapadd')); }
+function blockList(c){ return [...c.children].filter(x=>x.nodeType===1 && !x.classList.contains('addhere') && !x.classList.contains('gapadd') && !x.classList.contains('hovctrl')); }
 function paraOf(block){ if(!block||block.nodeType!==1) return null; return block.matches('p.body')?block:block.querySelector(':scope > p.body'); }
 function footerTop(page){ const f=page.querySelector('.ftr'); return f?f.getBoundingClientRect().top:Infinity; }
 
@@ -972,7 +1043,7 @@ function reflowAll(){
     mergeContinuations();
     pushDown();
     removeEmptyAutoPages();
-    ensurePageTools(); ensureGaps();
+    ensurePageTools(); ensureGaps(); ensureHoverCtrl();
     renumber(); pageNumbers(); labelPages();
     document.querySelectorAll('.editable').forEach(e=>e.contentEditable=editing);
     applyZoom();
@@ -1006,7 +1077,7 @@ function gatherProject(){
   document.querySelectorAll('[data-bind]').forEach(i=>inputs[i.getAttribute('data-bind')]=i.value);
   const pages=[...document.querySelectorAll('.page .content')].map(c=>{
     const clone=c.cloneNode(true);
-    clone.querySelectorAll('.gapadd,.addhere,.stepbtns,.stepno,.uctrl').forEach(x=>x.remove());
+    clone.querySelectorAll('.gapadd,.addhere,.hovctrl,.stepbtns,.stepno,.uctrl').forEach(x=>x.remove());
     return clone.innerHTML;
   });
   const prod=document.getElementById('prodImgWrap');
