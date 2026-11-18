@@ -99,6 +99,8 @@ body.editmode .editable:focus{background:rgba(0,84,155,.10);box-shadow:0 0 0 2px
 .tp-head{position:absolute;top:18mm;left:18mm;z-index:4;display:inline-block;max-width:150mm}
 .tp-logo{height:9.9mm}
 .tp-logo svg{height:9.9mm;width:auto}
+.tp-sub{font-size:12px;color:#6b7780;font-weight:600;letter-spacing:.2px;margin-top:1.5mm}
+body.nologosub .tp-sub{display:none}
 .tp-name{font-weight:700;font-size:44px;color:var(--atlantic);line-height:1.03;margin-top:6mm}
 .tp-ifu{font-size:15px;color:var(--atlantic);margin-top:5px;font-weight:400}
 .tp-product{position:absolute;left:12mm;right:12mm;top:108mm;width:auto;z-index:2}
@@ -409,6 +411,8 @@ body.editmode .ibimg .repl{display:flex}
     <div class="field"><label>Produktname</label><input data-bind="produktname" value="Transaroll ECO Board – Standard, 180 x 50 cm, faltbar"></div>
     <div class="field"><label>Titel (Deckblatt)</label><input data-bind="titel" value="ECO Board"></div>
     <div class="field"><label>Untertitel / Sprache (Deckblatt)</label><input data-bind="ifu" value="Gebrauchsanweisung · Instruction for use"></div>
+    <div class="field"><label>Logo-Unterzeile</label><input data-bind="logosub" value="" placeholder="z. B. Patientenumlagerung"></div>
+    <div class="lockrow"><input type="checkbox" id="logoSubChk" onchange="toggleLogoSub()"><span>Logo-Unterzeile anzeigen</span></div>
     <div class="field"><label>REF</label><input data-bind="ref" value="4400104"></div>
     <div class="field"><label>UDI-ID</label><input data-bind="udi" value="04050856047854"></div>
     <div class="field"><label>Art.-Nr.</label><input data-bind="artnr" value="Z xxxxxxxxxxxx"></div>
@@ -454,6 +458,7 @@ body.editmode .ibimg .repl{display:flex}
   <div class="tp-form chrome locked" data-form></div>
   <div class="tp-head chrome locked">
     <span class="tp-logo" data-logo></span>
+    <div class="tp-sub editable" data-field="logosub"></div>
     <div class="tp-name editable" data-field="titel">ECO Board</div>
     <div class="tp-ifu editable" data-field="ifu">Gebrauchsanweisung · Instruction for use</div>
   </div>
@@ -1097,6 +1102,7 @@ function gatherProject(){
     toggles:{
       chrome:document.getElementById('chromeLock').checked,
       folge:document.getElementById('folgeBg').checked,
+      logosub:document.getElementById('logoSubChk').checked,
       bleed:(document.getElementById('bleedSel')||{}).value||'0'
     },
     inputs:inputs,
@@ -1173,6 +1179,7 @@ function applyProject(p){
   const tg=p.toggles||{};
   setChk('chromeLock', tg.chrome!==false, toggleChrome);
   setChk('folgeBg',    tg.folge!==false,  toggleFolge);
+  setChk('logoSubChk', !!tg.logosub,      toggleLogoSub);
   // Beschnitt: neu '0'/'1'/'3' (String); alte Dateien hatten bleed:true/false
   let bl=tg.bleed;
   if(bl===true) bl='3'; else if(bl===false||bl==null) bl='0'; else bl=String(bl);
@@ -1208,6 +1215,10 @@ function pageNumbers(){
 }
 function toggleFolge(){
   document.body.classList.toggle('nofolgebg',!document.getElementById('folgeBg').checked);
+}
+function toggleLogoSub(){
+  document.body.classList.toggle('nologosub', !document.getElementById('logoSubChk').checked);
+  resizeBlob();
 }
 function setBleed(mm){
   mm=String(mm);
@@ -1414,6 +1425,7 @@ window.addEventListener('DOMContentLoaded',()=>{
   document.getElementById('taLogo').innerHTML=ASSETS.logoTA;
   document.querySelectorAll('[data-infoicon]').forEach(el=>el.innerHTML=ASSETS.infoIcon);
   bind();
+  toggleLogoSub();
   document.body.classList.add('editmode');
   document.querySelectorAll('.editable').forEach(e=>e.contentEditable=true);
   // editing the title directly on the cover re-fits the blob
