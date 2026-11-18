@@ -10,7 +10,11 @@
  *    npm i @realobjects/pdfreactor        (Node-Integration, lokaler Server)
  *    ICC-Profil "ISOcoated_v2_eci.icc"    (kostenlos: http://www.eci.org)
  *
- *  Aufruf:  node render-pdfx.js  transatlantic-docs.html  out.pdf
+ *  Aufruf:  node render-pdfx.js  transatlantic-docs.html  out.pdf  [dokument.tadoc.json]
+ *
+ *  Mit dem optionalen 3. Parameter wird ein im Tool gespeichertes Dokument
+ *  (.tadoc.json aus "Speichern" bzw. dem Dokumente-Ordner) gedruckt. Ohne ihn
+ *  wird die Vorlage so gedruckt, wie sie in der HTML-Datei steht.
  *
  *  HINWEIS: Genau einmal mit echtem PDFreactor gegenpruefen
  *  (Acrobat-Preflight: PDF/X-3, Output-Intent FOGRA39, BleedBox = Trim + Beschnitt,
@@ -20,18 +24,30 @@
 const fs = require('fs');
 const { PDFreactor } = require('@realobjects/pdfreactor');
 
-const [, , inFile = 'transatlantic-docs.html', outFile = 'transatlantic-docs.pdf'] = process.argv;
+const [, , inFile = 'transatlantic-docs.html', outFile = 'transatlantic-docs.pdf', docFile] = process.argv;
 const ICC = 'ISOcoated_v2_eci.icc';            // FOGRA39 / ISO Coated v2 (ECI)
 
 // Soll die Engine zusaetzlich Schnittmarken zeichnen? Manche Druckereien
 // wuenschen Crop-Marks zur Bleed-Flaeche; im Tool selbst ist die Option entfernt.
 const WITH_CROP_MARKS = true;
 
+// HTML laden; optional das gespeicherte Dokument einbetten (das Tool laedt es beim Start selbst)
+function loadHtml() {
+  let html = fs.readFileSync(inFile, 'utf8');
+  if (docFile) {
+    const doc = JSON.stringify(JSON.parse(fs.readFileSync(docFile, 'utf8'))).replace(/</g, '\\u003c');
+    const at = html.lastIndexOf('<script>');
+    if (at < 0) throw new Error('Unerwartetes HTML: kein <script> gefunden');
+    html = html.slice(0, at) + '<script>window.__TADOC=' + doc + ';</script>\n' + html.slice(at);
+  }
+  return html;
+}
+
 (async () => {
   const pdfreactor = new PDFreactor();        // ggf. URL des PDFreactor-Webservice
 
   const config = {
-    document: fs.readFileSync(inFile, 'utf8'),
+    document: loadHtml(),
     baseURL:  'file://' + process.cwd() + '/',
 
     // JavaScript MUSS aktiv sein: applyBrand() schaltet die Farben auf cmyk()

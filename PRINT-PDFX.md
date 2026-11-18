@@ -14,8 +14,14 @@ Der Browser kann kein CMYK/PDF-X – deshalb läuft die produktive Ausgabe über
 ```bash
 npm i @realobjects/pdfreactor
 # ICC-Profil "ISOcoated_v2_eci.icc" (ISO Coated v2 / FOGRA39) von eci.org neben das Skript legen
+# Vorlage drucken:
 node render-pdfx.js transatlantic-docs.html out.pdf
+# Ein im Tool gespeichertes Dokument drucken (Datei aus „Speichern“ / dem Dokumente-Ordner):
+node render-pdfx.js transatlantic-docs.html out.pdf MeinDokument.tadoc.json
 ```
+
+Das gespeicherte Dokument (`.tadoc.json`) enthält Texte, Bilder, Bereich und Beschnitt-Einstellung.
+Es ist im Tool bereits fertig auf A4-Seiten umbrochen; die Engine übernimmt diesen Umbruch 1:1.
 
 ## Wie die Farben gesteuert werden
 
